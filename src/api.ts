@@ -74,9 +74,11 @@ export const azFundApi = {
 export const memeApi = {
   getConfig: () => request<{ chainId: number; chainName: string; defaultSlippageBps: number }>('/sapi/v1/meme/config'),
   getMarkets: (tab: 'hot' | 'new' = 'hot') => request<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?tab=${tab}&limit=50`),
-  getCandles: (tokenAddress: string, interval: Interval) => request<CandleSnapshot>(
-    `/sapi/v1/meme/tokens/${tokenAddress}/candles?interval=${interval}&limit=120`,
-  ),
+  getCandles: (tokenAddress: string, interval: Interval, options?: { to?: number; limit?: number }) => {
+    const query = new URLSearchParams({ interval, limit: String(options?.limit ?? 120) });
+    if (options?.to !== undefined) query.set('to', String(options.to));
+    return request<CandleSnapshot>(`/sapi/v1/meme/tokens/${tokenAddress}/candles?${query.toString()}`);
+  },
   getAccount: () => request<AccountSummary>('/sapi/v1/meme/account/summary'),
   createQuote: (input: { side: 'BUY' | 'SELL'; tokenAddress: string; settlementAsset: Asset; amountIn: string; slippageBps: number }) =>
     request<Quote>('/sapi/v1/meme/quotes', { method: 'POST', body: JSON.stringify(input) }),

@@ -1,14 +1,33 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { azAuth, azFundApi, memeApi, setSessionToken, wsBaseUrl } from './api';
 import { CandleChart } from './CandleChart';
-import type { AccountSummary, Asset, Candle, CandleSnapshot, Interval, Quote, Token } from './types';
+import type { AccountSummary, Asset, Candle, CandleSnapshot, Interval, Quote, Token, Trade } from './types';
 import './styles.css';
 
 const intervals: Interval[] = ['1s', '1m', '15m', '1h', '4h'];
-const presets = ['0.05', '0.1', '0.25', '0.5'];
+const ethPresets = ['0.05', '0.1', '0.25', '0.5'];
+const stablePresets = ['25', '100', '250', '500'];
 
 function compact(value: string | number): string {
   return Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(Number(value));
+}
+
+function money(value: string | number): string {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '$0';
+  return `$${Intl.NumberFormat('en', {
+    notation: Math.abs(number) >= 100_000 ? 'compact' : 'standard',
+    maximumFractionDigits: Math.abs(number) >= 1 ? 2 : 6,
+  }).format(number)}`;
+}
+
+function readableAmount(value: string | number): string {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '0';
+  return Intl.NumberFormat('en-US', {
+    maximumSignificantDigits: 7,
+    useGrouping: Math.abs(number) >= 1_000,
+  }).format(number);
 }
 
 function age(seconds: number): string {
@@ -16,6 +35,18 @@ function age(seconds: number): string {
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
   return `${Math.floor(seconds / 86400)}d`;
+}
+
+function shortAddress(value: string): string {
+  return `${value.slice(0, 5)}...${value.slice(-4)}`;
+}
+
+function poolLabel(poolType: string): string {
+  return poolType.replaceAll('_', ' ');
+}
+
+function stageLabel(token: Token): string {
+  return token.stage === 'GRADUATED' ? '已毕业' : '内盘';
 }
 
 function percentageOf(value: string, percent: number): string {
@@ -28,21 +59,56 @@ function percentageOf(value: string, percent: number): string {
   return resultFraction ? `${resultWhole}.${resultFraction}` : resultWhole.toString();
 }
 
+function securityLabels(token: Token): string[] {
+  const labels: string[] = [];
+  if (token.security.buyTaxPct === '0' && token.security.sellTaxPct === '0') labels.push('无税');
+  if (token.security.liquidityLocked === true) labels.push('锁池');
+  if (token.security.isHoneypot === false) labels.push('非蜜罐');
+  return labels.length > 0 ? labels : ['安全数据待确认'];
+}
+
+interface StreamMessage<T> {
+  channel: string;
+  epoch: string;
+  sequence: number;
+  data: T;
+}
+
+function candleCacheKey(tokenAddress: string, interval: Interval): string {
+  return `${tokenAddress.toLowerCase()}:${interval}`;
+}
+
+function mergeSnapshots(previous: CandleSnapshot | null, next: CandleSnapshot): CandleSnapshot {
+  if (!previous
+    || previous.tokenAddress.toLowerCase() !== next.tokenAddress.toLowerCase()
+    || previous.marketKey !== next.marketKey
+    || previous.interval !== next.interval) return next;
+  const byTime = new Map([...previous.items, ...next.items].map((item) => [item.t, item]));
+  return { ...next, items: [...byTime.values()].sort((a, b) => a.t - b.t).slice(-1000) };
+}
+
+function TokenMark({ token }: { token: Token }) {
+  return <span className="token-mark" aria-hidden="true">{token.symbol.slice(0, 2)}</span>;
+}
+
 export default function App() {
   const [tokens, setTokens] = useState<Token[]>([]);
   const [selected, setSelected] = useState<Token | null>(null);
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [snapshot, setSnapshot] = useState<CandleSnapshot | null>(null);
+  const [trades, setTrades] = useState<Trade[]>([]);
   const [interval, setIntervalValue] = useState<Interval>('1m');
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
   const [asset, setAsset] = useState<Asset>('ETH');
   const [amount, setAmount] = useState('0.1');
+  const [activePreset, setActivePreset] = useState<string | null>('0.1');
   const [quote, setQuote] = useState<Quote | null>(null);
   const [orderState, setOrderState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chainName, setChainName] = useState('Robinhood Chain');
+  const [slippageBps, setSlippageBps] = useState(300);
   const [search, setSearch] = useState('');
   const [sessionReady, setSessionReady] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
@@ -50,6 +116,35 @@ export default function App() {
   const [transferAsset, setTransferAsset] = useState<Asset>('ETH');
   const [transferAmount, setTransferAmount] = useState('0.1');
   const [transferState, setTransferState] = useState<string | null>(null);
+  const candleCacheRef = useRef(new Map<string, CandleSnapshot>());
+  const streamSocketRef = useRef<WebSocket | null>(null);
+  const marketChannelsRef = useRef<string[]>([]);
+  const activeSnapshot = selected
+    ? (snapshot?.tokenAddress.toLowerCase() === selected.tokenAddress.toLowerCase() && snapshot.interval === interval
+        ? snapshot
+        : candleCacheRef.current.get(candleCacheKey(selected.tokenAddress, interval)) ?? null)
+    : null;
+
+  const setCachedSnapshot = useCallback((update: CandleSnapshot | null | ((current: CandleSnapshot | null) => CandleSnapshot | null)) => {
+    setSnapshot((current) => {
+      const next = typeof update === 'function' ? update(current) : update;
+      if (next) candleCacheRef.current.set(candleCacheKey(next.tokenAddress, next.interval), next);
+      return next;
+    });
+  }, []);
+
+  const quoteRequest = useMemo(() => {
+    if (!selected || !/^\d+(?:\.\d+)?$/.test(amount) || Number(amount) <= 0) return null;
+    return {
+      side,
+      tokenAddress: selected.tokenAddress,
+      settlementAsset: asset,
+      amountIn: amount,
+      slippageBps,
+    } as const;
+  }, [amount, asset, selected, side, slippageBps]);
+  const quoteRequestRef = useRef(quoteRequest);
+  quoteRequestRef.current = quoteRequest;
 
   useEffect(() => {
     let active = true;
@@ -57,6 +152,7 @@ export default function App() {
       .then(([config, markets]) => {
         if (!active) return;
         setChainName(config.chainName);
+        setSlippageBps(config.defaultSlippageBps);
         setTokens(markets.items);
         setSelected(markets.items[0] ?? null);
       })
@@ -76,7 +172,7 @@ export default function App() {
       })
       .catch((cause: unknown) => {
         setSessionToken(null);
-        if (active) setError(cause instanceof Error ? cause.message : 'AZ Mock 登录失败');
+        if (active) setError(cause instanceof Error ? cause.message : '登录失败');
       });
     return () => { active = false; };
   }, []);
@@ -86,8 +182,11 @@ export default function App() {
     let active = true;
     let pollTimer: number | undefined;
     let attempts = 0;
+    const cacheKey = candleCacheKey(selected.tokenAddress, interval);
+    const cached = candleCacheRef.current.get(cacheKey) ?? null;
     setChartLoading(true);
-    setSnapshot(null);
+    setSnapshot(cached ? { ...cached, status: 'CATCHING_UP' } : null);
+    setTrades([]);
     setQuote(null);
     setOrderState(null);
 
@@ -95,7 +194,8 @@ export default function App() {
       try {
         const result = await memeApi.getCandles(selected.tokenAddress, interval);
         if (!active) return;
-        setSnapshot(result);
+        const merged = mergeSnapshots(candleCacheRef.current.get(cacheKey) ?? null, result);
+        setCachedSnapshot(merged);
         if (result.status === 'READY') {
           setChartLoading(false);
           return;
@@ -119,22 +219,25 @@ export default function App() {
       active = false;
       if (pollTimer !== undefined) window.clearTimeout(pollTimer);
     };
-  }, [selected, interval]);
+  }, [selected, interval, setCachedSnapshot]);
 
   useEffect(() => {
-    if (!sessionReady || !selected || !snapshot || snapshot.status !== 'READY' || typeof WebSocket === 'undefined') return;
+    if (!sessionReady || !selected || !activeSnapshot || activeSnapshot.status !== 'READY' || typeof WebSocket === 'undefined') return;
     let socket: WebSocket | null = null;
     let disposed = false;
     let reconnectTimer: number | undefined;
-    let lastEpoch: string | null = null;
-    let lastSequence = 0;
+    const streamState = new Map<string, { epoch: string; sequence: number }>();
+    const candleChannel = `candle:${selected.tokenAddress}:${activeSnapshot.marketKey}:${interval}`;
+    const tradeChannel = `trade:${selected.tokenAddress}:${activeSnapshot.marketKey}`;
+    const channels = [candleChannel, tradeChannel];
+    marketChannelsRef.current = channels;
 
-    const upsert = (candle: Candle) => {
-      setSnapshot((current) => {
-        if (!current) return current;
+    const upsertCandle = (candle: Candle) => {
+      setCachedSnapshot((current) => {
+        if (!current || current.tokenAddress.toLowerCase() !== selected.tokenAddress.toLowerCase() || current.interval !== interval) return current;
         const byTime = new Map(current.items.map((item) => [item.t, item]));
         byTime.set(candle.t, candle);
-        return { ...current, items: [...byTime.values()].sort((a, b) => a.t - b.t).slice(-300) };
+        return { ...current, items: [...byTime.values()].sort((a, b) => a.t - b.t).slice(-1000) };
       });
     };
 
@@ -143,26 +246,54 @@ export default function App() {
         const { ticket } = await memeApi.getWsTicket();
         if (disposed) return;
         socket = new WebSocket(`${wsBaseUrl}?ticket=${encodeURIComponent(ticket)}`);
+        streamSocketRef.current = socket;
         socket.addEventListener('open', () => socket?.send(JSON.stringify({
           op: 'subscribe',
-          channels: [`candle:${selected.tokenAddress}:${snapshot.marketKey}:${interval}`],
+          channels,
+          ...(quoteRequestRef.current ? { quote: quoteRequestRef.current } : {}),
         })));
         socket.addEventListener('message', (event) => {
           try {
-            const message = JSON.parse(String(event.data)) as { epoch: string; sequence: number; data: Candle };
-            const requiresResync = (lastEpoch !== null && message.epoch !== lastEpoch)
-              || (lastSequence > 0 && message.sequence !== lastSequence + 1);
-            lastEpoch = message.epoch;
-            lastSequence = message.sequence;
-            if (requiresResync) {
-              void memeApi.getCandles(selected.tokenAddress, interval)
-                .then((fresh) => { if (!disposed) { setSnapshot(fresh); upsert(message.data); } })
-                .catch(() => setError('实时序列断档，K 线快照恢复失败'));
+            const message = JSON.parse(String(event.data)) as StreamMessage<Candle | Trade | Quote>;
+            const previous = streamState.get(message.channel);
+            const requiresResync = previous !== undefined
+              && (message.epoch !== previous.epoch || message.sequence !== previous.sequence + 1);
+            streamState.set(message.channel, { epoch: message.epoch, sequence: message.sequence });
+
+            if (message.channel.startsWith('quote:')) {
+              const liveQuote = message.data as Quote;
+              const expected = quoteRequestRef.current;
+              if (expected
+                && liveQuote.tokenAddress.toLowerCase() === expected.tokenAddress.toLowerCase()
+                && liveQuote.side === expected.side
+                && liveQuote.settlementAsset === expected.settlementAsset
+                && liveQuote.amountIn === expected.amountIn) {
+                setQuote(liveQuote);
+              }
               return;
             }
-            upsert(message.data);
+            if (message.channel === candleChannel) {
+              const candle = message.data as Candle;
+              if (requiresResync) {
+                void memeApi.getCandles(selected.tokenAddress, interval)
+                  .then((fresh) => {
+                    if (!disposed) {
+                      setCachedSnapshot((current) => mergeSnapshots(current, fresh));
+                      upsertCandle(candle);
+                    }
+                  })
+                  .catch(() => setError('行情更新中断，正在恢复'));
+                return;
+              }
+              upsertCandle(candle);
+              return;
+            }
+            if (message.channel === tradeChannel) {
+              const trade = message.data as Trade;
+              setTrades((current) => [trade, ...current.filter((item) => item.tradeId !== trade.tradeId)].slice(0, 12));
+            }
           } catch {
-            setError('实时行情消息格式错误，正在重连');
+            setError('实时行情暂时不可用，正在重连');
             socket?.close();
           }
         });
@@ -171,7 +302,7 @@ export default function App() {
         });
       } catch {
         if (!disposed) {
-          setError('实时行情连接失败，历史 K 线仍可用');
+          setError('实时行情暂时不可用，历史行情仍可查看');
           reconnectTimer = window.setTimeout(() => void connect(), 1000);
         }
       }
@@ -181,20 +312,33 @@ export default function App() {
     return () => {
       disposed = true;
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+      if (streamSocketRef.current === socket) streamSocketRef.current = null;
       socket?.close();
     };
-  }, [sessionReady, selected, snapshot?.marketKey, snapshot?.status, interval]);
+  }, [sessionReady, selected, activeSnapshot?.marketKey, activeSnapshot?.status, interval, setCachedSnapshot]);
+
+  useEffect(() => {
+    setQuote(null);
+    const socket = streamSocketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN || !selected) return;
+    if (!marketChannelsRef.current.some((channel) => channel.includes(selected.tokenAddress))) return;
+    socket.send(JSON.stringify({
+      op: 'subscribe',
+      channels: marketChannelsRef.current,
+      ...(quoteRequest ? { quote: quoteRequest } : {}),
+    }));
+  }, [quoteRequest, selected]);
 
   const selectedPosition = account?.positions.find((item) => item.tokenAddress === selected?.tokenAddress);
   const currentBalance = side === 'BUY'
     ? account?.quoteBalances.find((item) => item.asset === asset)?.available ?? '0'
     : selectedPosition?.available ?? '0';
-  const displayedPrice = snapshot?.items.at(-1)?.c ?? selected?.priceUsd ?? '0';
+  const displayedPrice = activeSnapshot?.items.at(-1)?.c ?? selected?.priceUsd ?? '0';
   const totalPosition = useMemo(() => account?.positions.reduce((sum, item) => sum + Number(item.valueUsd), 0) ?? 0, [account]);
   const balanceLabel = account?.quoteBalances
     .filter((item) => item.asset === 'ETH' || item.asset === 'USDC')
     .map((item) => `${Number(item.available).toLocaleString('en-US')} ${item.asset}`)
-    .join(' · ') ?? '余额加载中';
+    .join(' / ') ?? '余额加载中';
   const visibleTokens = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return tokens;
@@ -204,7 +348,7 @@ export default function App() {
   }, [search, tokens]);
   const tradePresets = useMemo(() => {
     if (side === 'BUY') {
-      const values = asset === 'ETH' ? presets : ['25', '100', '250', '500'];
+      const values = asset === 'ETH' ? ethPresets : stablePresets;
       return values.map((value) => ({ label: value, value }));
     }
     return [25, 50, 75, 100].map((percent) => ({
@@ -213,23 +357,51 @@ export default function App() {
     }));
   }, [asset, currentBalance, side]);
 
-  const requestQuote = useCallback(async () => {
-    if (!selected || !sessionReady) return;
-    setError(null);
-    setOrderState('正在报价');
+  const resetTradeDraft = useCallback(() => {
+    setQuote(null);
+    setOrderState(null);
+  }, []);
+
+  const selectSide = useCallback((nextSide: 'BUY' | 'SELL') => {
+    setSide(nextSide);
+    setAmount(nextSide === 'BUY' ? (asset === 'ETH' ? '0.1' : '100') : '0');
+    setActivePreset(nextSide === 'BUY' ? (asset === 'ETH' ? '0.1' : '100') : null);
+    resetTradeDraft();
+  }, [asset, resetTradeDraft]);
+
+  const loadOlderCandles = useCallback(async (before: number): Promise<number> => {
+    if (!selected) return 0;
     try {
-      const next = await memeApi.createQuote({ side, tokenAddress: selected.tokenAddress, settlementAsset: asset, amountIn: amount, slippageBps: 500 });
-      setQuote(next);
-      setOrderState(null);
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        const result = await memeApi.getCandles(selected.tokenAddress, interval, { to: before, limit: 120 });
+        if (result.status === 'STALE') throw new Error('更早行情加载失败');
+        if (result.status === 'READY') {
+          setCachedSnapshot((current) => {
+            if (!current
+              || current.tokenAddress.toLowerCase() !== result.tokenAddress.toLowerCase()
+              || current.marketKey !== result.marketKey
+              || current.interval !== result.interval) return current;
+            const byTime = new Map([...result.items, ...current.items].map((item) => [item.t, item]));
+            return { ...current, items: [...byTime.values()].sort((a, b) => a.t - b.t).slice(-1000) };
+          });
+          return result.items.length;
+        }
+        await new Promise((resolvePromise) => window.setTimeout(resolvePromise, 75));
+      }
+      throw new Error('更早行情加载超时');
     } catch (cause) {
-      setOrderState(null);
-      setError(cause instanceof Error ? cause.message : '报价失败');
+      setError(cause instanceof Error ? cause.message : '更早行情加载失败');
+      return 0;
     }
-  }, [amount, asset, selected, sessionReady, side]);
+  }, [interval, selected, setCachedSnapshot]);
 
   const submitOrder = useCallback(async () => {
-    if (!quote) return;
-    setOrderState('资金已冻结，等待广播');
+    if (!quote) {
+      setError('报价更新中，请稍后再试');
+      return;
+    }
+    setError(null);
+    setOrderState('提交中');
     try {
       const order = await memeApi.createOrder({
         clientOrderId: crypto.randomUUID(),
@@ -237,10 +409,14 @@ export default function App() {
         maxAmountIn: amount,
         minAmountOut: quote.minAmountOut,
       });
-      setOrderState(order.status);
+      setOrderState('处理中');
       window.setTimeout(async () => {
         const latest = await memeApi.getOrder(order.orderId);
-        setOrderState(`${latest.status} / ${latest.fundStatus}`);
+        const failed = latest.status.startsWith('FAILED');
+        setOrderState(latest.status === 'SETTLED' ? '交易成功' : failed ? '交易失败' : '处理中');
+        if (latest.status === 'SETTLED' || failed) {
+          window.setTimeout(() => setOrderState(null), 1200);
+        }
       }, 250);
     } catch (cause) {
       setOrderState(null);
@@ -267,44 +443,64 @@ export default function App() {
       });
       const summary = await memeApi.getAccount();
       setAccount(summary);
-      setTransferState(`划转成功 · ${transferId}`);
+      setTransferState(`划转成功 / ${transferId}`);
     } catch (cause) {
       setTransferState(null);
       setError(cause instanceof Error ? cause.message : '划转失败');
     }
   }, [sessionReady, transferAmount, transferAsset, transferDirection]);
 
-  if (loading) return <main className="full-state">正在连接 AZ MEME BOT Mock 服务</main>;
+  if (loading) return <main className="full-state">正在加载</main>;
   if (error && tokens.length === 0) return <main className="full-state error-state">启动失败：{error}</main>;
+
+  const safety = selected ? securityLabels(selected) : [];
 
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div className="brand">AZ<span>X</span></div>
-        <nav aria-label="主导航">
-          <button type="button">Perp</button><button type="button">Spot</button>
-          <button type="button" className="active">Meme · {chainName}</button><button type="button">Stocks</button>
-        </nav>
-        <label className="search"><span>搜索</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="粘贴代币合约地址 0x..." /></label>
+        <div className="brand-group">
+          <div className="brand">AZ<span>X</span></div>
+          <div className="product-name"><strong>Meme</strong><span>{chainName}</span></div>
+        </div>
+        <label className="search">
+          <span className="sr-only">搜索代币名称或合约地址</span>
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索代币或粘贴合约地址" />
+        </label>
         <button type="button" className="balances" aria-label="打开账户划转" disabled={!sessionReady} onClick={() => setTransferOpen(true)}>{balanceLabel}</button>
-        <div className="mock-badge">{sessionReady ? 'MOCK 已登录' : 'MOCK 登录中'}</div>
+        <div className="mock-badge"><i aria-hidden="true" />{sessionReady ? '已登录' : '登录中'}</div>
       </header>
 
       {error && <div className="notice" role="alert">{error}<button type="button" onClick={() => setError(null)}>关闭</button></div>}
 
       <div className="workspace">
         <aside className="market-panel">
-          <div className="panel-title"><strong>发现 · 热榜</strong><span>新币 · 毕业 · 聪明钱</span></div>
-          <div className="token-head"><span>代币</span><span>市值</span><span>5m</span><span>持有</span></div>
+          <div className="panel-title">
+            <strong>发现</strong>
+            <div className="discovery-tabs"><button type="button" className="active">热榜</button><button type="button" disabled>新币</button></div>
+          </div>
+          <div className="token-head"><span>代币</span><span>市值</span><span>5m</span><span>持有</span><span /></div>
           <div className="token-list">
             {visibleTokens.length === 0 && <div className="empty">没有匹配的代币</div>}
             {visibleTokens.map((token) => (
-              <button type="button" key={token.tokenAddress} className={selected?.tokenAddress === token.tokenAddress ? 'token-row selected' : 'token-row'} onClick={() => setSelected(token)}>
-                <span><b>{token.symbol}</b><small>${compact(token.pool.liquidityUsd)} 流动性 · {age(token.ageSeconds)}</small></span>
-                <span>${compact(Number(token.priceUsd) * 1_000_000_000)}</span>
-                <span className={Number(token.change5m) >= 0 ? 'positive' : 'negative'}>{Number(token.change5m) > 0 ? '+' : ''}{token.change5m}%</span>
-                <span>{compact(token.holders)}</span>
-              </button>
+              <div key={token.tokenAddress} className={selected?.tokenAddress === token.tokenAddress ? 'token-row selected' : 'token-row'}>
+                <button type="button" className="token-select" aria-label={`查看 ${token.symbol}`} onClick={() => setSelected(token)}>
+                  <span className="row-token">
+                    <TokenMark token={token} />
+                    <span>
+                      <b>{token.symbol}</b>
+                      <small>
+                        <em className={token.stage === 'GRADUATED' ? 'badge graduated' : 'badge curve'}>{stageLabel(token)}</em>
+                        <em className="badge launchpad">{token.launchpad}</em>
+                        <span>{age(token.ageSeconds)}</span>
+                      </small>
+                    </span>
+                  </span>
+                  <span>{money(token.marketCapUsd)}</span>
+                  <span className={Number(token.change5m) >= 0 ? 'positive' : 'negative'}>{Number(token.change5m) > 0 ? '+' : ''}{token.change5m}%</span>
+                  <span>{compact(token.holders)}</span>
+                </button>
+                <button type="button" className="quick-buy" aria-label={`买入 ${token.symbol}`} disabled={token.tradeStatus !== 'TRADABLE'} onClick={() => { setSelected(token); selectSide('BUY'); }}>买</button>
+              </div>
             ))}
           </div>
         </aside>
@@ -312,40 +508,115 @@ export default function App() {
         <section className="chart-panel">
           {selected ? <>
             <div className="instrument">
-              <div><strong>{selected.symbol} / ETH</strong><span>{selected.stage === 'GRADUATED' ? '已毕业' : '曲线'} · {selected.pool.poolType.replaceAll('_', ' ')}</span></div>
-              <div className="ticker"><strong>${Number(displayedPrice).toFixed(6)}</strong><span className={Number(selected.change5m) >= 0 ? 'positive' : 'negative'}>{Number(selected.change5m) > 0 ? '+' : ''}{selected.change5m}% 5m</span></div>
+              <div className="token-identity">
+                <TokenMark token={selected} />
+                <div>
+                  <div className="token-title"><strong>{selected.symbol} / ETH</strong><span className={selected.stage === 'GRADUATED' ? 'badge graduated' : 'badge curve'}>{stageLabel(selected)}</span><span className="badge launchpad">{selected.launchpad}</span><span className="badge pool">{poolLabel(selected.pool.poolType)}</span></div>
+                  <small>{selected.name} / {shortAddress(selected.tokenAddress)}</small>
+                </div>
+              </div>
+              <div className="market-stats">
+                <div><span>价格</span><strong data-testid="current-price">{money(displayedPrice)}</strong></div>
+                <div><span>市值</span><strong>{money(selected.marketCapUsd)}</strong></div>
+                <div><span>24h 量</span><strong>{money(selected.volume24hUsd)}</strong></div>
+                <div><span>流动性</span><strong>{money(selected.pool.liquidityUsd)}</strong></div>
+                <div><span>持有人</span><strong>{compact(selected.holders)}</strong></div>
+              </div>
             </div>
-            <div className="intervals" aria-label="K 线周期">
-              {intervals.map((item) => <button type="button" className={interval === item ? 'active' : ''} key={item} onClick={() => setIntervalValue(item)}>{item}</button>)}
-              <span>市值 ${compact(Number(selected.priceUsd) * 1_000_000_000)} · 持有 {compact(selected.holders)}</span>
+            <div className="chart-toolbar">
+              <div className="intervals" aria-label="K 线周期">
+                {intervals.map((item) => <button type="button" className={interval === item ? 'active' : ''} key={item} onClick={() => setIntervalValue(item)}>{item}</button>)}
+              </div>
+              <span className={Number(selected.change5m) >= 0 ? 'positive' : 'negative'}>{Number(selected.change5m) > 0 ? '+' : ''}{selected.change5m}% / 5m</span>
             </div>
-            {chartLoading || snapshot?.status !== 'READY'
-              ? <div className="chart-state">回补历史 K 线并追至最新区块</div>
-              : <CandleChart candles={snapshot.items} symbol={selected.symbol} />}
+            {activeSnapshot?.items.length
+              ? <CandleChart key={`${selected.tokenAddress}:${interval}`} candles={activeSnapshot.items} symbol={selected.symbol} refreshing={chartLoading || activeSnapshot.status !== 'READY'} onLoadBefore={loadOlderCandles} />
+              : <div className="chart-state">正在加载行情</div>}
+            <section className="trade-tape" aria-label="实时成交">
+              <header><strong>实时成交</strong><span>最新成交</span></header>
+              <div className="trade-head"><span>方向 / 数量</span><span>成交价</span><span>交易者</span><span>时间</span></div>
+              <div className="trade-rows">
+                {trades.length === 0 && <div className="trade-empty">等待最新成交</div>}
+                {trades.slice(0, 6).map((trade) => (
+                  <div className="trade-row" key={trade.tradeId}>
+                    <span className={trade.side === 'BUY' ? 'positive' : 'negative'}>{trade.side === 'BUY' ? '买' : '卖'} {compact(trade.baseAmount)} {selected.symbol}</span>
+                    <span data-testid="trade-price">{money(trade.priceUsd)}</span>
+                    <span>{shortAddress(trade.trader)}</span>
+                    <span>{new Date(trade.t * 1000).toLocaleTimeString('zh-CN', { hour12: false })}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
           </> : <div className="empty">请选择代币</div>}
         </section>
 
         <aside className="trade-panel">
-          <div className="side-tabs"><button type="button" className={side === 'BUY' ? 'active' : ''} onClick={() => { setSide('BUY'); setQuote(null); setOrderState(null); }}>买入</button><button type="button" className={side === 'SELL' ? 'active sell' : ''} onClick={() => { setSide('SELL'); setQuote(null); setOrderState(null); }}>卖出</button></div>
-          <div className="trade-form">
-            <label><span>{side === 'BUY' ? '金额' : '数量'}</span><span>可用 {currentBalance} {side === 'BUY' ? asset : selected?.symbol}</span></label>
-            <div className="amount-input"><input aria-label={side === 'BUY' ? '买入金额' : '卖出数量'} value={amount} onChange={(event) => { setAmount(event.target.value); setQuote(null); setOrderState(null); }} inputMode="decimal" />{side === 'BUY' ? <select aria-label="支付资产" value={asset} onChange={(event) => { setAsset(event.target.value as Asset); setQuote(null); setOrderState(null); }}><option>ETH</option><option>USDC</option><option>USDT</option></select> : <span className="amount-unit">{selected?.symbol}</span>}</div>
-            {side === 'SELL' && <label className="settlement"><span>结算资产</span><select aria-label="结算资产" value={asset} onChange={(event) => { setAsset(event.target.value as Asset); setQuote(null); setOrderState(null); }}><option>ETH</option><option>USDC</option><option>USDT</option></select></label>}
-            <div className="presets">{tradePresets.map((preset) => <button type="button" className={amount === preset.value ? 'active' : ''} key={preset.label} onClick={() => { setAmount(preset.value); setQuote(null); setOrderState(null); }}>{preset.label}</button>)}</div>
-            <dl>
-              <div><dt>预计得到</dt><dd>{quote ? `≈ ${quote.expectedAmountOut} ${side === 'BUY' ? selected?.symbol : asset}` : '等待报价'}</dd></div>
-              <div><dt>路由</dt><dd>{selected?.pool.poolType.replaceAll('_', ' ') ?? '未选择'}</dd></div>
-              <div><dt>滑点上限</dt><dd>5%</dd></div>
-              <div><dt>交易模式</dt><dd className="positive">无需钱包再次签名</dd></div>
-            </dl>
-            <button type="button" className="primary" disabled={!sessionReady || !selected || Boolean(orderState) || (side === 'SELL' && Number(currentBalance) <= 0)} onClick={quote ? submitOrder : requestQuote}>
-              {!sessionReady ? '等待 AZ 登录' : orderState ?? (quote ? `确认${side === 'BUY' ? '买入' : '卖出'}` : '获取链上报价')}
-            </button>
-            <p>PoC 使用 AZ 登录会话与平台 Trading Account</p>
+          <div className="side-tabs">
+            <button type="button" className={side === 'BUY' ? 'active buy' : ''} onClick={() => selectSide('BUY')}>买入</button>
+            <button type="button" className={side === 'SELL' ? 'active sell' : ''} onClick={() => selectSide('SELL')}>卖出</button>
           </div>
+          <div className="trade-form">
+            <label><span>{side === 'BUY' ? '金额' : '数量'}</span><span>可用 {readableAmount(currentBalance)} {side === 'BUY' ? asset : selected?.symbol}</span></label>
+            <div className="amount-input">
+              <input
+                aria-label={side === 'BUY' ? '买入金额' : '卖出数量'}
+                value={amount}
+                onChange={(event) => {
+                  setAmount(event.target.value);
+                  setActivePreset(null);
+                  resetTradeDraft();
+                }}
+                inputMode="decimal"
+              />
+              {side === 'BUY'
+                ? <select aria-label="支付资产" value={asset} onChange={(event) => {
+                    const nextAsset = event.target.value as Asset;
+                    setAsset(nextAsset);
+                    const nextAmount = nextAsset === 'ETH' ? '0.1' : '100';
+                    setAmount(nextAmount);
+                    setActivePreset(nextAmount);
+                    resetTradeDraft();
+                  }}><option>ETH</option><option>USDC</option><option>USDT</option></select>
+                : <span className="amount-unit">{selected?.symbol}</span>}
+            </div>
+            {side === 'SELL' && <label className="settlement"><span>结算资产</span><select aria-label="结算资产" value={asset} onChange={(event) => { setAsset(event.target.value as Asset); resetTradeDraft(); }}><option>ETH</option><option>USDC</option><option>USDT</option></select></label>}
+            <div className="presets">
+              {tradePresets.map((preset) => <button
+                type="button"
+                className={activePreset === preset.label ? 'active' : ''}
+                key={preset.label}
+                onClick={() => {
+                  setAmount(preset.value);
+                  setActivePreset(preset.label);
+                  resetTradeDraft();
+                }}
+              >{preset.label}</button>)}
+            </div>
+            <dl className="quote-details">
+              <div><dt>预计得到</dt><dd>{quote ? `≈ ${readableAmount(quote.expectedAmountOut)} ${side === 'BUY' ? selected?.symbol : asset}` : '等待报价'}</dd></div>
+              <div><dt>路由</dt><dd>{selected ? poolLabel(selected.pool.poolType) : '未选择'}</dd></div>
+              <div><dt>滑点上限</dt><dd>{(slippageBps / 100).toFixed(slippageBps % 100 === 0 ? 0 : 2)}%</dd></div>
+              <div className="security-row"><dt>安全</dt><dd>{safety.map((item) => <span key={item}>{item}</span>)}</dd></div>
+            </dl>
+            <button type="button" className="primary" disabled={!sessionReady || !selected || !quoteRequest || !quote || Boolean(orderState) || (side === 'SELL' && Number(currentBalance) <= 0)} onClick={submitOrder}>
+              {!sessionReady ? '等待登录' : orderState ?? (side === 'BUY' ? '买入' : '卖出')}
+            </button>
+            <p>下单无需再次签名</p>
+          </div>
+
+          {selected && <section className="token-about">
+            <header><strong>关于 {selected.symbol}</strong><span>{shortAddress(selected.tokenAddress)}</span></header>
+            <div className="about-badges"><span className={selected.stage === 'GRADUATED' ? 'badge graduated' : 'badge curve'}>{stageLabel(selected)}</span><span className="badge launchpad">来自 {selected.launchpad}</span><span className="badge pool">{poolLabel(selected.pool.poolType)}</span></div>
+            <dl>
+              <div><dt>流动性</dt><dd>{money(selected.pool.liquidityUsd)}</dd></div>
+              <div><dt>5m 涨跌</dt><dd className={Number(selected.change5m) >= 0 ? 'positive' : 'negative'}>{Number(selected.change5m) > 0 ? '+' : ''}{selected.change5m}%</dd></div>
+              <div><dt>交易状态</dt><dd>{selected.tradeStatus === 'TRADABLE' ? '可交易' : '暂不支持'}</dd></div>
+            </dl>
+          </section>}
+
           <div className="positions">
-            <div className="positions-head"><strong>我的持仓</strong><span className="positive">+${totalPosition.toFixed(0)}</span></div>
-            {account?.positions.map((position) => <div className="position" key={position.tokenAddress}><span><b>{position.symbol}</b><small>{compact(position.available)} 枚</small></span><span className={Number(position.valueUsd) >= Number(position.costUsd) ? 'positive' : 'negative'}>{((Number(position.valueUsd) / Number(position.costUsd) - 1) * 100).toFixed(0)}%</span><button type="button" onClick={() => { setSelected(tokens.find((token) => token.tokenAddress === position.tokenAddress) ?? null); setSide('SELL'); setQuote(null); setOrderState(null); }}>卖</button></div>)}
+            <div className="positions-head"><strong>我的持仓</strong><span className="positive">{money(totalPosition)}</span></div>
+            {account?.positions.map((position) => <div className="position" key={position.tokenAddress}><span><b>{position.symbol}</b><small>{compact(position.available)} 枚</small></span><span className={Number(position.valueUsd) >= Number(position.costUsd) ? 'positive' : 'negative'}>{((Number(position.valueUsd) / Number(position.costUsd) - 1) * 100).toFixed(0)}%</span><button type="button" onClick={() => { setSelected(tokens.find((token) => token.tokenAddress === position.tokenAddress) ?? null); selectSide('SELL'); }}>卖</button></div>)}
           </div>
         </aside>
       </div>

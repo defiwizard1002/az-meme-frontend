@@ -1,41 +1,211 @@
-import { useMemo } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import {
+  CandlestickSeries,
+  ColorType,
+  createChart,
+  CrosshairMode,
+  HistogramSeries,
+  type IChartApi,
+  type ISeriesApi,
+  type UTCTimestamp,
+} from 'lightweight-charts';
 import type { Candle } from './types';
 
-interface Props { candles: Candle[]; symbol: string }
+interface Props {
+  candles: Candle[];
+  symbol: string;
+  refreshing?: boolean;
+  onLoadBefore?: (before: number) => Promise<number>;
+}
 
-export function CandleChart({ candles, symbol }: Props) {
-  const geometry = useMemo(() => {
-    const visible = candles.slice(-72);
-    const highs = visible.map((item) => Number(item.h));
-    const lows = visible.map((item) => Number(item.l));
-    const max = Math.max(...highs);
-    const min = Math.min(...lows);
-    const range = max - min || 1;
-    return visible.map((item, index) => {
-      const x = 14 + index * (872 / Math.max(visible.length, 1));
-      const y = (value: string) => 18 + ((max - Number(value)) / range) * 242;
-      return { item, x, open: y(item.o), high: y(item.h), low: y(item.l), close: y(item.c) };
+function pricePrecision(candles: Candle[]): { precision: number; minMove: number } {
+  const last = Number(candles.at(-1)?.c ?? 0);
+  if (last >= 100) return { precision: 2, minMove: 0.01 };
+  if (last >= 1) return { precision: 4, minMove: 0.0001 };
+  if (last >= 0.01) return { precision: 6, minMove: 0.000001 };
+  return { precision: 8, minMove: 0.00000001 };
+}
+
+export function CandleChart({ candles, symbol, refreshing = false, onLoadBefore }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const lastTimeRef = useRef<number | null>(null);
+  const firstTimeRef = useRef<number | null>(null);
+  const previousLengthRef = useRef(0);
+  const candlesRef = useRef(candles);
+  const loadBeforeRef = useRef(onLoadBefore);
+  const loadingBeforeRef = useRef(false);
+  const interactedRef = useRef(false);
+  const requestedBeforeRef = useRef<number | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  useEffect(() => { candlesRef.current = candles; }, [candles]);
+  useEffect(() => { loadBeforeRef.current = onLoadBefore; }, [onLoadBefore]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const chart = createChart(container, {
+      width: container.clientWidth,
+      height: container.clientHeight || 360,
+      layout: {
+        background: { type: ColorType.Solid, color: '#09080d' },
+        textColor: '#777481',
+        fontFamily: 'Geist Mono, SFMono-Regular, Menlo, monospace',
+        fontSize: 11,
+        attributionLogo: false,
+      },
+      grid: {
+        vertLines: { color: '#18161f' },
+        horzLines: { color: '#18161f' },
+      },
+      crosshair: { mode: CrosshairMode.Normal },
+      rightPriceScale: {
+        borderColor: '#282531',
+        scaleMargins: { top: 0.08, bottom: 0.24 },
+      },
+      timeScale: {
+        borderColor: '#282531',
+        timeVisible: true,
+        secondsVisible: true,
+        rightOffset: 5,
+        barSpacing: 8,
+        minBarSpacing: 2,
+      },
+      handleScroll: {
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: false,
+      },
+      handleScale: {
+        axisPressedMouseMove: true,
+        mouseWheel: true,
+        pinch: true,
+      },
     });
+
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      upColor: '#39d98a',
+      downColor: '#ff4d79',
+      borderVisible: false,
+      wickUpColor: '#39d98a',
+      wickDownColor: '#ff4d79',
+      priceFormat: { type: 'price', ...pricePrecision(candles) },
+    });
+    const volumeSeries = chart.addSeries(HistogramSeries, {
+      priceFormat: { type: 'volume' },
+      priceScaleId: '',
+      lastValueVisible: false,
+      priceLineVisible: false,
+    });
+    volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+
+    chartRef.current = chart;
+    candleSeriesRef.current = candleSeries;
+    volumeSeriesRef.current = volumeSeries;
+
+    const markInteraction = () => { interactedRef.current = true; };
+    const handleVisibleRange = (range: { from: number; to: number } | null) => {
+      if (!range || range.from >= 8 || !interactedRef.current || loadingBeforeRef.current || !loadBeforeRef.current) return;
+      const before = (candlesRef.current[0]?.t ?? 0) - 1;
+      if (before <= 0 || requestedBeforeRef.current === before) return;
+      requestedBeforeRef.current = before;
+      loadingBeforeRef.current = true;
+      setHistoryLoading(true);
+      void loadBeforeRef.current(before)
+        .finally(() => {
+          loadingBeforeRef.current = false;
+          setHistoryLoading(false);
+        });
+    };
+    container.addEventListener('pointerdown', markInteraction);
+    container.addEventListener('wheel', markInteraction, { passive: true });
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRange);
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      const size = entries[0]?.contentRect;
+      if (!size) return;
+      chart.applyOptions({ width: size.width, height: size.height });
+    });
+    resizeObserver.observe(container);
+
+    return () => {
+      resizeObserver.disconnect();
+      container.removeEventListener('pointerdown', markInteraction);
+      container.removeEventListener('wheel', markInteraction);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRange);
+      chart.remove();
+      chartRef.current = null;
+      candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+      lastTimeRef.current = null;
+      firstTimeRef.current = null;
+      previousLengthRef.current = 0;
+    };
+  }, []);
+
+  useEffect(() => {
+    const candleSeries = candleSeriesRef.current;
+    const volumeSeries = volumeSeriesRef.current;
+    const chart = chartRef.current;
+    if (!candleSeries || !volumeSeries || !chart || candles.length === 0) return;
+
+    const toCandle = (item: Candle) => ({
+      time: item.t as UTCTimestamp,
+      open: Number(item.o),
+      high: Number(item.h),
+      low: Number(item.l),
+      close: Number(item.c),
+    });
+    const toVolume = (item: Candle) => ({
+      time: item.t as UTCTimestamp,
+      value: Number(item.quoteVolume ?? item.rawVolume ?? item.baseVolume ?? 0),
+      color: Number(item.c) >= Number(item.o) ? '#39d98a55' : '#ff4d7955',
+    });
+
+    const firstTime = candles[0]!.t;
+    const prepended = firstTimeRef.current !== null && firstTime < firstTimeRef.current;
+    const reset = lastTimeRef.current === null
+      || candles.length < previousLengthRef.current
+      || firstTime > lastTimeRef.current
+      || prepended;
+    if (reset) {
+      const visibleRange = chart.timeScale().getVisibleLogicalRange();
+      const added = Math.max(candles.length - previousLengthRef.current, 0);
+      candleSeries.setData(candles.map(toCandle));
+      volumeSeries.setData(candles.map(toVolume));
+      if (prepended && visibleRange && added > 0) {
+        chart.timeScale().setVisibleLogicalRange({ from: visibleRange.from + added, to: visibleRange.to + added });
+      } else {
+        chart.timeScale().fitContent();
+      }
+    } else {
+      const lastSeen = lastTimeRef.current ?? Number.NEGATIVE_INFINITY;
+      for (const item of candles) {
+        if (item.t < lastSeen) continue;
+        candleSeries.update(toCandle(item));
+        volumeSeries.update(toVolume(item));
+      }
+    }
+    firstTimeRef.current = firstTime;
+    lastTimeRef.current = candles.at(-1)!.t;
+    previousLengthRef.current = candles.length;
   }, [candles]);
 
   if (candles.length === 0) return <div className="chart-state">暂无成交 K 线</div>;
 
   return (
     <figure className="chart" aria-label={`${symbol} K 线图`}>
-      <svg viewBox="0 0 900 280" role="img">
-        <title>{symbol} K 线</title>
-        {[50, 100, 150, 200, 250].map((y) => <line key={y} className="grid-line" x1="0" x2="900" y1={y} y2={y} />)}
-        {geometry.map(({ item, x, open, high, low, close }) => {
-          const up = close <= open;
-          return (
-            <g key={`${item.t}-${item.revision}`} className={up ? 'candle-up' : 'candle-down'}>
-              <line x1={x} x2={x} y1={high} y2={low} />
-              <rect x={x - 3.5} y={Math.min(open, close)} width="7" height={Math.max(Math.abs(close - open), 1.5)} />
-            </g>
-          );
-        })}
-      </svg>
-      <figcaption>历史回补完成后接入秒级实时扫描</figcaption>
+      <div ref={containerRef} className="chart-canvas" data-testid="tradingview-chart" data-history-loading={historyLoading ? 'true' : 'false'} />
+      {(historyLoading || refreshing) && <div className="history-loading">{historyLoading ? '正在加载更早行情' : '正在更新行情'}</div>}
+      <figcaption>
+        <span>拖动查看历史</span>
+        <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">Charts by TradingView</a>
+      </figcaption>
     </figure>
   );
 }

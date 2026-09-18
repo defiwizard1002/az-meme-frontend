@@ -6,14 +6,23 @@ export interface Token {
   tokenAddress: string;
   symbol: string;
   name: string;
+  launchpad: string;
   stage: 'CURVE' | 'GRADUATED';
   priceUsd: string;
+  marketCapUsd: string;
+  volume24hUsd: string;
   change5m: string;
   holders: number;
   ageSeconds: number;
   pool: { poolKey: string; poolType: string; liquidityUsd: string };
   tradeStatus: 'TRADABLE' | 'UNSUPPORTED_POOL_TYPE';
   riskFlags: string[];
+  security: {
+    isHoneypot: boolean | null;
+    buyTaxPct: string | null;
+    sellTaxPct: string | null;
+    liquidityLocked: boolean | null;
+  };
 }
 export interface Candle {
   t: number;
@@ -23,6 +32,8 @@ export interface Candle {
   c: string;
   baseVolume: string | null;
   quoteVolume: string | null;
+  rawVolume?: string;
+  rawVolumeUnit?: 'BASE' | 'QUOTE' | 'USD' | 'UNKNOWN';
   revision: number;
 }
 
@@ -36,6 +47,18 @@ export interface CandleSnapshot {
   items: Candle[];
 }
 
+export interface Trade {
+  tradeId: string;
+  t: number;
+  side: 'BUY' | 'SELL';
+  priceUsd: string;
+  baseAmount: string;
+  quoteAmount: string;
+  quoteAsset: 'ETH';
+  trader: string;
+  txHash: string;
+}
+
 export interface AccountSummary {
   quoteBalances: Array<{ asset: Asset; available: string; frozen: string }>;
   positions: Array<{ tokenAddress: string; symbol: string; available: string; costUsd: string; valueUsd: string }>;
@@ -43,6 +66,9 @@ export interface AccountSummary {
 
 export interface Quote {
   quoteId: string;
+  tokenAddress: string;
+  side: 'BUY' | 'SELL';
+  amountIn: string;
   expectedAmountOut: string;
   minAmountOut: string;
   settlementAsset: Asset;
