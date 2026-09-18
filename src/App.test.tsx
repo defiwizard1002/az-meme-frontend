@@ -84,7 +84,7 @@ describe('App', () => {
         marketKey: 'pool_cashcat:NATIVE',
         interval: '1m',
         status: 'READY',
-        source: 'GECKOTERMINAL',
+        source: 'BITQUERY+CHAIN',
         items: [{ t: 1, o: '0.018', h: '0.019', l: '0.017', c: '0.0184', baseVolume: null, quoteVolume: null, revision: 1 }],
       });
       throw new Error(`Unexpected request ${url}`);
