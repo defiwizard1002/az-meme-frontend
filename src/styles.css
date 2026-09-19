@@ -201,10 +201,10 @@ button:active:not(:disabled) { transform: translateY(1px); }
   .token-row { grid-template-columns: 1fr 32px; }
   .quick-buy { width: 32px; }
   .instrument { gap: 14px; }
-  .token-identity { min-width: 200px; }
-  .token-title .badge.launchpad { display: none; }
+  .token-identity { min-width: 0; flex: 0 0 240px; }
+  .token-title { flex-wrap: wrap; row-gap: 3px; }
   .market-stats { grid-template-columns: 1.25fr repeat(4, 1fr); }
-  .market-stats > div { padding-inline: 8px; }
+  .market-stats > div { padding-inline: 6px; }
   .market-stats strong { font-size: 11px; }
 }
 

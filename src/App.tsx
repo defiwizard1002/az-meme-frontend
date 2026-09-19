@@ -67,6 +67,10 @@ function securityLabels(token: Token): string[] {
   return labels.length > 0 ? labels : ['安全数据待确认'];
 }
 
+function quoteLabel(token: Token): string {
+  return token.quoteAssetKey === 'NATIVE' ? 'ETH' : token.quoteAssetKey;
+}
+
 interface StreamMessage<T> {
   channel: string;
   epoch: string;
@@ -84,7 +88,7 @@ function mergeSnapshots(previous: CandleSnapshot | null, next: CandleSnapshot): 
     || previous.marketKey !== next.marketKey
     || previous.interval !== next.interval) return next;
   const byTime = new Map([...previous.items, ...next.items].map((item) => [item.t, item]));
-  return { ...next, items: [...byTime.values()].sort((a, b) => a.t - b.t).slice(-1000) };
+  return { ...next, items: [...byTime.values()].sort((a, b) => a.t - b.t) };
 }
 
 function TokenMark({ token }: { token: Token }) {
@@ -110,6 +114,9 @@ export default function App() {
   const [chainName, setChainName] = useState('Robinhood Chain');
   const [slippageBps, setSlippageBps] = useState(300);
   const [search, setSearch] = useState('');
+  const [searchResults, setSearchResults] = useState<Token[] | null>(null);
+  const [discoveryTab, setDiscoveryTab] = useState<'hot' | 'new'>('hot');
+  const [marketLoading, setMarketLoading] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferDirection, setTransferDirection] = useState<'SPOT_TO_MEME' | 'MEME_TO_SPOT'>('SPOT_TO_MEME');
@@ -163,6 +170,27 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
+    const query = search.trim();
+    if (!query) {
+      setSearchResults(null);
+      return () => { active = false; };
+    }
+    setSearchResults(null);
+    const timer = window.setTimeout(() => {
+      setMarketLoading(true);
+      void memeApi.searchMarkets(query)
+        .then((result) => { if (active) setSearchResults(result.items); })
+        .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : '搜索失败'); })
+        .finally(() => { if (active) setMarketLoading(false); });
+    }, 300);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [search]);
+
+  useEffect(() => {
+    let active = true;
     void azAuth.loginMock()
       .then(() => memeApi.getAccount())
       .then((summary) => {
@@ -207,7 +235,7 @@ export default function App() {
         }
         attempts += 1;
         if (attempts >= 40) throw new Error('K 线回补超时');
-        pollTimer = window.setTimeout(() => void loadCandles(), 75);
+        pollTimer = window.setTimeout(() => void loadCandles(), 250);
       } catch (cause) {
         if (!active) return;
         setChartLoading(false);
@@ -222,14 +250,15 @@ export default function App() {
   }, [selected, interval, setCachedSnapshot]);
 
   useEffect(() => {
-    if (!sessionReady || !selected || !activeSnapshot || activeSnapshot.status !== 'READY' || typeof WebSocket === 'undefined') return;
+    if (!sessionReady || !selected || !activeSnapshot || activeSnapshot.status === 'STALE' || typeof WebSocket === 'undefined') return;
     let socket: WebSocket | null = null;
     let disposed = false;
     let reconnectTimer: number | undefined;
     const streamState = new Map<string, { epoch: string; sequence: number }>();
     const candleChannel = `candle:${selected.tokenAddress}:${activeSnapshot.marketKey}:${interval}`;
     const tradeChannel = `trade:${selected.tokenAddress}:${activeSnapshot.marketKey}`;
-    const channels = [candleChannel, tradeChannel];
+    const marketChannel = `market:${selected.tokenAddress.toLowerCase()}`;
+    const channels = [candleChannel, tradeChannel, marketChannel];
     marketChannelsRef.current = channels;
 
     const upsertCandle = (candle: Candle) => {
@@ -237,7 +266,7 @@ export default function App() {
         if (!current || current.tokenAddress.toLowerCase() !== selected.tokenAddress.toLowerCase() || current.interval !== interval) return current;
         const byTime = new Map(current.items.map((item) => [item.t, item]));
         byTime.set(candle.t, candle);
-        return { ...current, items: [...byTime.values()].sort((a, b) => a.t - b.t).slice(-1000) };
+        return { ...current, items: [...byTime.values()].sort((a, b) => a.t - b.t) };
       });
     };
 
@@ -254,12 +283,23 @@ export default function App() {
         })));
         socket.addEventListener('message', (event) => {
           try {
-            const message = JSON.parse(String(event.data)) as StreamMessage<Candle | Trade | Quote>;
+            const message = JSON.parse(String(event.data)) as StreamMessage<Candle | Trade | Quote | Token>;
             const previous = streamState.get(message.channel);
             const requiresResync = previous !== undefined
               && (message.epoch !== previous.epoch || message.sequence !== previous.sequence + 1);
             streamState.set(message.channel, { epoch: message.epoch, sequence: message.sequence });
 
+            if (message.channel === marketChannel) {
+              const refreshedToken = message.data as Token;
+              const tokenPrefix = `${selected.tokenAddress.toLowerCase()}:`;
+              for (const key of candleCacheRef.current.keys()) {
+                if (key.startsWith(tokenPrefix)) candleCacheRef.current.delete(key);
+              }
+              setSnapshot(null);
+              setTrades([]);
+              setSelected(refreshedToken);
+              return;
+            }
             if (message.channel.startsWith('quote:')) {
               const liveQuote = message.data as Quote;
               const expected = quoteRequestRef.current;
@@ -315,7 +355,7 @@ export default function App() {
       if (streamSocketRef.current === socket) streamSocketRef.current = null;
       socket?.close();
     };
-  }, [sessionReady, selected, activeSnapshot?.marketKey, activeSnapshot?.status, interval, setCachedSnapshot]);
+  }, [sessionReady, selected, activeSnapshot?.marketKey, interval, setCachedSnapshot]);
 
   useEffect(() => {
     setQuote(null);
@@ -342,10 +382,27 @@ export default function App() {
   const visibleTokens = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return tokens;
+    if (searchResults) return searchResults;
     return tokens.filter((token) => token.symbol.toLowerCase().includes(needle)
       || token.name.toLowerCase().includes(needle)
       || token.tokenAddress.toLowerCase().includes(needle));
-  }, [search, tokens]);
+  }, [search, searchResults, tokens]);
+
+  const selectDiscoveryTab = useCallback(async (tab: 'hot' | 'new') => {
+    if (tab === discoveryTab || marketLoading) return;
+    setMarketLoading(true);
+    setError(null);
+    try {
+      const result = await memeApi.getMarkets(tab);
+      setTokens(result.items);
+      setDiscoveryTab(tab);
+      setSelected((current) => result.items.find((item) => item.tokenAddress === current?.tokenAddress) ?? result.items[0] ?? null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '市场加载失败');
+    } finally {
+      setMarketLoading(false);
+    }
+  }, [discoveryTab, marketLoading]);
   const tradePresets = useMemo(() => {
     if (side === 'BUY') {
       const values = asset === 'ETH' ? ethPresets : stablePresets;
@@ -382,11 +439,11 @@ export default function App() {
               || current.marketKey !== result.marketKey
               || current.interval !== result.interval) return current;
             const byTime = new Map([...result.items, ...current.items].map((item) => [item.t, item]));
-            return { ...current, items: [...byTime.values()].sort((a, b) => a.t - b.t).slice(-1000) };
+            return { ...current, items: [...byTime.values()].sort((a, b) => a.t - b.t) };
           });
           return result.items.length;
         }
-        await new Promise((resolvePromise) => window.setTimeout(resolvePromise, 75));
+        await new Promise((resolvePromise) => window.setTimeout(resolvePromise, 250));
       }
       throw new Error('更早行情加载超时');
     } catch (cause) {
@@ -476,7 +533,10 @@ export default function App() {
         <aside className="market-panel">
           <div className="panel-title">
             <strong>发现</strong>
-            <div className="discovery-tabs"><button type="button" className="active">热榜</button><button type="button" disabled>新币</button></div>
+            <div className="discovery-tabs">
+              <button type="button" className={discoveryTab === 'hot' ? 'active' : ''} disabled={marketLoading} onClick={() => void selectDiscoveryTab('hot')}>热榜</button>
+              <button type="button" className={discoveryTab === 'new' ? 'active' : ''} disabled={marketLoading} onClick={() => void selectDiscoveryTab('new')}>新币</button>
+            </div>
           </div>
           <div className="token-head"><span>代币</span><span>市值</span><span>5m</span><span>持有</span><span /></div>
           <div className="token-list">
@@ -511,7 +571,7 @@ export default function App() {
               <div className="token-identity">
                 <TokenMark token={selected} />
                 <div>
-                  <div className="token-title"><strong>{selected.symbol} / ETH</strong><span className={selected.stage === 'GRADUATED' ? 'badge graduated' : 'badge curve'}>{stageLabel(selected)}</span><span className="badge launchpad">{selected.launchpad}</span><span className="badge pool">{poolLabel(selected.pool.poolType)}</span></div>
+                  <div className="token-title"><strong>{selected.symbol} / {quoteLabel(selected)}</strong><span className={selected.stage === 'GRADUATED' ? 'badge graduated' : 'badge curve'}>{stageLabel(selected)}</span><span className="badge launchpad">{selected.launchpad}</span><span className="badge pool">{poolLabel(selected.pool.poolType)}</span></div>
                   <small>{selected.name} / {shortAddress(selected.tokenAddress)}</small>
                 </div>
               </div>
@@ -529,8 +589,8 @@ export default function App() {
               </div>
               <span className={Number(selected.change5m) >= 0 ? 'positive' : 'negative'}>{Number(selected.change5m) > 0 ? '+' : ''}{selected.change5m}% / 5m</span>
             </div>
-            {activeSnapshot?.items.length
-              ? <CandleChart key={`${selected.tokenAddress}:${interval}`} candles={activeSnapshot.items} symbol={selected.symbol} refreshing={chartLoading || activeSnapshot.status !== 'READY'} onLoadBefore={loadOlderCandles} />
+            {activeSnapshot?.status === 'READY'
+              ? <CandleChart key={`${selected.tokenAddress}:${interval}`} candles={activeSnapshot.items} symbol={selected.symbol} refreshing={chartLoading} onLoadBefore={loadOlderCandles} />
               : <div className="chart-state">正在加载行情</div>}
             <section className="trade-tape" aria-label="实时成交">
               <header><strong>实时成交</strong><span>最新成交</span></header>

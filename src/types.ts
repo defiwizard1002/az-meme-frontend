@@ -8,6 +8,7 @@ export interface Token {
   name: string;
   launchpad: string;
   stage: 'CURVE' | 'GRADUATED';
+  quoteAssetKey: 'NATIVE' | 'USDC' | 'USDT' | 'USDG';
   priceUsd: string;
   marketCapUsd: string;
   volume24hUsd: string;
@@ -54,7 +55,7 @@ export interface Trade {
   priceUsd: string;
   baseAmount: string;
   quoteAmount: string;
-  quoteAsset: 'ETH';
+  quoteAsset: 'ETH' | 'USDC' | 'USDT' | 'USDG';
   trader: string;
   txHash: string;
 }

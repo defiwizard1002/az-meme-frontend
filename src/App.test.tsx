@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 
@@ -32,6 +32,7 @@ const token = {
   name: 'Cash Cat',
   launchpad: 'PONS',
   stage: 'GRADUATED',
+  quoteAssetKey: 'NATIVE',
   priceUsd: '0.0184',
   marketCapUsd: '18400000',
   volume24hUsd: '1344000',
@@ -52,7 +53,11 @@ function response(result: unknown) {
 }
 
 describe('App', () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
 
   it('renders markets, READY candles and account balances from API responses', async () => {
     vi.stubGlobal('WebSocket', undefined);
@@ -124,5 +129,54 @@ describe('App', () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('mock provider unavailable'));
     render(<App />);
     expect(await screen.findByText('启动失败：mock provider unavailable')).toBeInTheDocument();
+  });
+
+  it('subscribes while catching up but keeps the chart hidden until READY', async () => {
+    const sent: string[] = [];
+    class TestWebSocket {
+      static readonly OPEN = 1;
+      readonly readyState = TestWebSocket.OPEN;
+      private readonly listeners = new Map<string, Array<(event: Event) => void>>();
+      constructor(_url: string) {
+        queueMicrotask(() => this.emit('open', new Event('open')));
+      }
+      addEventListener(name: string, listener: (event: Event) => void): void {
+        this.listeners.set(name, [...(this.listeners.get(name) ?? []), listener]);
+      }
+      send(payload: string): void { sent.push(payload); }
+      close(): void { this.emit('close', new Event('close')); }
+      private emit(name: string, event: Event): void {
+        for (const listener of this.listeners.get(name) ?? []) listener(event);
+      }
+    }
+    vi.stubGlobal('WebSocket', TestWebSocket);
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith('/uaapi/user/web3/get-nonce')) return response({ nonce: 'mock-nonce', message: 'AZ login message' });
+      if (url.endsWith('/uaapi/user/web3/login')) return response({ accessToken: 'mock-az-session-token', expiresAt: Date.now() + 3600000 });
+      if (url.endsWith('/uaapi/user/user/getDesensitizedUserInfo')) return response({ userId: 'mock-user', accountId: 'mock-account', loginStatus: 'LOGGED_IN' });
+      if (url.endsWith('/config')) return response({ chainId: 4663, chainName: 'Robinhood Chain', defaultSlippageBps: 300 });
+      if (url.includes('/markets')) return response({ items: [token], stale: false });
+      if (url.endsWith('/account/summary')) return response({ quoteBalances: [], positions: [] });
+      if (url.endsWith('/ws-ticket')) return response({ ticket: 'ticket', expiresAt: Date.now() + 30_000 });
+      if (url.includes('/candles')) return response({
+        chainId: 4663,
+        tokenAddress: token.tokenAddress,
+        marketKey: 'pool_cashcat:NATIVE',
+        interval: '1m',
+        status: 'CATCHING_UP',
+        source: 'BITQUERY+CHAIN',
+        items: [{ t: 1, o: '0.018', h: '0.019', l: '0.017', c: '0.0184', baseVolume: '1', quoteVolume: '1', revision: 1 }],
+      });
+      throw new Error(`Unexpected request ${url}`);
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sent.some((payload) => {
+      const message = JSON.parse(payload) as { op?: string; channels?: string[] };
+      return message.op === 'subscribe' && message.channels?.some((channel) => channel.startsWith('candle:'));
+    })).toBe(true));
+    expect(screen.getByText('正在加载行情')).toBeInTheDocument();
+    expect(screen.queryByLabelText('CASHCAT K 线图')).not.toBeInTheDocument();
   });
 });
