@@ -153,15 +153,28 @@ export default function App() {
   const quoteRequestRef = useRef(quoteRequest);
   quoteRequestRef.current = quoteRequest;
 
+  const selectToken = useCallback(async (summary: Token) => {
+    try {
+      const detail = await memeApi.getToken(summary.tokenAddress);
+      setTokens((current) => current.map((item) => item.tokenAddress === detail.tokenAddress ? detail : item));
+      setSearchResults((current) => current?.map((item) => item.tokenAddress === detail.tokenAddress ? detail : item) ?? null);
+      setSelected(detail);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '代币详情加载失败');
+    }
+  }, []);
+
   useEffect(() => {
     let active = true;
     Promise.all([memeApi.getConfig(), memeApi.getMarkets()])
-      .then(([config, markets]) => {
+      .then(async ([config, markets]) => {
+        const first = markets.items[0];
+        const selectedToken = first ? await memeApi.getToken(first.tokenAddress) : null;
         if (!active) return;
         setChainName(config.chainName);
         setSlippageBps(config.defaultSlippageBps);
-        setTokens(markets.items);
-        setSelected(markets.items[0] ?? null);
+        setTokens(markets.items.map((item) => item.tokenAddress === selectedToken?.tokenAddress ? selectedToken : item));
+        setSelected(selectedToken);
       })
       .catch((cause: unknown) => active && setError(cause instanceof Error ? cause.message : '加载失败'))
       .finally(() => active && setLoading(false));
@@ -396,13 +409,14 @@ export default function App() {
       const result = await memeApi.getMarkets(tab);
       setTokens(result.items);
       setDiscoveryTab(tab);
-      setSelected((current) => result.items.find((item) => item.tokenAddress === current?.tokenAddress) ?? result.items[0] ?? null);
+      const candidate = result.items.find((item) => item.tokenAddress === selected?.tokenAddress) ?? result.items[0];
+      if (candidate) await selectToken(candidate);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '市场加载失败');
     } finally {
       setMarketLoading(false);
     }
-  }, [discoveryTab, marketLoading]);
+  }, [discoveryTab, marketLoading, selectToken, selected?.tokenAddress]);
   const tradePresets = useMemo(() => {
     if (side === 'BUY') {
       const values = asset === 'ETH' ? ethPresets : stablePresets;
@@ -543,7 +557,7 @@ export default function App() {
             {visibleTokens.length === 0 && <div className="empty">没有匹配的代币</div>}
             {visibleTokens.map((token) => (
               <div key={token.tokenAddress} className={selected?.tokenAddress === token.tokenAddress ? 'token-row selected' : 'token-row'}>
-                <button type="button" className="token-select" aria-label={`查看 ${token.symbol}`} onClick={() => setSelected(token)}>
+                <button type="button" className="token-select" aria-label={`查看 ${token.symbol}`} onClick={() => void selectToken(token)}>
                   <span className="row-token">
                     <TokenMark token={token} />
                     <span>
@@ -559,7 +573,7 @@ export default function App() {
                   <span className={Number(token.change5m) >= 0 ? 'positive' : 'negative'}>{Number(token.change5m) > 0 ? '+' : ''}{token.change5m}%</span>
                   <span>{compact(token.holders)}</span>
                 </button>
-                <button type="button" className="quick-buy" aria-label={`买入 ${token.symbol}`} disabled={token.tradeStatus !== 'TRADABLE'} onClick={() => { setSelected(token); selectSide('BUY'); }}>买</button>
+                <button type="button" className="quick-buy" aria-label={`买入 ${token.symbol}`} onClick={() => { void selectToken(token); selectSide('BUY'); }}>买</button>
               </div>
             ))}
           </div>

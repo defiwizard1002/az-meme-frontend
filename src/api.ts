@@ -75,6 +75,7 @@ export const memeApi = {
   getConfig: () => request<{ chainId: number; chainName: string; defaultSlippageBps: number }>('/sapi/v1/meme/config'),
   getMarkets: (tab: 'hot' | 'new' = 'hot') => request<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?tab=${tab}&limit=50`),
   searchMarkets: (query: string) => request<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?query=${encodeURIComponent(query)}&limit=50`),
+  getToken: (tokenAddress: string) => request<Token>(`/sapi/v1/meme/tokens/${tokenAddress}`),
   getCandles: (tokenAddress: string, interval: Interval, options?: { to?: number; limit?: number }) => {
     const query = new URLSearchParams({ interval, limit: String(options?.limit ?? 120) });
     if (options?.to !== undefined) query.set('to', String(options.to));

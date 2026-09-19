@@ -70,7 +70,11 @@ describe('App', () => {
         return response({ userId: 'mock-user', accountId: 'mock-account', loginStatus: 'LOGGED_IN' });
       }
       if (url.endsWith('/config')) return response({ chainId: 4663, chainName: 'Robinhood Chain', defaultSlippageBps: 300 });
-      if (url.includes('/markets')) return response({ items: [token], stale: false });
+      if (url.includes('/markets')) return response({
+        items: [{ ...token, pool: { ...token.pool, poolType: 'UNSUPPORTED' }, tradeStatus: 'UNSUPPORTED_POOL_TYPE' }],
+        stale: false,
+      });
+      if (url.endsWith(`/tokens/${token.tokenAddress}`)) return response(token);
       if (url.endsWith('/account/summary')) {
         expect(new Headers(init?.headers).get('authorization')).toBe('Bearer mock-az-session-token');
         return response({
@@ -103,6 +107,8 @@ describe('App', () => {
     expect(screen.getByText('已登录')).toBeInTheDocument();
     expect(screen.getByText('3%')).toBeInTheDocument();
     expect(screen.getAllByText('PONS').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('UNISWAP V4').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: '买入 CASHCAT' })).toBeEnabled();
     expect(screen.queryByText('预览交易')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '打开账户划转' }));
@@ -157,6 +163,7 @@ describe('App', () => {
       if (url.endsWith('/uaapi/user/user/getDesensitizedUserInfo')) return response({ userId: 'mock-user', accountId: 'mock-account', loginStatus: 'LOGGED_IN' });
       if (url.endsWith('/config')) return response({ chainId: 4663, chainName: 'Robinhood Chain', defaultSlippageBps: 300 });
       if (url.includes('/markets')) return response({ items: [token], stale: false });
+      if (url.endsWith(`/tokens/${token.tokenAddress}`)) return response(token);
       if (url.endsWith('/account/summary')) return response({ quoteBalances: [], positions: [] });
       if (url.endsWith('/ws-ticket')) return response({ ticket: 'ticket', expiresAt: Date.now() + 30_000 });
       if (url.includes('/candles')) return response({
