@@ -8,7 +8,7 @@ import './styles.css';
 const intervals: Interval[] = ['1s', '1m', '15m', '1h', '4h'];
 const ethPresets = ['0.05', '0.1', '0.25', '0.5'];
 const stablePresets = ['25', '100', '250', '500'];
-const tradesPerPage = 12;
+const tradesPerBatch = 20;
 
 function compact(value: string | number): string {
   return Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(Number(value));
@@ -31,6 +31,12 @@ function readableAmount(value: string | number): string {
     maximumSignificantDigits: 7,
     useGrouping: Math.abs(number) >= 1_000,
   }).format(number);
+}
+
+function formatPercent(value: string | number): string {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '0.00%';
+  return `${number > 0 ? '+' : ''}${number.toFixed(2)}%`;
 }
 
 function age(seconds: number): string {
@@ -79,6 +85,10 @@ interface StreamMessage<T> {
   epoch: string;
   sequence: number;
   data: T;
+}
+
+interface HotMarketUpdate {
+  items: Token[];
 }
 
 function candleCacheKey(tokenAddress: string, interval: Interval): string {
@@ -138,7 +148,7 @@ export default function App() {
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [snapshot, setSnapshot] = useState<CandleSnapshot | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
-  const [tradePage, setTradePage] = useState(0);
+  const [visibleTradeCount, setVisibleTradeCount] = useState(tradesPerBatch);
   const [interval, setIntervalValue] = useState<Interval>('1m');
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
   const [asset, setAsset] = useState<Asset>('ETH');
@@ -171,6 +181,7 @@ export default function App() {
   const orderPollsRef = useRef(new Map<string, { controller: AbortController; promise: Promise<void> }>());
   const streamSocketRef = useRef<WebSocket | null>(null);
   const marketChannelsRef = useRef<string[]>([]);
+  const selectionRequestRef = useRef(0);
   const selectedMarketKey = selected ? `${selected.pool.poolKey}:${selected.quoteAssetKey}` : null;
   const activeSnapshot = selected
     ? (snapshot?.tokenAddress.toLowerCase() === selected.tokenAddress.toLowerCase()
@@ -247,15 +258,20 @@ export default function App() {
   }, []);
 
   const selectToken = useCallback(async (summary: Token) => {
+    const requestId = ++selectionRequestRef.current;
     setError(null);
     setMarketError(null);
+    setSelected(summary);
     try {
       const detail = await memeApi.getToken(summary.tokenAddress);
+      if (requestId !== selectionRequestRef.current) return;
       setTokens((current) => current.map((item) => item.tokenAddress === detail.tokenAddress ? detail : item));
       setSearchResults((current) => current?.map((item) => item.tokenAddress === detail.tokenAddress ? detail : item) ?? null);
       setSelected(detail);
     } catch (cause) {
-      setError(friendlyError(cause, '代币详情加载失败'));
+      if (requestId === selectionRequestRef.current) {
+        setMarketError(friendlyError(cause, '该代币行情暂不可用'));
+      }
     }
   }, []);
 
@@ -264,7 +280,14 @@ export default function App() {
     Promise.all([memeApi.getConfig(), memeApi.getMarkets()])
       .then(async ([config, markets]) => {
         const first = markets.items[0];
-        const selectedToken = first ? await memeApi.getToken(first.tokenAddress) : null;
+        let selectedToken = first ?? null;
+        if (first) {
+          try {
+            selectedToken = await memeApi.getToken(first.tokenAddress);
+          } catch {
+            selectedToken = first;
+          }
+        }
         if (!active) return;
         setChainName(config.chainName);
         setExplorerBaseUrl(config.explorerBaseUrl);
@@ -278,7 +301,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    setTradePage(0);
+    setVisibleTradeCount(tradesPerBatch);
     setTrades(activeTradeKey ? tradeCacheRef.current.get(activeTradeKey) ?? [] : []);
   }, [activeTradeKey]);
 
@@ -394,7 +417,8 @@ export default function App() {
     const tradeChannel = `trade:${selected.tokenAddress}:${activeSnapshot.marketKey}`;
     const currentTradeCacheKey = tradeCacheKey(selected.tokenAddress, activeSnapshot.marketKey);
     const marketChannel = `market:${selected.tokenAddress.toLowerCase()}`;
-    const channels = [candleChannel, tradeChannel, marketChannel];
+    const hotMarketChannel = 'markets:hot';
+    const channels = [candleChannel, tradeChannel, marketChannel, hotMarketChannel];
     marketChannelsRef.current = channels;
     const scheduleReconnect = () => {
       if (disposed) return;
@@ -428,7 +452,7 @@ export default function App() {
         });
         socket.addEventListener('message', (event) => {
           try {
-            const message = JSON.parse(String(event.data)) as StreamMessage<Candle | Trade | Quote | Token>;
+            const message = JSON.parse(String(event.data)) as StreamMessage<Candle | Trade | Quote | Token | HotMarketUpdate>;
             const previous = streamState.get(message.channel);
             const duplicate = previous !== undefined
               && message.epoch === previous.epoch
@@ -438,6 +462,18 @@ export default function App() {
               && (message.epoch !== previous.epoch || message.sequence > previous.sequence + 1);
             streamState.set(message.channel, { epoch: message.epoch, sequence: message.sequence });
 
+            if (message.channel === hotMarketChannel) {
+              const updates = (message.data as HotMarketUpdate).items;
+              const byAddress = new Map(updates.map((token) => [token.tokenAddress.toLowerCase(), token]));
+              setTokens((current) => current.map((token) => byAddress.get(token.tokenAddress.toLowerCase()) ?? token));
+              setSearchResults((current) => current?.map((token) => byAddress.get(token.tokenAddress.toLowerCase()) ?? token) ?? null);
+              setSelected((current) => {
+                if (!current) return current;
+                const update = byAddress.get(current.tokenAddress.toLowerCase());
+                return update ? { ...current, priceUsd: update.priceUsd, priceQuote: update.priceQuote, change24h: update.change24h } : current;
+              });
+              return;
+            }
             if (message.channel === marketChannel) {
               const refreshedToken = message.data as Token;
               const tokenPrefix = `${selected.tokenAddress.toLowerCase()}:`;
@@ -534,8 +570,11 @@ export default function App() {
     ? account?.quoteBalances.find((item) => item.asset === asset)?.available ?? '0'
     : selectedPosition?.available ?? '0';
   const displayedPrice = activeSnapshot?.items.at(-1)?.c ?? selected?.priceUsd ?? '0';
-  const tradePageCount = Math.max(1, Math.ceil(trades.length / tradesPerPage));
-  const visibleTrades = trades.slice(tradePage * tradesPerPage, (tradePage + 1) * tradesPerPage);
+  const visibleTrades = trades.slice(0, visibleTradeCount);
+  const loadMoreTrades = useCallback((element: HTMLDivElement) => {
+    if (element.scrollHeight - element.scrollTop - element.clientHeight > 40) return;
+    setVisibleTradeCount((count) => Math.min(trades.length, count + tradesPerBatch));
+  }, [trades.length]);
   const totalPosition = useMemo(() => account?.positions.reduce((sum, item) => sum + Number(item.valueUsd), 0) ?? 0, [account]);
   const balanceLabel = account?.quoteBalances
     .filter((item) => item.asset === 'ETH' || item.asset === 'USDC' || item.asset === 'USDT')
@@ -710,7 +749,7 @@ export default function App() {
               <button type="button" className={discoveryTab === 'new' ? 'active' : ''} disabled={marketLoading} onClick={() => void selectDiscoveryTab('new')}>新币</button>
             </div>
           </div>
-          <div className="token-head"><span>代币</span><span>市值</span><span>5m</span><span>持有</span><span /></div>
+          <div className="token-head"><span>代币</span><span>市值</span><span>24h</span><span>持有</span><span /></div>
           <div className="token-list">
             {visibleTokens.length === 0 && <div className="empty">没有匹配的代币</div>}
             {visibleTokens.map((token) => (
@@ -728,7 +767,7 @@ export default function App() {
                     </span>
                   </span>
                   <span>{money(token.marketCapUsd)}</span>
-                  <span className={Number(token.change5m) >= 0 ? 'positive' : 'negative'}>{Number(token.change5m) > 0 ? '+' : ''}{token.change5m}%</span>
+                  <span className={`token-change ${Number(token.change24h) >= 0 ? 'positive' : 'negative'}`}>{formatPercent(token.change24h)}</span>
                   <span>{compact(token.holders)}</span>
                 </button>
                 <button type="button" className="quick-buy" aria-label={`买入 ${token.symbol}`} onClick={() => { void selectToken(token); selectSide('BUY'); }}>买</button>
@@ -759,7 +798,7 @@ export default function App() {
               <div className="intervals" aria-label="K 线周期">
                 {intervals.map((item) => <button type="button" className={interval === item ? 'active' : ''} key={item} onClick={() => setIntervalValue(item)}>{item}</button>)}
               </div>
-              <span className={Number(selected.change5m) >= 0 ? 'positive' : 'negative'}>{Number(selected.change5m) > 0 ? '+' : ''}{selected.change5m}% / 5m</span>
+              <span className={Number(selected.change24h) >= 0 ? 'positive' : 'negative'}>{formatPercent(selected.change24h)} / 24h</span>
             </div>
             {activeSnapshot?.status === 'READY'
               ? <CandleChart key={`${selected.tokenAddress}:${activeSnapshot.marketKey}:${interval}`} candles={activeSnapshot.items} symbol={selected.symbol} refreshing={chartLoading} onLoadBefore={loadOlderCandles} />
@@ -769,14 +808,10 @@ export default function App() {
             <section className="trade-tape" aria-label="实时成交">
               <header>
                 <strong>实时成交</strong>
-                <div className="trade-pagination">
-                  <span>{trades.length > 0 ? `${trades.length} 笔 · ${tradePage + 1}/${tradePageCount}` : '最新成交'}</span>
-                  <button type="button" aria-label="上一页成交" disabled={tradePage === 0} onClick={() => setTradePage((page) => Math.max(0, page - 1))}>‹</button>
-                  <button type="button" aria-label="下一页成交" disabled={tradePage + 1 >= tradePageCount} onClick={() => setTradePage((page) => Math.min(tradePageCount - 1, page + 1))}>›</button>
-                </div>
+                <span className="trade-count">{trades.length > 0 ? `${trades.length} 笔` : '最新成交'}</span>
               </header>
               <div className="trade-head"><span>方向 / 数量</span><span>成交价</span><span>交易者</span><span>Tx</span><span>时间</span></div>
-              <div className="trade-rows">
+              <div className="trade-rows" onScroll={(event) => loadMoreTrades(event.currentTarget)}>
                 {trades.length === 0 && <div className="trade-empty">等待最新成交</div>}
                 {visibleTrades.map((trade) => {
                   const txUrl = transactionUrl(explorerBaseUrl, trade.txHash);
@@ -792,6 +827,7 @@ export default function App() {
                     </div>
                   );
                 })}
+                {visibleTrades.length < trades.length && <div className="trade-more">向下滚动加载更多</div>}
               </div>
             </section>
           </> : <div className="empty">请选择代币</div>}

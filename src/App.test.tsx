@@ -37,6 +37,7 @@ const token = {
   marketCapUsd: '18400000',
   volume24hUsd: '1344000',
   change5m: '41',
+  change24h: '88',
   holders: 4120,
   ageSeconds: 720,
   pool: { poolKey: 'pool_cashcat', poolType: 'UNISWAP_V4', liquidityUsd: '3200000' },
@@ -147,6 +148,45 @@ describe('App', () => {
     expect(await screen.findByText('启动失败：mock provider unavailable')).toBeInTheDocument();
   });
 
+  it('switches to the requested token even when its detail request fails', async () => {
+    vi.stubGlobal('WebSocket', undefined);
+    const second = {
+      ...token,
+      tokenAddress: '0x2222222222222222222222222222222222222022',
+      symbol: 'SECOND',
+      name: 'Second token',
+      pool: { ...token.pool, poolKey: 'pool_second' },
+    };
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith('/uaapi/user/web3/get-nonce')) return response({ nonce: 'mock-nonce', message: 'AZ login message' });
+      if (url.endsWith('/uaapi/user/web3/login')) return response({ accessToken: 'mock-az-session-token', expiresAt: Date.now() + 3600000 });
+      if (url.endsWith('/uaapi/user/user/getDesensitizedUserInfo')) return response({ userId: 'mock-user', accountId: 'mock-account', loginStatus: 'LOGGED_IN' });
+      if (url.endsWith('/config')) return response({ chainId: 4663, chainName: 'Robinhood Chain', explorerBaseUrl: 'https://robinhoodchain.blockscout.com', defaultSlippageBps: 300 });
+      if (url.includes('/markets')) return response({ items: [token, second], stale: false });
+      if (url.endsWith(`/tokens/${token.tokenAddress}`)) return response(token);
+      if (url.endsWith(`/tokens/${second.tokenAddress}`)) {
+        return Promise.resolve(new Response(JSON.stringify({ rc: 1, mc: 'MEME_PROVIDER_ERROR', ma: ['upstream failed'], result: null }), { status: 502 }));
+      }
+      if (url.includes(`/tokens/${second.tokenAddress}/candles`)) return response({
+        chainId: 4663, tokenAddress: second.tokenAddress, marketKey: 'pool_second:NATIVE', interval: '1m', status: 'READY', source: 'BITQUERY+CHAIN', items: [],
+      });
+      if (url.includes('/candles')) return response({
+        chainId: 4663, tokenAddress: token.tokenAddress, marketKey: 'pool_cashcat:NATIVE', interval: '1m', status: 'READY', source: 'BITQUERY+CHAIN', items: [],
+      });
+      if (url.endsWith('/account/summary')) return response({ quoteBalances: [], positions: [] });
+      if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
+      throw new Error(`Unexpected request ${url}`);
+    });
+
+    render(<App />);
+    const target = await screen.findByRole('button', { name: '查看 SECOND' });
+    fireEvent.click(target);
+
+    expect(await screen.findByText('SECOND / ETH')).toBeInTheDocument();
+    expect(screen.queryByText('代币详情加载失败')).not.toBeInTheDocument();
+  });
+
   it('subscribes while catching up but keeps the chart hidden until READY', async () => {
     const sent: string[] = [];
     class TestWebSocket {
@@ -215,7 +255,7 @@ describe('App', () => {
     expect(TestWebSocket.latest).not.toBeNull();
 
     act(() => {
-      for (let sequence = 1; sequence <= 13; sequence += 1) {
+      for (let sequence = 1; sequence <= 25; sequence += 1) {
         const suffix = sequence.toString(16).padStart(64, '0');
         TestWebSocket.latest?.receive({
           channel: tradeChannel,
@@ -236,15 +276,21 @@ describe('App', () => {
       }
     });
 
-    expect(await screen.findByText('13 笔 · 1/2')).toBeInTheDocument();
+    expect(await screen.findByText('25 笔')).toBeInTheDocument();
     const newestTxLink = screen.getAllByRole('link', { name: /查看交易/ })[0];
-    expect(newestTxLink).toHaveAttribute('href', `https://robinhoodchain.blockscout.com/tx/0x${'d'.padStart(64, '0')}`);
-    fireEvent.click(screen.getByRole('button', { name: '下一页成交' }));
-    expect(screen.getByText('13 笔 · 2/2')).toBeInTheDocument();
-    expect(screen.getAllByRole('link', { name: /查看交易/ })).toHaveLength(1);
+    expect(newestTxLink).toHaveAttribute('href', `https://robinhoodchain.blockscout.com/tx/0x${'19'.padStart(64, '0')}`);
+    expect(screen.getAllByRole('link', { name: /查看交易/ })).toHaveLength(20);
+    const tradeRows = screen.getByLabelText('实时成交').querySelector('.trade-rows') as HTMLDivElement;
+    Object.defineProperties(tradeRows, {
+      scrollHeight: { configurable: true, value: 1_000 },
+      clientHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, value: 600 },
+    });
+    fireEvent.scroll(tradeRows);
+    expect(screen.getAllByRole('link', { name: /查看交易/ })).toHaveLength(25);
 
     fireEvent.click(screen.getByRole('button', { name: '1s' }));
-    expect(screen.getByText('13 笔 · 2/2')).toBeInTheDocument();
-    expect(screen.getAllByRole('link', { name: /查看交易/ })).toHaveLength(1);
+    expect(screen.getByText('25 笔')).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: /查看交易/ })).toHaveLength(25);
   });
 });

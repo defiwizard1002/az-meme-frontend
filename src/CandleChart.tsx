@@ -83,8 +83,9 @@ export function CandleChart({ candles, symbol, refreshing = false, onLoadBefore 
       },
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: {
+        autoScale: true,
         borderColor: '#282531',
-        scaleMargins: { top: 0.08, bottom: 0.24 },
+        scaleMargins: { top: 0.1, bottom: 0.18 },
       },
       timeScale: {
         borderColor: '#282531',
@@ -229,6 +230,7 @@ export function CandleChart({ candles, symbol, refreshing = false, onLoadBefore 
     firstTimeRef.current = firstTime;
     lastTimeRef.current = linkedCandles.at(-1)!.t;
     previousLengthRef.current = linkedCandles.length;
+    candleSeries.priceScale().applyOptions({ autoScale: true });
   }, [candles]);
 
   return (

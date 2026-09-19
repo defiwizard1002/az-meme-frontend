@@ -9,10 +9,12 @@ export interface Token {
   launchpad: string;
   stage: 'CURVE' | 'GRADUATED';
   quoteAssetKey: 'NATIVE' | 'USDC' | 'USDT' | 'USDG';
+  priceQuote: string;
   priceUsd: string;
   marketCapUsd: string;
   volume24hUsd: string;
   change5m: string;
+  change24h: string;
   holders: number;
   ageSeconds: number;
   pool: { poolKey: string; poolType: string; liquidityUsd: string };
