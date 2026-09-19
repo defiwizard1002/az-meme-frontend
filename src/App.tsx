@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { azAuth, azFundApi, memeApi, setSessionToken, wsBaseUrl } from './api';
+import { ApiError, azAuth, azFundApi, memeApi, setSessionToken, wsBaseUrl } from './api';
 import { CandleChart } from './CandleChart';
 import type { AccountSummary, Asset, Candle, CandleSnapshot, Interval, Quote, Token, Trade } from './types';
 import './styles.css';
@@ -18,7 +18,8 @@ function money(value: string | number): string {
   if (!Number.isFinite(number)) return '$0';
   return `$${Intl.NumberFormat('en', {
     notation: Math.abs(number) >= 100_000 ? 'compact' : 'standard',
-    maximumFractionDigits: Math.abs(number) >= 1 ? 2 : 6,
+    maximumFractionDigits: Math.abs(number) >= 1 ? 2 : 12,
+    maximumSignificantDigits: Math.abs(number) < 1 ? 6 : undefined,
   }).format(number)}`;
 }
 
@@ -92,12 +93,37 @@ function transactionUrl(explorerBaseUrl: string, txHash: string): string | null 
   return `${explorerBaseUrl.replace(/\/+$/, '')}/tx/${txHash}`;
 }
 
+function normalizedDecimal(value: string): string {
+  const [whole = '0', fraction = ''] = value.split('.');
+  const normalizedWhole = whole.replace(/^0+(?=\d)/, '') || '0';
+  const normalizedFraction = fraction.replace(/0+$/, '');
+  return normalizedFraction ? normalizedWhole + '.' + normalizedFraction : normalizedWhole;
+}
+
+function friendlyError(cause: unknown, fallback: string): string {
+  if (!(cause instanceof ApiError)) return cause instanceof Error ? cause.message : fallback;
+  const messages: Record<string, string> = {
+    MEME_UNAUTHORIZED: '登录已失效，请重新登录',
+    MEME_GMGN_RATE_LIMITED: '行情请求较多，请稍后再试',
+    MEME_MARKET_MISMATCH: '池子已更新，正在刷新行情',
+    MEME_QUOTE_EXPIRED: '报价已过期，请使用最新报价',
+    MEME_EXECUTION_DISABLED: '当前环境暂不开放交易',
+  };
+  return messages[cause.code] ?? fallback;
+}
+
+function chooseNewerCandle(previous: Candle | undefined, next: Candle): Candle {
+  if (!previous || next.revision >= previous.revision) return next;
+  return previous;
+}
+
 function mergeSnapshots(previous: CandleSnapshot | null, next: CandleSnapshot): CandleSnapshot {
   if (!previous
     || previous.tokenAddress.toLowerCase() !== next.tokenAddress.toLowerCase()
     || previous.marketKey !== next.marketKey
     || previous.interval !== next.interval) return next;
-  const byTime = new Map([...previous.items, ...next.items].map((item) => [item.t, item]));
+  const byTime = new Map(previous.items.map((item) => [item.t, item]));
+  for (const item of next.items) byTime.set(item.t, chooseNewerCandle(byTime.get(item.t), item));
   return { ...next, items: [...byTime.values()].sort((a, b) => a.t - b.t) };
 }
 
@@ -138,12 +164,13 @@ export default function App() {
   const candleCacheRef = useRef(new Map<string, CandleSnapshot>());
   const tradeCacheRef = useRef(new Map<string, Trade[]>());
   const tradeMarketKeyRef = useRef(new Map<string, string>());
+  const orderIdempotencyRef = useRef(new Map<string, string>());
   const streamSocketRef = useRef<WebSocket | null>(null);
   const marketChannelsRef = useRef<string[]>([]);
   const activeSnapshot = selected
     ? (snapshot?.tokenAddress.toLowerCase() === selected.tokenAddress.toLowerCase() && snapshot.interval === interval
         ? snapshot
-        : candleCacheRef.current.get(candleCacheKey(selected.tokenAddress, interval)) ?? null)
+        : null)
     : null;
   const activeTradeKey = selected
     ? (() => {
@@ -177,6 +204,25 @@ export default function App() {
   const quoteRequestRef = useRef(quoteRequest);
   quoteRequestRef.current = quoteRequest;
 
+  const trackOrder = useCallback(async (orderId: string) => {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const latest = await memeApi.getOrder(orderId);
+      if (latest.status === 'SETTLED') {
+        setOrderState('交易成功');
+        window.setTimeout(() => setOrderState(null), 1200);
+        return;
+      }
+      if (latest.status.startsWith('FAILED')) {
+        setOrderState('交易失败');
+        window.setTimeout(() => setOrderState(null), 1200);
+        return;
+      }
+      setOrderState(latest.status === 'SUBMISSION_UNKNOWN' || latest.status === 'MANUAL_REVIEW' ? '确认中' : '处理中');
+      await new Promise((resolvePromise) => window.setTimeout(resolvePromise, 250));
+    }
+    setOrderState('确认中');
+  }, []);
+
   const selectToken = useCallback(async (summary: Token) => {
     try {
       const detail = await memeApi.getToken(summary.tokenAddress);
@@ -184,7 +230,7 @@ export default function App() {
       setSearchResults((current) => current?.map((item) => item.tokenAddress === detail.tokenAddress ? detail : item) ?? null);
       setSelected(detail);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '代币详情加载失败');
+      setError(friendlyError(cause, '代币详情加载失败'));
     }
   }, []);
 
@@ -201,7 +247,7 @@ export default function App() {
         setTokens(markets.items.map((item) => item.tokenAddress === selectedToken?.tokenAddress ? selectedToken : item));
         setSelected(selectedToken);
       })
-      .catch((cause: unknown) => active && setError(cause instanceof Error ? cause.message : '加载失败'))
+      .catch((cause: unknown) => active && setError(friendlyError(cause, '加载失败')))
       .finally(() => active && setLoading(false));
     return () => { active = false; };
   }, []);
@@ -223,7 +269,7 @@ export default function App() {
       setMarketLoading(true);
       void memeApi.searchMarkets(query)
         .then((result) => { if (active) setSearchResults(result.items); })
-        .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : '搜索失败'); })
+        .catch((cause: unknown) => { if (active) setError(friendlyError(cause, '搜索失败')); })
         .finally(() => { if (active) setMarketLoading(false); });
     }, 300);
     return () => {
@@ -240,13 +286,24 @@ export default function App() {
         if (!active) return;
         setAccount(summary);
         setSessionReady(true);
+        void memeApi.getOrders()
+          .then(({ items }) => {
+            if (!active) return;
+            const pending = items.find((order) => !order.status.startsWith('FAILED') && order.status !== 'SETTLED');
+            if (pending) void trackOrder(pending.orderId).catch((cause: unknown) => {
+              if (active) setError(friendlyError(cause, '订单状态恢复失败'));
+            });
+          })
+          .catch((cause: unknown) => {
+            if (active) setError(friendlyError(cause, '订单状态恢复失败'));
+          });
       })
       .catch((cause: unknown) => {
         setSessionToken(null);
-        if (active) setError(cause instanceof Error ? cause.message : '登录失败');
+        if (active) setError(friendlyError(cause, '登录失败'));
       });
     return () => { active = false; };
-  }, []);
+  }, [trackOrder]);
 
   useEffect(() => {
     if (!selected) return;
@@ -254,6 +311,7 @@ export default function App() {
     let pollTimer: number | undefined;
     let attempts = 0;
     const cacheKey = candleCacheKey(selected.tokenAddress, interval);
+    const requestedMarketKey = selected.pool.poolKey + ':' + selected.quoteAssetKey;
     const cached = candleCacheRef.current.get(cacheKey) ?? null;
     setChartLoading(true);
     setSnapshot(cached ? { ...cached, status: 'CATCHING_UP' } : null);
@@ -262,7 +320,7 @@ export default function App() {
 
     const loadCandles = async () => {
       try {
-        const result = await memeApi.getCandles(selected.tokenAddress, interval);
+        const result = await memeApi.getCandles(selected.tokenAddress, interval, { marketKey: requestedMarketKey });
         if (!active) return;
         const merged = mergeSnapshots(candleCacheRef.current.get(cacheKey) ?? null, result);
         setCachedSnapshot(merged);
@@ -281,7 +339,7 @@ export default function App() {
       } catch (cause) {
         if (!active) return;
         setChartLoading(false);
-        setError(cause instanceof Error ? cause.message : 'K 线加载失败');
+        setError(friendlyError(cause, 'K 线加载失败'));
       }
     };
     void loadCandles();
@@ -292,10 +350,11 @@ export default function App() {
   }, [selected, interval, setCachedSnapshot]);
 
   useEffect(() => {
-    if (!sessionReady || !selected || !activeSnapshot || activeSnapshot.status === 'STALE' || typeof WebSocket === 'undefined') return;
+    if (!selected || !activeSnapshot || activeSnapshot.status === 'STALE' || typeof WebSocket === 'undefined') return;
     let socket: WebSocket | null = null;
     let disposed = false;
     let reconnectTimer: number | undefined;
+    let reconnectAttempt = 0;
     const streamState = new Map<string, { epoch: string; sequence: number }>();
     const candleChannel = `candle:${selected.tokenAddress}:${activeSnapshot.marketKey}:${interval}`;
     const tradeChannel = `trade:${selected.tokenAddress}:${activeSnapshot.marketKey}`;
@@ -303,12 +362,18 @@ export default function App() {
     const marketChannel = `market:${selected.tokenAddress.toLowerCase()}`;
     const channels = [candleChannel, tradeChannel, marketChannel];
     marketChannelsRef.current = channels;
+    const scheduleReconnect = () => {
+      if (disposed) return;
+      const delay = Math.min(30_000, 1_000 * 2 ** reconnectAttempt);
+      reconnectAttempt += 1;
+      reconnectTimer = window.setTimeout(() => void connect(), delay);
+    };
 
     const upsertCandle = (candle: Candle) => {
       setCachedSnapshot((current) => {
         if (!current || current.tokenAddress.toLowerCase() !== selected.tokenAddress.toLowerCase() || current.interval !== interval) return current;
         const byTime = new Map(current.items.map((item) => [item.t, item]));
-        byTime.set(candle.t, candle);
+        byTime.set(candle.t, chooseNewerCandle(byTime.get(candle.t), candle));
         return { ...current, items: [...byTime.values()].sort((a, b) => a.t - b.t) };
       });
     };
@@ -319,17 +384,24 @@ export default function App() {
         if (disposed) return;
         socket = new WebSocket(`${wsBaseUrl}?ticket=${encodeURIComponent(ticket)}`);
         streamSocketRef.current = socket;
-        socket.addEventListener('open', () => socket?.send(JSON.stringify({
-          op: 'subscribe',
-          channels,
-          ...(quoteRequestRef.current ? { quote: quoteRequestRef.current } : {}),
-        })));
+        socket.addEventListener('open', () => {
+          reconnectAttempt = 0;
+          socket?.send(JSON.stringify({
+            op: 'subscribe',
+            channels,
+            ...(sessionReady && quoteRequestRef.current ? { quote: quoteRequestRef.current } : {}),
+          }));
+        });
         socket.addEventListener('message', (event) => {
           try {
             const message = JSON.parse(String(event.data)) as StreamMessage<Candle | Trade | Quote | Token>;
             const previous = streamState.get(message.channel);
+            const duplicate = previous !== undefined
+              && message.epoch === previous.epoch
+              && message.sequence <= previous.sequence;
+            if (duplicate) return;
             const requiresResync = previous !== undefined
-              && (message.epoch !== previous.epoch || message.sequence !== previous.sequence + 1);
+              && (message.epoch !== previous.epoch || message.sequence > previous.sequence + 1);
             streamState.set(message.channel, { epoch: message.epoch, sequence: message.sequence });
 
             if (message.channel === marketChannel) {
@@ -350,7 +422,7 @@ export default function App() {
                 && liveQuote.tokenAddress.toLowerCase() === expected.tokenAddress.toLowerCase()
                 && liveQuote.side === expected.side
                 && liveQuote.settlementAsset === expected.settlementAsset
-                && liveQuote.amountIn === expected.amountIn) {
+                && normalizedDecimal(liveQuote.amountIn) === normalizedDecimal(expected.amountIn)) {
                 setQuote(liveQuote);
               }
               return;
@@ -358,7 +430,7 @@ export default function App() {
             if (message.channel === candleChannel) {
               const candle = message.data as Candle;
               if (requiresResync) {
-                void memeApi.getCandles(selected.tokenAddress, interval)
+                void memeApi.getCandles(selected.tokenAddress, interval, { marketKey: activeSnapshot.marketKey })
                   .then((fresh) => {
                     if (!disposed) {
                       setCachedSnapshot((current) => mergeSnapshots(current, fresh));
@@ -384,12 +456,12 @@ export default function App() {
           }
         });
         socket.addEventListener('close', () => {
-          if (!disposed) reconnectTimer = window.setTimeout(() => void connect(), 1000);
+          scheduleReconnect();
         });
       } catch {
         if (!disposed) {
           setError('实时行情暂时不可用，历史行情仍可查看');
-          reconnectTimer = window.setTimeout(() => void connect(), 1000);
+          scheduleReconnect();
         }
       }
     };
@@ -411,11 +483,11 @@ export default function App() {
     socket.send(JSON.stringify({
       op: 'subscribe',
       channels: marketChannelsRef.current,
-      ...(quoteRequest ? { quote: quoteRequest } : {}),
+      ...(sessionReady && quoteRequest ? { quote: quoteRequest } : {}),
     }));
-  }, [quoteRequest, selected]);
+  }, [quoteRequest, selected, sessionReady]);
 
-  const selectedPosition = account?.positions.find((item) => item.tokenAddress === selected?.tokenAddress);
+  const selectedPosition = account?.positions.find((item) => item.tokenAddress.toLowerCase() === selected?.tokenAddress.toLowerCase());
   const currentBalance = side === 'BUY'
     ? account?.quoteBalances.find((item) => item.asset === asset)?.available ?? '0'
     : selectedPosition?.available ?? '0';
@@ -424,8 +496,8 @@ export default function App() {
   const visibleTrades = trades.slice(tradePage * tradesPerPage, (tradePage + 1) * tradesPerPage);
   const totalPosition = useMemo(() => account?.positions.reduce((sum, item) => sum + Number(item.valueUsd), 0) ?? 0, [account]);
   const balanceLabel = account?.quoteBalances
-    .filter((item) => item.asset === 'ETH' || item.asset === 'USDC')
-    .map((item) => `${Number(item.available).toLocaleString('en-US')} ${item.asset}`)
+    .filter((item) => item.asset === 'ETH' || item.asset === 'USDC' || item.asset === 'USDT')
+    .map((item) => `${readableAmount(item.available)} ${item.asset}`)
     .join(' / ') ?? '余额加载中';
   const visibleTokens = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -447,7 +519,7 @@ export default function App() {
       const candidate = result.items.find((item) => item.tokenAddress === selected?.tokenAddress) ?? result.items[0];
       if (candidate) await selectToken(candidate);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '市场加载失败');
+      setError(friendlyError(cause, '市场加载失败'));
     } finally {
       setMarketLoading(false);
     }
@@ -479,7 +551,11 @@ export default function App() {
     if (!selected) return 0;
     try {
       for (let attempt = 0; attempt < 40; attempt += 1) {
-        const result = await memeApi.getCandles(selected.tokenAddress, interval, { to: before, limit: 120 });
+        const marketKey = snapshot?.tokenAddress.toLowerCase() === selected.tokenAddress.toLowerCase()
+          && snapshot.interval === interval
+          ? snapshot.marketKey
+          : selected.pool.poolKey + ':' + selected.quoteAssetKey;
+        const result = await memeApi.getCandles(selected.tokenAddress, interval, { to: before, limit: 120, marketKey });
         if (result.status === 'STALE') throw new Error('更早行情加载失败');
         if (result.status === 'READY') {
           setCachedSnapshot((current) => {
@@ -487,7 +563,8 @@ export default function App() {
               || current.tokenAddress.toLowerCase() !== result.tokenAddress.toLowerCase()
               || current.marketKey !== result.marketKey
               || current.interval !== result.interval) return current;
-            const byTime = new Map([...result.items, ...current.items].map((item) => [item.t, item]));
+            const byTime = new Map(current.items.map((item) => [item.t, item]));
+            for (const item of result.items) byTime.set(item.t, chooseNewerCandle(byTime.get(item.t), item));
             return { ...current, items: [...byTime.values()].sort((a, b) => a.t - b.t) };
           });
           return result.items.length;
@@ -496,10 +573,10 @@ export default function App() {
       }
       throw new Error('更早行情加载超时');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '更早行情加载失败');
+      setError(friendlyError(cause, '更早行情加载失败'));
       return 0;
     }
-  }, [interval, selected, setCachedSnapshot]);
+  }, [interval, selected, setCachedSnapshot, snapshot]);
 
   const submitOrder = useCallback(async () => {
     if (!quote) {
@@ -509,37 +586,38 @@ export default function App() {
     setError(null);
     setOrderState('提交中');
     try {
+      let clientOrderId = orderIdempotencyRef.current.get(quote.quoteId);
+      if (!clientOrderId) {
+        clientOrderId = crypto.randomUUID();
+        orderIdempotencyRef.current.set(quote.quoteId, clientOrderId);
+      }
       const order = await memeApi.createOrder({
-        clientOrderId: crypto.randomUUID(),
+        clientOrderId,
         quoteId: quote.quoteId,
-        maxAmountIn: amount,
+        maxAmountIn: quote.amountIn,
         minAmountOut: quote.minAmountOut,
       });
       setOrderState('处理中');
-      window.setTimeout(async () => {
-        const latest = await memeApi.getOrder(order.orderId);
-        const failed = latest.status.startsWith('FAILED');
-        setOrderState(latest.status === 'SETTLED' ? '交易成功' : failed ? '交易失败' : '处理中');
-        if (latest.status === 'SETTLED' || failed) {
-          window.setTimeout(() => setOrderState(null), 1200);
-        }
-      }, 250);
+      await trackOrder(order.orderId);
     } catch (cause) {
       setOrderState(null);
-      setError(cause instanceof Error ? cause.message : '下单失败');
+      setError(friendlyError(cause, '下单失败'));
     }
-  }, [amount, quote]);
+  }, [quote, trackOrder]);
 
   const submitTransfer = useCallback(async () => {
     if (!sessionReady) return;
+    if (!/^\d+(?:\.\d+)?$/.test(transferAmount) || Number(transferAmount) <= 0) {
+      setError('请输入有效的划转金额');
+      return;
+    }
     setTransferState('划转中');
     setError(null);
     try {
       const from = transferDirection === 'SPOT_TO_MEME' ? 'SPOT' : 'MEME';
       const to = from === 'SPOT' ? 'MEME' : 'SPOT';
-      const randomId = typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      if (typeof crypto.randomUUID !== 'function') throw new Error('当前浏览器不支持安全划转编号');
+      const randomId = crypto.randomUUID();
       const transferId = await azFundApi.transfer({
         bizId: `meme-transfer-${randomId}`,
         from,
@@ -552,7 +630,7 @@ export default function App() {
       setTransferState(`划转成功 / ${transferId}`);
     } catch (cause) {
       setTransferState(null);
-      setError(cause instanceof Error ? cause.message : '划转失败');
+      setError(friendlyError(cause, '划转失败'));
     }
   }, [sessionReady, transferAmount, transferAsset, transferDirection]);
 
@@ -639,7 +717,7 @@ export default function App() {
               <span className={Number(selected.change5m) >= 0 ? 'positive' : 'negative'}>{Number(selected.change5m) > 0 ? '+' : ''}{selected.change5m}% / 5m</span>
             </div>
             {activeSnapshot?.status === 'READY'
-              ? <CandleChart key={`${selected.tokenAddress}:${interval}`} candles={activeSnapshot.items} symbol={selected.symbol} refreshing={chartLoading} onLoadBefore={loadOlderCandles} />
+              ? <CandleChart key={`${selected.tokenAddress}:${activeSnapshot.marketKey}:${interval}`} candles={activeSnapshot.items} symbol={selected.symbol} refreshing={chartLoading} onLoadBefore={loadOlderCandles} />
               : <div className="chart-state">正在加载行情</div>}
             <section className="trade-tape" aria-label="实时成交">
               <header>
@@ -738,7 +816,11 @@ export default function App() {
 
           <div className="positions">
             <div className="positions-head"><strong>我的持仓</strong><span className="positive">{money(totalPosition)}</span></div>
-            {account?.positions.map((position) => <div className="position" key={position.tokenAddress}><span><b>{position.symbol}</b><small>{compact(position.available)} 枚</small></span><span className={Number(position.valueUsd) >= Number(position.costUsd) ? 'positive' : 'negative'}>{((Number(position.valueUsd) / Number(position.costUsd) - 1) * 100).toFixed(0)}%</span><button type="button" onClick={() => { setSelected(tokens.find((token) => token.tokenAddress === position.tokenAddress) ?? null); selectSide('SELL'); }}>卖</button></div>)}
+            {account?.positions.map((position) => {
+              const cost = Number(position.costUsd);
+              const pnl = cost > 0 ? `${((Number(position.valueUsd) / cost - 1) * 100).toFixed(0)}%` : '—';
+              return <div className="position" key={position.tokenAddress}><span><b>{position.symbol}</b><small>{compact(position.available)} 枚</small></span><span className={cost > 0 && Number(position.valueUsd) >= cost ? 'positive' : 'negative'}>{pnl}</span><button type="button" onClick={() => { setSelected(tokens.find((token) => token.tokenAddress.toLowerCase() === position.tokenAddress.toLowerCase()) ?? null); selectSide('SELL'); }}>卖</button></div>;
+            })}
           </div>
         </aside>
       </div>

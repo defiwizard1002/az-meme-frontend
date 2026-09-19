@@ -76,3 +76,10 @@ export interface Quote {
   fees: Array<{ type: string; asset: Asset; amount: string; estimated: boolean }>;
   expiresAt: number;
 }
+
+export interface Order {
+  orderId: string;
+  status: 'CREATED' | 'RESERVED' | 'SIGNED' | 'SUBMITTING' | 'SUBMITTED' | 'CONFIRMED' | 'SETTLED' | 'FAILED_FINAL' | 'SUBMISSION_UNKNOWN' | 'MANUAL_REVIEW';
+  fundStatus: 'RESERVED' | 'SETTLED' | 'RELEASED';
+  txHash?: string;
+}

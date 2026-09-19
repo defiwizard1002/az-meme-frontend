@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CandleChart } from './CandleChart';
 
 const chartMocks = vi.hoisted(() => ({
@@ -22,6 +22,11 @@ vi.mock('lightweight-charts', () => ({
 }));
 
 describe('CandleChart', () => {
+  afterEach(cleanup);
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('enables TradingView drag and zoom controls and loads OHLCV data', () => {
     chartMocks.createChart.mockReturnValue({
       addSeries: vi.fn(() => ({
@@ -71,8 +76,33 @@ describe('CandleChart', () => {
     expect(chartMocks.setData).toHaveBeenCalled();
     expect(chartMocks.setData.mock.calls[0]?.[0]).toEqual([
       expect.objectContaining({ time: 1_789_600_000 }),
-      expect.objectContaining({ time: 1_789_600_002 }),
+      expect.objectContaining({ time: 1_789_600_002, open: 0.018, low: 0.018 }),
     ]);
     expect(chartMocks.fitContent).toHaveBeenCalled();
+  });
+
+  it('initializes the chart even when the token has no trades yet', () => {
+    chartMocks.createChart.mockReturnValue({
+      addSeries: vi.fn(() => ({
+        setData: chartMocks.setData,
+        update: chartMocks.update,
+        priceScale: () => ({ applyOptions: vi.fn() }),
+      })),
+      applyOptions: vi.fn(),
+      timeScale: () => ({
+        fitContent: chartMocks.fitContent,
+        subscribeVisibleLogicalRangeChange: chartMocks.subscribeVisibleRange,
+        unsubscribeVisibleLogicalRangeChange: chartMocks.unsubscribeVisibleRange,
+        getVisibleLogicalRange: chartMocks.getVisibleRange,
+        setVisibleLogicalRange: chartMocks.setVisibleRange,
+      }),
+      remove: vi.fn(),
+    });
+
+    render(<CandleChart symbol="NEW" candles={[]} />);
+
+    expect(screen.getByTestId('tradingview-chart')).toBeInTheDocument();
+    expect(screen.getByText('暂无成交 K 线')).toBeInTheDocument();
+    expect(chartMocks.setData).toHaveBeenCalledWith([]);
   });
 });

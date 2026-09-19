@@ -26,6 +26,25 @@ function pricePrecision(candles: Candle[]): { precision: number; minMove: number
   return { precision: 8, minMove: 0.00000001 };
 }
 
+export function linkCandleOpens(candles: Candle[]): Candle[] {
+  let previousClose: string | undefined;
+  return candles.map((candle) => {
+    if (previousClose === undefined) {
+      previousClose = candle.c;
+      return candle;
+    }
+    const open = previousClose;
+    const linked = {
+      ...candle,
+      o: open,
+      h: Number(candle.h) >= Number(open) ? candle.h : open,
+      l: Number(candle.l) <= Number(open) ? candle.l : open,
+    };
+    previousClose = candle.c;
+    return linked;
+  });
+}
+
 export function CandleChart({ candles, symbol, refreshing = false, onLoadBefore }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -117,6 +136,12 @@ export function CandleChart({ candles, symbol, refreshing = false, onLoadBefore 
       loadingBeforeRef.current = true;
       setHistoryLoading(true);
       void loadBeforeRef.current(before)
+        .then((loaded) => {
+          if (loaded === 0) requestedBeforeRef.current = null;
+        })
+        .catch(() => {
+          requestedBeforeRef.current = null;
+        })
         .finally(() => {
           loadingBeforeRef.current = false;
           setHistoryLoading(false);
@@ -152,7 +177,16 @@ export function CandleChart({ candles, symbol, refreshing = false, onLoadBefore 
     const candleSeries = candleSeriesRef.current;
     const volumeSeries = volumeSeriesRef.current;
     const chart = chartRef.current;
-    if (!candleSeries || !volumeSeries || !chart || candles.length === 0) return;
+    if (!candleSeries || !volumeSeries || !chart) return;
+    const linkedCandles = linkCandleOpens(candles);
+    if (linkedCandles.length === 0) {
+      candleSeries.setData([]);
+      volumeSeries.setData([]);
+      firstTimeRef.current = null;
+      lastTimeRef.current = null;
+      previousLengthRef.current = 0;
+      return;
+    }
 
     const toCandle = (item: Candle) => ({
       time: item.t as UTCTimestamp,
@@ -163,21 +197,22 @@ export function CandleChart({ candles, symbol, refreshing = false, onLoadBefore 
     });
     const toVolume = (item: Candle) => ({
       time: item.t as UTCTimestamp,
-      value: Number(item.quoteVolume ?? item.rawVolume ?? item.baseVolume ?? 0),
+      value: Number(item.quoteVolume),
       color: Number(item.c) >= Number(item.o) ? '#39d98a55' : '#ff4d7955',
     });
 
-    const firstTime = candles[0]!.t;
+    const volumeCandles = linkedCandles.filter((item) => item.quoteVolume !== null);
+    const firstTime = linkedCandles[0]!.t;
     const prepended = firstTimeRef.current !== null && firstTime < firstTimeRef.current;
     const reset = lastTimeRef.current === null
-      || candles.length < previousLengthRef.current
+      || linkedCandles.length < previousLengthRef.current
       || firstTime > lastTimeRef.current
       || prepended;
     if (reset) {
       const visibleRange = chart.timeScale().getVisibleLogicalRange();
-      const added = Math.max(candles.length - previousLengthRef.current, 0);
-      candleSeries.setData(candles.map(toCandle));
-      volumeSeries.setData(candles.map(toVolume));
+      const added = Math.max(linkedCandles.length - previousLengthRef.current, 0);
+      candleSeries.setData(linkedCandles.map(toCandle));
+      volumeSeries.setData(volumeCandles.map(toVolume));
       if (prepended && visibleRange && added > 0) {
         chart.timeScale().setVisibleLogicalRange({ from: visibleRange.from + added, to: visibleRange.to + added });
       } else {
@@ -185,22 +220,21 @@ export function CandleChart({ candles, symbol, refreshing = false, onLoadBefore 
       }
     } else {
       const lastSeen = lastTimeRef.current ?? Number.NEGATIVE_INFINITY;
-      for (const item of candles) {
+      for (const item of linkedCandles) {
         if (item.t < lastSeen) continue;
         candleSeries.update(toCandle(item));
-        volumeSeries.update(toVolume(item));
+        if (item.quoteVolume !== null) volumeSeries.update(toVolume(item));
       }
     }
     firstTimeRef.current = firstTime;
-    lastTimeRef.current = candles.at(-1)!.t;
-    previousLengthRef.current = candles.length;
+    lastTimeRef.current = linkedCandles.at(-1)!.t;
+    previousLengthRef.current = linkedCandles.length;
   }, [candles]);
-
-  if (candles.length === 0) return <div className="chart-state">暂无成交 K 线</div>;
 
   return (
     <figure className="chart" aria-label={`${symbol} K 线图`}>
       <div ref={containerRef} className="chart-canvas" data-testid="tradingview-chart" data-history-loading={historyLoading ? 'true' : 'false'} />
+      {candles.length === 0 && <div className="chart-empty">暂无成交 K 线</div>}
       {(historyLoading || refreshing) && <div className="history-loading">{historyLoading ? '正在加载更早行情' : '正在更新行情'}</div>}
       <figcaption>
         <span>拖动查看历史</span>

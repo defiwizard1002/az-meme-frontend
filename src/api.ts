@@ -1,4 +1,4 @@
-import type { AccountSummary, Asset, CandleSnapshot, Interval, Quote, Token } from './types';
+import type { AccountSummary, Asset, CandleSnapshot, Interval, Order, Quote, Token } from './types';
 
 interface Envelope<T> {
   rc: number;
@@ -7,9 +7,16 @@ interface Envelope<T> {
   result: T;
 }
 
-const apiBaseUrl = (import.meta.env.VITE_MEME_API_BASE_URL as string | undefined) ?? 'http://127.0.0.1:3000';
-const azApiBaseUrl = (import.meta.env.VITE_AZ_API_BASE_URL as string | undefined) ?? 'http://127.0.0.1:4100';
+const apiBaseUrl = import.meta.env.VITE_MEME_API_BASE_URL as string | undefined;
+const azApiBaseUrl = import.meta.env.VITE_AZ_API_BASE_URL as string | undefined;
+if (!apiBaseUrl || !azApiBaseUrl) throw new Error('VITE_MEME_API_BASE_URL and VITE_AZ_API_BASE_URL are required');
 let sessionToken: string | null = null;
+
+export class ApiError extends Error {
+  constructor(readonly code: string, message: string, readonly status: number) {
+    super(message);
+  }
+}
 
 export function setSessionToken(token: string | null): void {
   sessionToken = token;
@@ -25,7 +32,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   const payload = await response.json() as Envelope<T>;
   if (!response.ok || payload.rc !== 0) {
-    throw new Error(payload.ma?.[0] ?? payload.mc ?? `HTTP ${response.status}`);
+    throw new ApiError(payload.mc ?? 'MEME_REQUEST_FAILED', payload.ma?.[0] ?? '请求失败', response.status);
   }
   return payload.result;
 }
@@ -37,7 +44,7 @@ async function requestAz<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${azApiBaseUrl}${path}`, { ...init, headers });
   const payload = await response.json() as Envelope<T>;
   if (!response.ok || payload.rc !== 0) {
-    throw new Error(payload.ma?.[0] ?? payload.mc ?? `HTTP ${response.status}`);
+    throw new ApiError(payload.mc ?? 'AZ_REQUEST_FAILED', payload.ma?.[0] ?? '请求失败', response.status);
   }
   return payload.result;
 }
@@ -76,19 +83,21 @@ export const memeApi = {
   getMarkets: (tab: 'hot' | 'new' = 'hot') => request<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?tab=${tab}&limit=50`),
   searchMarkets: (query: string) => request<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?query=${encodeURIComponent(query)}&limit=50`),
   getToken: (tokenAddress: string) => request<Token>(`/sapi/v1/meme/tokens/${tokenAddress}`),
-  getCandles: (tokenAddress: string, interval: Interval, options?: { to?: number; limit?: number }) => {
+  getCandles: (tokenAddress: string, interval: Interval, options?: { to?: number; limit?: number; marketKey?: string }) => {
     const query = new URLSearchParams({ interval, limit: String(options?.limit ?? 120) });
     if (options?.to !== undefined) query.set('to', String(options.to));
+    if (options?.marketKey) query.set('marketKey', options.marketKey);
     return request<CandleSnapshot>(`/sapi/v1/meme/tokens/${tokenAddress}/candles?${query.toString()}`);
   },
   getAccount: () => request<AccountSummary>('/sapi/v1/meme/account/summary'),
   createQuote: (input: { side: 'BUY' | 'SELL'; tokenAddress: string; settlementAsset: Asset; amountIn: string; slippageBps: number }) =>
     request<Quote>('/sapi/v1/meme/quotes', { method: 'POST', body: JSON.stringify(input) }),
   createOrder: (input: { clientOrderId: string; quoteId: string; maxAmountIn: string; minAmountOut: string }) =>
-    request<{ orderId: string; status: string; fundStatus: string }>('/sapi/v1/meme/orders', { method: 'POST', body: JSON.stringify(input) }),
-  getOrder: (orderId: string) => request<{ orderId: string; status: string; fundStatus: string }>(`/sapi/v1/meme/orders/${orderId}`),
+    request<Order>('/sapi/v1/meme/orders', { method: 'POST', body: JSON.stringify(input) }),
+  getOrders: () => request<{ items: Order[]; nextCursor: string | null }>('/sapi/v1/meme/orders'),
+  getOrder: (orderId: string) => request<Order>(`/sapi/v1/meme/orders/${orderId}`),
   getWsTicket: () => request<{ ticket: string; expiresAt: number }>('/sapi/v1/meme/ws-ticket', { method: 'POST' }),
 };
 
-export const wsBaseUrl = (import.meta.env.VITE_MEME_WS_URL as string | undefined)
-  ?? 'ws://127.0.0.1:3000/sapi/v1/meme/stream';
+export const wsBaseUrl = import.meta.env.VITE_MEME_WS_URL as string | undefined;
+if (!wsBaseUrl) throw new Error('VITE_MEME_WS_URL is required');

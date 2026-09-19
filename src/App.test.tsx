@@ -87,6 +87,7 @@ describe('App', () => {
         positions: [{ tokenAddress: token.tokenAddress, symbol: 'CASHCAT', available: '0', costUsd: '100', valueUsd: '141' }],
         });
       }
+      if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
       if (url.endsWith('/sapi/v4/fund/balance/transfer')) {
         expect(new Headers(init?.headers).get('authorization')).toBe('Bearer mock-az-session-token');
         expect(JSON.parse(String(init?.body))).toMatchObject({ from: 'SPOT', to: 'MEME', currency: 'ETH', amount: '0.1' });
@@ -180,6 +181,7 @@ describe('App', () => {
       if (url.includes('/markets')) return response({ items: [token], stale: false });
       if (url.endsWith(`/tokens/${token.tokenAddress}`)) return response(token);
       if (url.endsWith('/account/summary')) return response({ quoteBalances: [], positions: [] });
+      if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
       if (url.endsWith('/ws-ticket')) return response({ ticket: 'ticket', expiresAt: Date.now() + 30_000 });
       if (url.includes('/candles')) return response({
         chainId: 4663,
