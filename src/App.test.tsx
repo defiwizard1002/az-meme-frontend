@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 
@@ -69,7 +69,12 @@ describe('App', () => {
         expect(new Headers(init?.headers).get('authorization')).toBe('Bearer mock-az-session-token');
         return response({ userId: 'mock-user', accountId: 'mock-account', loginStatus: 'LOGGED_IN' });
       }
-      if (url.endsWith('/config')) return response({ chainId: 4663, chainName: 'Robinhood Chain', defaultSlippageBps: 300 });
+      if (url.endsWith('/config')) return response({
+        chainId: 4663,
+        chainName: 'Robinhood Chain',
+        explorerBaseUrl: 'https://robinhoodchain.blockscout.com',
+        defaultSlippageBps: 300,
+      });
       if (url.includes('/markets')) return response({
         items: [{ ...token, pool: { ...token.pool, poolType: 'UNSUPPORTED' }, tradeStatus: 'UNSUPPORTED_POOL_TYPE' }],
         stale: false,
@@ -141,9 +146,11 @@ describe('App', () => {
     const sent: string[] = [];
     class TestWebSocket {
       static readonly OPEN = 1;
+      static latest: TestWebSocket | null = null;
       readonly readyState = TestWebSocket.OPEN;
       private readonly listeners = new Map<string, Array<(event: Event) => void>>();
       constructor(_url: string) {
+        TestWebSocket.latest = this;
         queueMicrotask(() => this.emit('open', new Event('open')));
       }
       addEventListener(name: string, listener: (event: Event) => void): void {
@@ -151,6 +158,9 @@ describe('App', () => {
       }
       send(payload: string): void { sent.push(payload); }
       close(): void { this.emit('close', new Event('close')); }
+      receive(payload: unknown): void {
+        this.emit('message', { data: JSON.stringify(payload) } as MessageEvent);
+      }
       private emit(name: string, event: Event): void {
         for (const listener of this.listeners.get(name) ?? []) listener(event);
       }
@@ -161,7 +171,12 @@ describe('App', () => {
       if (url.endsWith('/uaapi/user/web3/get-nonce')) return response({ nonce: 'mock-nonce', message: 'AZ login message' });
       if (url.endsWith('/uaapi/user/web3/login')) return response({ accessToken: 'mock-az-session-token', expiresAt: Date.now() + 3600000 });
       if (url.endsWith('/uaapi/user/user/getDesensitizedUserInfo')) return response({ userId: 'mock-user', accountId: 'mock-account', loginStatus: 'LOGGED_IN' });
-      if (url.endsWith('/config')) return response({ chainId: 4663, chainName: 'Robinhood Chain', defaultSlippageBps: 300 });
+      if (url.endsWith('/config')) return response({
+        chainId: 4663,
+        chainName: 'Robinhood Chain',
+        explorerBaseUrl: 'https://robinhoodchain.blockscout.com',
+        defaultSlippageBps: 300,
+      });
       if (url.includes('/markets')) return response({ items: [token], stale: false });
       if (url.endsWith(`/tokens/${token.tokenAddress}`)) return response(token);
       if (url.endsWith('/account/summary')) return response({ quoteBalances: [], positions: [] });
@@ -185,5 +200,45 @@ describe('App', () => {
     })).toBe(true));
     expect(screen.getByText('正在加载行情')).toBeInTheDocument();
     expect(screen.queryByLabelText('CASHCAT K 线图')).not.toBeInTheDocument();
+
+    const subscription = sent
+      .map((payload) => JSON.parse(payload) as { channels?: string[] })
+      .find((message) => message.channels?.some((channel) => channel.startsWith('trade:')));
+    const tradeChannel = subscription?.channels?.find((channel) => channel.startsWith('trade:'));
+    expect(tradeChannel).toBeDefined();
+    expect(TestWebSocket.latest).not.toBeNull();
+
+    act(() => {
+      for (let sequence = 1; sequence <= 7; sequence += 1) {
+        const suffix = sequence.toString(16).padStart(64, '0');
+        TestWebSocket.latest?.receive({
+          channel: tradeChannel,
+          epoch: 'epoch-1',
+          sequence,
+          data: {
+            tradeId: `trade-${sequence}`,
+            t: 1_700_000_000 + sequence,
+            side: sequence % 2 === 0 ? 'SELL' : 'BUY',
+            priceUsd: `0.0${sequence}`,
+            baseAmount: String(sequence),
+            quoteAmount: '0.1',
+            quoteAsset: 'ETH',
+            trader: `0x${String(sequence).padStart(40, '0')}`,
+            txHash: `0x${suffix}`,
+          },
+        });
+      }
+    });
+
+    expect(await screen.findByText('7 笔 · 1/2')).toBeInTheDocument();
+    const newestTxLink = screen.getAllByRole('link', { name: /查看交易/ })[0];
+    expect(newestTxLink).toHaveAttribute('href', `https://robinhoodchain.blockscout.com/tx/0x${'7'.padStart(64, '0')}`);
+    fireEvent.click(screen.getByRole('button', { name: '下一页成交' }));
+    expect(screen.getByText('7 笔 · 2/2')).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: /查看交易/ })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: '1s' }));
+    expect(screen.getByText('7 笔 · 2/2')).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: /查看交易/ })).toHaveLength(1);
   });
 });

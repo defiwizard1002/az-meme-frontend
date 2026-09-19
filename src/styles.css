@@ -131,11 +131,17 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .trade-tape { min-height: 172px; background: #0a090f; }
 .trade-tape header { height: 42px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom: 1px solid var(--line); }
 .trade-tape header strong { font-size: 12px; }
-.trade-tape header span { color: var(--subtle); font-size: 9px; }
-.trade-head, .trade-row { display: grid; grid-template-columns: 1.35fr .75fr .8fr .55fr; gap: 12px; align-items: center; }
+.trade-pagination { display: flex; align-items: center; gap: 5px; }
+.trade-pagination span { min-width: 70px; color: var(--subtle); font-size: 9px; text-align: right; }
+.trade-pagination button { width: 22px; height: 22px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: #111018; color: var(--muted); cursor: pointer; }
+.trade-pagination button:hover:not(:disabled) { border-color: var(--line-strong); color: var(--text); }
+.trade-pagination button:disabled { cursor: default; opacity: .35; }
+.trade-head, .trade-row { display: grid; grid-template-columns: 1.3fr .75fr .75fr .8fr .55fr; gap: 10px; align-items: center; }
 .trade-head { height: 28px; padding: 0 14px; color: var(--subtle); font-size: 9px; }
 .trade-row { height: 29px; padding: 0 14px; border-top: 1px solid #15131b; color: #a7a2ae; font: 10px ui-monospace, monospace; }
 .trade-row span:not(:first-child), .trade-head span:not(:first-child) { text-align: right; }
+.trade-tx { color: #8fded8; text-decoration: none; white-space: nowrap; }
+.trade-tx:hover { color: var(--accent); text-decoration: underline; }
 .trade-empty { padding: 30px 14px; color: var(--subtle); font-size: 11px; text-align: center; }
 
 .side-tabs { height: 52px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 9px 12px; border-bottom: 1px solid var(--line); }
@@ -246,8 +252,8 @@ button:active:not(:disabled) { transform: translateY(1px); }
   .market-stats { margin-top: 12px; overflow-x: auto; }
   .market-stats > div { min-width: 82px; }
   .chart-canvas { height: 350px; }
-  .trade-head, .trade-row { grid-template-columns: 1.3fr .8fr .7fr; }
-  .trade-head span:nth-child(3), .trade-row span:nth-child(3) { display: none; }
+  .trade-head, .trade-row { grid-template-columns: 1.3fr .8fr .8fr; }
+  .trade-head span:nth-child(3), .trade-row span:nth-child(3), .trade-head span:nth-child(5), .trade-row span:nth-child(5) { display: none; }
   .trade-panel { display: block; border-left: 0; }
   .side-tabs, .trade-form, .token-about, .positions { display: revert; border-left: 0; }
 }

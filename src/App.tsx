@@ -7,6 +7,7 @@ import './styles.css';
 const intervals: Interval[] = ['1s', '1m', '15m', '1h', '4h'];
 const ethPresets = ['0.05', '0.1', '0.25', '0.5'];
 const stablePresets = ['25', '100', '250', '500'];
+const tradesPerPage = 6;
 
 function compact(value: string | number): string {
   return Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(Number(value));
@@ -82,6 +83,15 @@ function candleCacheKey(tokenAddress: string, interval: Interval): string {
   return `${tokenAddress.toLowerCase()}:${interval}`;
 }
 
+function tradeCacheKey(tokenAddress: string, marketKey: string): string {
+  return `${tokenAddress.toLowerCase()}:${marketKey}`;
+}
+
+function transactionUrl(explorerBaseUrl: string, txHash: string): string | null {
+  if (!explorerBaseUrl || !/^0x[a-fA-F0-9]{64}$/.test(txHash)) return null;
+  return `${explorerBaseUrl.replace(/\/+$/, '')}/tx/${txHash}`;
+}
+
 function mergeSnapshots(previous: CandleSnapshot | null, next: CandleSnapshot): CandleSnapshot {
   if (!previous
     || previous.tokenAddress.toLowerCase() !== next.tokenAddress.toLowerCase()
@@ -101,6 +111,7 @@ export default function App() {
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [snapshot, setSnapshot] = useState<CandleSnapshot | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
+  const [tradePage, setTradePage] = useState(0);
   const [interval, setIntervalValue] = useState<Interval>('1m');
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
   const [asset, setAsset] = useState<Asset>('ETH');
@@ -112,6 +123,7 @@ export default function App() {
   const [chartLoading, setChartLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chainName, setChainName] = useState('Robinhood Chain');
+  const [explorerBaseUrl, setExplorerBaseUrl] = useState('');
   const [slippageBps, setSlippageBps] = useState(300);
   const [search, setSearch] = useState('');
   const [searchResults, setSearchResults] = useState<Token[] | null>(null);
@@ -124,6 +136,8 @@ export default function App() {
   const [transferAmount, setTransferAmount] = useState('0.1');
   const [transferState, setTransferState] = useState<string | null>(null);
   const candleCacheRef = useRef(new Map<string, CandleSnapshot>());
+  const tradeCacheRef = useRef(new Map<string, Trade[]>());
+  const tradeMarketKeyRef = useRef(new Map<string, string>());
   const streamSocketRef = useRef<WebSocket | null>(null);
   const marketChannelsRef = useRef<string[]>([]);
   const activeSnapshot = selected
@@ -131,11 +145,21 @@ export default function App() {
         ? snapshot
         : candleCacheRef.current.get(candleCacheKey(selected.tokenAddress, interval)) ?? null)
     : null;
+  const activeTradeKey = selected
+    ? (() => {
+        const tokenAddress = selected.tokenAddress.toLowerCase();
+        const marketKey = activeSnapshot?.marketKey ?? tradeMarketKeyRef.current.get(tokenAddress);
+        return marketKey ? tradeCacheKey(tokenAddress, marketKey) : null;
+      })()
+    : null;
 
   const setCachedSnapshot = useCallback((update: CandleSnapshot | null | ((current: CandleSnapshot | null) => CandleSnapshot | null)) => {
     setSnapshot((current) => {
       const next = typeof update === 'function' ? update(current) : update;
-      if (next) candleCacheRef.current.set(candleCacheKey(next.tokenAddress, next.interval), next);
+      if (next) {
+        candleCacheRef.current.set(candleCacheKey(next.tokenAddress, next.interval), next);
+        tradeMarketKeyRef.current.set(next.tokenAddress.toLowerCase(), next.marketKey);
+      }
       return next;
     });
   }, []);
@@ -172,6 +196,7 @@ export default function App() {
         const selectedToken = first ? await memeApi.getToken(first.tokenAddress) : null;
         if (!active) return;
         setChainName(config.chainName);
+        setExplorerBaseUrl(config.explorerBaseUrl);
         setSlippageBps(config.defaultSlippageBps);
         setTokens(markets.items.map((item) => item.tokenAddress === selectedToken?.tokenAddress ? selectedToken : item));
         setSelected(selectedToken);
@@ -180,6 +205,11 @@ export default function App() {
       .finally(() => active && setLoading(false));
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    setTradePage(0);
+    setTrades(activeTradeKey ? tradeCacheRef.current.get(activeTradeKey) ?? [] : []);
+  }, [activeTradeKey]);
 
   useEffect(() => {
     let active = true;
@@ -227,7 +257,6 @@ export default function App() {
     const cached = candleCacheRef.current.get(cacheKey) ?? null;
     setChartLoading(true);
     setSnapshot(cached ? { ...cached, status: 'CATCHING_UP' } : null);
-    setTrades([]);
     setQuote(null);
     setOrderState(null);
 
@@ -270,6 +299,7 @@ export default function App() {
     const streamState = new Map<string, { epoch: string; sequence: number }>();
     const candleChannel = `candle:${selected.tokenAddress}:${activeSnapshot.marketKey}:${interval}`;
     const tradeChannel = `trade:${selected.tokenAddress}:${activeSnapshot.marketKey}`;
+    const currentTradeCacheKey = tradeCacheKey(selected.tokenAddress, activeSnapshot.marketKey);
     const marketChannel = `market:${selected.tokenAddress.toLowerCase()}`;
     const channels = [candleChannel, tradeChannel, marketChannel];
     marketChannelsRef.current = channels;
@@ -308,8 +338,8 @@ export default function App() {
               for (const key of candleCacheRef.current.keys()) {
                 if (key.startsWith(tokenPrefix)) candleCacheRef.current.delete(key);
               }
+              tradeMarketKeyRef.current.delete(selected.tokenAddress.toLowerCase());
               setSnapshot(null);
-              setTrades([]);
               setSelected(refreshedToken);
               return;
             }
@@ -343,7 +373,10 @@ export default function App() {
             }
             if (message.channel === tradeChannel) {
               const trade = message.data as Trade;
-              setTrades((current) => [trade, ...current.filter((item) => item.tradeId !== trade.tradeId)].slice(0, 12));
+              const current = tradeCacheRef.current.get(currentTradeCacheKey) ?? [];
+              const next = [trade, ...current.filter((item) => item.tradeId !== trade.tradeId)];
+              tradeCacheRef.current.set(currentTradeCacheKey, next);
+              setTrades(next);
             }
           } catch {
             setError('实时行情暂时不可用，正在重连');
@@ -387,6 +420,8 @@ export default function App() {
     ? account?.quoteBalances.find((item) => item.asset === asset)?.available ?? '0'
     : selectedPosition?.available ?? '0';
   const displayedPrice = activeSnapshot?.items.at(-1)?.c ?? selected?.priceUsd ?? '0';
+  const tradePageCount = Math.max(1, Math.ceil(trades.length / tradesPerPage));
+  const visibleTrades = trades.slice(tradePage * tradesPerPage, (tradePage + 1) * tradesPerPage);
   const totalPosition = useMemo(() => account?.positions.reduce((sum, item) => sum + Number(item.valueUsd), 0) ?? 0, [account]);
   const balanceLabel = account?.quoteBalances
     .filter((item) => item.asset === 'ETH' || item.asset === 'USDC')
@@ -607,18 +642,31 @@ export default function App() {
               ? <CandleChart key={`${selected.tokenAddress}:${interval}`} candles={activeSnapshot.items} symbol={selected.symbol} refreshing={chartLoading} onLoadBefore={loadOlderCandles} />
               : <div className="chart-state">正在加载行情</div>}
             <section className="trade-tape" aria-label="实时成交">
-              <header><strong>实时成交</strong><span>最新成交</span></header>
-              <div className="trade-head"><span>方向 / 数量</span><span>成交价</span><span>交易者</span><span>时间</span></div>
+              <header>
+                <strong>实时成交</strong>
+                <div className="trade-pagination">
+                  <span>{trades.length > 0 ? `${trades.length} 笔 · ${tradePage + 1}/${tradePageCount}` : '最新成交'}</span>
+                  <button type="button" aria-label="上一页成交" disabled={tradePage === 0} onClick={() => setTradePage((page) => Math.max(0, page - 1))}>‹</button>
+                  <button type="button" aria-label="下一页成交" disabled={tradePage + 1 >= tradePageCount} onClick={() => setTradePage((page) => Math.min(tradePageCount - 1, page + 1))}>›</button>
+                </div>
+              </header>
+              <div className="trade-head"><span>方向 / 数量</span><span>成交价</span><span>交易者</span><span>Tx</span><span>时间</span></div>
               <div className="trade-rows">
                 {trades.length === 0 && <div className="trade-empty">等待最新成交</div>}
-                {trades.slice(0, 6).map((trade) => (
-                  <div className="trade-row" key={trade.tradeId}>
-                    <span className={trade.side === 'BUY' ? 'positive' : 'negative'}>{trade.side === 'BUY' ? '买' : '卖'} {compact(trade.baseAmount)} {selected.symbol}</span>
-                    <span data-testid="trade-price">{money(trade.priceUsd)}</span>
-                    <span>{shortAddress(trade.trader)}</span>
-                    <span>{new Date(trade.t * 1000).toLocaleTimeString('zh-CN', { hour12: false })}</span>
-                  </div>
-                ))}
+                {visibleTrades.map((trade) => {
+                  const txUrl = transactionUrl(explorerBaseUrl, trade.txHash);
+                  return (
+                    <div className="trade-row" key={trade.tradeId}>
+                      <span className={trade.side === 'BUY' ? 'positive' : 'negative'}>{trade.side === 'BUY' ? '买' : '卖'} {compact(trade.baseAmount)} {selected.symbol}</span>
+                      <span data-testid="trade-price">{money(trade.priceUsd)}</span>
+                      <span>{shortAddress(trade.trader)}</span>
+                      <span>{txUrl
+                        ? <a className="trade-tx" href={txUrl} target="_blank" rel="noreferrer" aria-label={`查看交易 ${shortAddress(trade.txHash)}`}>{shortAddress(trade.txHash)} ↗</a>
+                        : shortAddress(trade.txHash)}</span>
+                      <span>{new Date(trade.t * 1000).toLocaleTimeString('zh-CN', { hour12: false })}</span>
+                    </div>
+                  );
+                })}
               </div>
             </section>
           </> : <div className="empty">请选择代币</div>}
