@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, azAuth, azFundApi, memeApi, setSessionToken, wsBaseUrl } from './api';
 import { CandleChart } from './CandleChart';
+import { pollOrderUntilTerminal } from './order-tracker';
 import type { AccountSummary, Asset, Candle, CandleSnapshot, Interval, Quote, Token, Trade } from './types';
 import './styles.css';
 
@@ -165,10 +166,14 @@ export default function App() {
   const tradeCacheRef = useRef(new Map<string, Trade[]>());
   const tradeMarketKeyRef = useRef(new Map<string, string>());
   const orderIdempotencyRef = useRef(new Map<string, string>());
+  const orderPollsRef = useRef(new Map<string, { controller: AbortController; promise: Promise<void> }>());
   const streamSocketRef = useRef<WebSocket | null>(null);
   const marketChannelsRef = useRef<string[]>([]);
+  const selectedMarketKey = selected ? `${selected.pool.poolKey}:${selected.quoteAssetKey}` : null;
   const activeSnapshot = selected
-    ? (snapshot?.tokenAddress.toLowerCase() === selected.tokenAddress.toLowerCase() && snapshot.interval === interval
+    ? (snapshot?.tokenAddress.toLowerCase() === selected.tokenAddress.toLowerCase()
+        && snapshot.marketKey === selectedMarketKey
+        && snapshot.interval === interval
         ? snapshot
         : null)
     : null;
@@ -205,22 +210,38 @@ export default function App() {
   quoteRequestRef.current = quoteRequest;
 
   const trackOrder = useCallback(async (orderId: string) => {
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      const latest = await memeApi.getOrder(orderId);
-      if (latest.status === 'SETTLED') {
-        setOrderState('交易成功');
-        window.setTimeout(() => setOrderState(null), 1200);
-        return;
-      }
-      if (latest.status.startsWith('FAILED')) {
-        setOrderState('交易失败');
-        window.setTimeout(() => setOrderState(null), 1200);
-        return;
-      }
-      setOrderState(latest.status === 'SUBMISSION_UNKNOWN' || latest.status === 'MANUAL_REVIEW' ? '确认中' : '处理中');
-      await new Promise((resolvePromise) => window.setTimeout(resolvePromise, 250));
-    }
-    setOrderState('确认中');
+    const existing = orderPollsRef.current.get(orderId);
+    if (existing) return await existing.promise;
+    const controller = new AbortController();
+    const promise = pollOrderUntilTerminal(orderId, {
+      signal: controller.signal,
+      loadOrder: memeApi.getOrder,
+      onUpdate: (latest) => {
+        if (latest.status === 'SETTLED') {
+          setOrderState('交易成功');
+          window.setTimeout(() => setOrderState(null), 1200);
+        } else if (latest.status === 'FAILED_FINAL' && latest.fundStatus === 'RELEASED') {
+          setOrderState('交易失败，资金已释放');
+          window.setTimeout(() => setOrderState(null), 1200);
+        } else if (latest.status === 'MANUAL_REVIEW') {
+          setOrderState('处理中，请联系客服');
+        } else if (latest.status === 'SUBMISSION_UNKNOWN') {
+          setOrderState('链上结果确认中');
+        } else if (latest.status === 'FAILED_FINAL') {
+          setOrderState('资金释放中');
+        } else {
+          setOrderState('处理中');
+        }
+      },
+      onTemporaryError: () => setOrderState('状态同步中'),
+    }).then(() => undefined).finally(() => orderPollsRef.current.delete(orderId));
+    orderPollsRef.current.set(orderId, { controller, promise });
+    return await promise;
+  }, []);
+
+  useEffect(() => () => {
+    for (const { controller } of orderPollsRef.current.values()) controller.abort();
+    orderPollsRef.current.clear();
   }, []);
 
   const selectToken = useCallback(async (summary: Token) => {
@@ -289,10 +310,13 @@ export default function App() {
         void memeApi.getOrders()
           .then(({ items }) => {
             if (!active) return;
-            const pending = items.find((order) => !order.status.startsWith('FAILED') && order.status !== 'SETTLED');
-            if (pending) void trackOrder(pending.orderId).catch((cause: unknown) => {
-              if (active) setError(friendlyError(cause, '订单状态恢复失败'));
-            });
+            const pending = items.filter((order) => order.status !== 'SETTLED'
+              && !(order.status === 'FAILED_FINAL' && order.fundStatus === 'RELEASED'));
+            for (const order of pending) {
+              void trackOrder(order.orderId).catch((cause: unknown) => {
+                if (active) setError(friendlyError(cause, '订单状态恢复失败'));
+              });
+            }
           })
           .catch((cause: unknown) => {
             if (active) setError(friendlyError(cause, '订单状态恢复失败'));
@@ -458,8 +482,16 @@ export default function App() {
         socket.addEventListener('close', () => {
           scheduleReconnect();
         });
-      } catch {
+      } catch (cause) {
         if (!disposed) {
+          if (cause instanceof ApiError && (cause.status === 401 || cause.code === 'MEME_UNAUTHORIZED')) {
+            setSessionToken(null);
+            setSessionReady(false);
+            setAccount(null);
+            setQuote(null);
+            setError('登录已失效，请重新登录');
+            return;
+          }
           setError('实时行情暂时不可用，历史行情仍可查看');
           scheduleReconnect();
         }
@@ -598,7 +630,10 @@ export default function App() {
         minAmountOut: quote.minAmountOut,
       });
       setOrderState('处理中');
-      await trackOrder(order.orderId);
+      void trackOrder(order.orderId).catch((cause: unknown) => {
+        setOrderState(null);
+        setError(friendlyError(cause, '订单状态同步失败'));
+      });
     } catch (cause) {
       setOrderState(null);
       setError(friendlyError(cause, '下单失败'));
