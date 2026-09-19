@@ -8,7 +8,7 @@ import './styles.css';
 const intervals: Interval[] = ['1s', '1m', '15m', '1h', '4h'];
 const ethPresets = ['0.05', '0.1', '0.25', '0.5'];
 const stablePresets = ['25', '100', '250', '500'];
-const tradesPerPage = 6;
+const tradesPerPage = 12;
 
 function compact(value: string | number): string {
   return Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(Number(value));
@@ -148,6 +148,8 @@ export default function App() {
   const [orderState, setOrderState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(false);
+  const [marketError, setMarketError] = useState<string | null>(null);
+  const [marketRetry, setMarketRetry] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [chainName, setChainName] = useState('Robinhood Chain');
   const [explorerBaseUrl, setExplorerBaseUrl] = useState('');
@@ -245,6 +247,8 @@ export default function App() {
   }, []);
 
   const selectToken = useCallback(async (summary: Token) => {
+    setError(null);
+    setMarketError(null);
     try {
       const detail = await memeApi.getToken(summary.tokenAddress);
       setTokens((current) => current.map((item) => item.tokenAddress === detail.tokenAddress ? detail : item));
@@ -333,11 +337,12 @@ export default function App() {
     if (!selected) return;
     let active = true;
     let pollTimer: number | undefined;
-    let attempts = 0;
+    let consecutiveFailures = 0;
     const cacheKey = candleCacheKey(selected.tokenAddress, interval);
     const requestedMarketKey = selected.pool.poolKey + ':' + selected.quoteAssetKey;
     const cached = candleCacheRef.current.get(cacheKey) ?? null;
     setChartLoading(true);
+    setMarketError(null);
     setSnapshot(cached ? { ...cached, status: 'CATCHING_UP' } : null);
     setQuote(null);
     setOrderState(null);
@@ -346,24 +351,29 @@ export default function App() {
       try {
         const result = await memeApi.getCandles(selected.tokenAddress, interval, { marketKey: requestedMarketKey });
         if (!active) return;
+        consecutiveFailures = 0;
         const merged = mergeSnapshots(candleCacheRef.current.get(cacheKey) ?? null, result);
         setCachedSnapshot(merged);
         if (result.status === 'READY') {
           setChartLoading(false);
+          setMarketError(null);
           return;
         }
         if (result.status === 'STALE') {
           setChartLoading(false);
-          setError('历史 K 线回补失败，未启动实时扫描');
+          setMarketError('行情暂时不可用');
           return;
         }
-        attempts += 1;
-        if (attempts >= 40) throw new Error('K 线回补超时');
-        pollTimer = window.setTimeout(() => void loadCandles(), 250);
+        pollTimer = window.setTimeout(() => void loadCandles(), 500);
       } catch (cause) {
         if (!active) return;
+        consecutiveFailures += 1;
+        if (consecutiveFailures < 3) {
+          pollTimer = window.setTimeout(() => void loadCandles(), consecutiveFailures * 1_000);
+          return;
+        }
         setChartLoading(false);
-        setError(friendlyError(cause, 'K 线加载失败'));
+        setMarketError(friendlyError(cause, '行情暂时不可用'));
       }
     };
     void loadCandles();
@@ -371,7 +381,7 @@ export default function App() {
       active = false;
       if (pollTimer !== undefined) window.clearTimeout(pollTimer);
     };
-  }, [selected, interval, setCachedSnapshot]);
+  }, [selected, interval, marketRetry, setCachedSnapshot]);
 
   useEffect(() => {
     if (!selected || !activeSnapshot || activeSnapshot.status === 'STALE' || typeof WebSocket === 'undefined') return;
@@ -753,7 +763,9 @@ export default function App() {
             </div>
             {activeSnapshot?.status === 'READY'
               ? <CandleChart key={`${selected.tokenAddress}:${activeSnapshot.marketKey}:${interval}`} candles={activeSnapshot.items} symbol={selected.symbol} refreshing={chartLoading} onLoadBefore={loadOlderCandles} />
-              : <div className="chart-state">正在加载行情</div>}
+              : <div className="chart-state">{marketError
+                  ? <div className="market-retry"><span>{marketError}</span><button type="button" onClick={() => setMarketRetry((value) => value + 1)}>重试</button></div>
+                  : '正在加载行情'}</div>}
             <section className="trade-tape" aria-label="实时成交">
               <header>
                 <strong>实时成交</strong>
@@ -836,24 +848,13 @@ export default function App() {
             <button type="button" className="primary" disabled={!sessionReady || !selected || !quoteRequest || !quote || Boolean(orderState) || (side === 'SELL' && Number(currentBalance) <= 0)} onClick={submitOrder}>
               {!sessionReady ? '等待登录' : orderState ?? (side === 'BUY' ? '买入' : '卖出')}
             </button>
-            <p>下单无需再次签名</p>
           </div>
-
-          {selected && <section className="token-about">
-            <header><strong>关于 {selected.symbol}</strong><span>{shortAddress(selected.tokenAddress)}</span></header>
-            <div className="about-badges"><span className={selected.stage === 'GRADUATED' ? 'badge graduated' : 'badge curve'}>{stageLabel(selected)}</span><span className="badge launchpad">来自 {selected.launchpad}</span><span className="badge pool">{poolLabel(selected.pool.poolType)}</span></div>
-            <dl>
-              <div><dt>流动性</dt><dd>{money(selected.pool.liquidityUsd)}</dd></div>
-              <div><dt>5m 涨跌</dt><dd className={Number(selected.change5m) >= 0 ? 'positive' : 'negative'}>{Number(selected.change5m) > 0 ? '+' : ''}{selected.change5m}%</dd></div>
-              <div><dt>交易状态</dt><dd>{selected.tradeStatus === 'TRADABLE' ? '可交易' : '暂不支持'}</dd></div>
-            </dl>
-          </section>}
 
           <div className="positions">
             <div className="positions-head"><strong>我的持仓</strong><span className="positive">{money(totalPosition)}</span></div>
             {account?.positions.map((position) => {
               const cost = Number(position.costUsd);
-              const pnl = cost > 0 ? `${((Number(position.valueUsd) / cost - 1) * 100).toFixed(0)}%` : '—';
+              const pnl = cost > 0 ? `${((Number(position.valueUsd) / cost - 1) * 100).toFixed(0)}%` : '-';
               return <div className="position" key={position.tokenAddress}><span><b>{position.symbol}</b><small>{compact(position.available)} 枚</small></span><span className={cost > 0 && Number(position.valueUsd) >= cost ? 'positive' : 'negative'}>{pnl}</span><button type="button" onClick={() => { setSelected(tokens.find((token) => token.tokenAddress.toLowerCase() === position.tokenAddress.toLowerCase()) ?? null); selectSide('SELL'); }}>卖</button></div>;
             })}
           </div>

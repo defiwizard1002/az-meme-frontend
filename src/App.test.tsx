@@ -116,6 +116,10 @@ describe('App', () => {
     expect(screen.getAllByText('UNISWAP V4').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: '买入 CASHCAT' })).toBeEnabled();
     expect(screen.queryByText('预览交易')).not.toBeInTheDocument();
+    expect(screen.queryByText('下单无需再次签名')).not.toBeInTheDocument();
+    expect(screen.queryByText('拖动查看历史')).not.toBeInTheDocument();
+    expect(screen.queryByText('Charts by TradingView')).not.toBeInTheDocument();
+    expect(screen.queryByText('关于 CASHCAT')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '打开账户划转' }));
     expect(screen.getByRole('dialog', { name: 'Meme Account 划转' })).toBeInTheDocument();
@@ -211,7 +215,7 @@ describe('App', () => {
     expect(TestWebSocket.latest).not.toBeNull();
 
     act(() => {
-      for (let sequence = 1; sequence <= 7; sequence += 1) {
+      for (let sequence = 1; sequence <= 13; sequence += 1) {
         const suffix = sequence.toString(16).padStart(64, '0');
         TestWebSocket.latest?.receive({
           channel: tradeChannel,
@@ -232,15 +236,15 @@ describe('App', () => {
       }
     });
 
-    expect(await screen.findByText('7 笔 · 1/2')).toBeInTheDocument();
+    expect(await screen.findByText('13 笔 · 1/2')).toBeInTheDocument();
     const newestTxLink = screen.getAllByRole('link', { name: /查看交易/ })[0];
-    expect(newestTxLink).toHaveAttribute('href', `https://robinhoodchain.blockscout.com/tx/0x${'7'.padStart(64, '0')}`);
+    expect(newestTxLink).toHaveAttribute('href', `https://robinhoodchain.blockscout.com/tx/0x${'d'.padStart(64, '0')}`);
     fireEvent.click(screen.getByRole('button', { name: '下一页成交' }));
-    expect(screen.getByText('7 笔 · 2/2')).toBeInTheDocument();
+    expect(screen.getByText('13 笔 · 2/2')).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: /查看交易/ })).toHaveLength(1);
 
     fireEvent.click(screen.getByRole('button', { name: '1s' }));
-    expect(screen.getByText('7 笔 · 2/2')).toBeInTheDocument();
+    expect(screen.getByText('13 笔 · 2/2')).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: /查看交易/ })).toHaveLength(1);
   });
 });

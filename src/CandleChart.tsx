@@ -236,10 +236,6 @@ export function CandleChart({ candles, symbol, refreshing = false, onLoadBefore 
       <div ref={containerRef} className="chart-canvas" data-testid="tradingview-chart" data-history-loading={historyLoading ? 'true' : 'false'} />
       {candles.length === 0 && <div className="chart-empty">暂无成交 K 线</div>}
       {(historyLoading || refreshing) && <div className="history-loading">{historyLoading ? '正在加载更早行情' : '正在更新行情'}</div>}
-      <figcaption>
-        <span>拖动查看历史</span>
-        <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">Charts by TradingView</a>
-      </figcaption>
     </figure>
   );
 }
