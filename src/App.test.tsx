@@ -213,7 +213,7 @@ describe('App', () => {
     expect(screen.queryByText('代币详情加载失败')).not.toBeInTheDocument();
   });
 
-  it('subscribes while catching up but keeps the chart hidden until READY', async () => {
+  it('shows persisted candles while realtime scanning catches up', async () => {
     const sent: string[] = [];
     const marketToken = {
       ...token,
@@ -297,8 +297,7 @@ describe('App', () => {
       const message = JSON.parse(payload) as { op?: string; channels?: string[] };
       return message.op === 'subscribe' && message.channels?.some((channel) => channel.startsWith('candle:'));
     })).toBe(true));
-    expect(screen.getByText('正在加载行情')).toBeInTheDocument();
-    expect(screen.queryByLabelText('CASHCAT K 线图')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('CASHCAT K 线图')).toBeInTheDocument();
 
     const subscription = sent
       .map((payload) => JSON.parse(payload) as { channels?: string[] })

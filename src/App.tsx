@@ -896,7 +896,8 @@ export default function App() {
               </div>
               <span className={Number(selected.change24h) >= 0 ? 'positive' : 'negative'}>{formatPercent(selected.change24h)} / 24h</span>
             </div>
-            {activeSnapshot?.status === 'READY'
+            {activeSnapshot && (activeSnapshot.status === 'READY'
+              || (activeSnapshot.status === 'CATCHING_UP' && activeSnapshot.items.length > 0))
               ? <CandleChart key={`${selected.tokenAddress}:${activeSnapshot.marketKey}:${interval}`} candles={activeSnapshot.items} symbol={selected.symbol} refreshing={chartLoading} onLoadBefore={loadOlderCandles} />
               : <div className="chart-state">{marketError
                   ? <div className="market-retry"><span>{marketError}</span><button type="button" onClick={() => setMarketRetry((value) => value + 1)}>重试</button></div>
