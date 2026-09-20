@@ -169,6 +169,57 @@ describe('App', () => {
     expect(await screen.findByText('启动失败：mock provider unavailable')).toBeInTheDocument();
   });
 
+  it('uses the local main account without AZ login or transfer controls', async () => {
+    vi.stubGlobal('WebSocket', undefined);
+    let azRequests = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes('/az-auth/') || url.includes('/sapi/v4/fund/')) {
+        azRequests += 1;
+        throw new Error(`Unexpected AZ request ${url}`);
+      }
+      if (url.endsWith('/config')) return response({
+        chainId: 4663,
+        chainName: 'Robinhood Chain',
+        explorerBaseUrl: 'https://robinhoodchain.blockscout.com',
+        defaultSlippageBps: 300,
+        marketRefreshMs: { hot: 14_400_000, new: 300_000 },
+        accountMode: 'MAIN_ACCOUNT_POC',
+        mainAccountAddress: '0x9999999999999999999999999999999999999999',
+      });
+      if (url.includes('/markets')) return response({ items: [token], stale: false });
+      if (url.endsWith(`/tokens/${token.tokenAddress}`)) return response(token);
+      if (url.endsWith('/account/summary')) return response({
+        quoteBalances: [
+          { asset: 'USDG', available: '10', frozen: '0' },
+          { asset: 'ETH', available: '0.01', frozen: '0' },
+        ],
+        positions: [],
+      });
+      if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
+      if (url.includes('/trades?')) return response({ items: [], nextCursor: null });
+      if (url.includes('/candles')) return response({
+        chainId: 4663,
+        tokenAddress: token.tokenAddress,
+        marketKey: 'pool_cashcat:NATIVE',
+        interval: '1m',
+        status: 'READY',
+        source: 'BITQUERY+CHAIN',
+        items: [],
+      });
+      throw new Error(`Unexpected request ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText('10 USDG / 0.01 ETH')).toBeInTheDocument();
+    expect(screen.getByText('验证账户')).toBeInTheDocument();
+    expect(screen.getByLabelText('支付资产')).toHaveValue('USDG');
+    expect(screen.getByLabelText('买入金额')).toHaveValue('1');
+    expect(screen.queryByRole('button', { name: '打开账户划转' })).not.toBeInTheDocument();
+    expect(azRequests).toBe(0);
+  });
+
   it('switches to the requested token even when its detail request fails', async () => {
     vi.stubGlobal('WebSocket', undefined);
     const second = {

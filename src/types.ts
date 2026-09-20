@@ -1,5 +1,5 @@
 export type Interval = '1s' | '1m' | '15m' | '1h' | '4h';
-export type Asset = 'ETH' | 'USDC' | 'USDT';
+export type Asset = 'ETH' | 'USDC' | 'USDT' | 'USDG';
 
 export interface Token {
   chainId: number;
@@ -86,4 +86,10 @@ export interface Order {
   status: 'CREATED' | 'RESERVED' | 'SIGNED' | 'SUBMITTING' | 'SUBMITTED' | 'CONFIRMED' | 'SETTLED' | 'FAILED_FINAL' | 'SUBMISSION_UNKNOWN' | 'MANUAL_REVIEW';
   fundStatus: 'RESERVED' | 'SETTLED' | 'RELEASED';
   txHash?: string;
+}
+
+export interface TradePlan {
+  route: 'DIRECT' | 'USDG_BRIDGE';
+  selectedPool: { poolType: string; liquidityUsd: string; quoteTokenSymbol?: string };
+  simulation?: { status: 'SUCCESS'; bufferedGas: string; estimatedFeeWei: string };
 }

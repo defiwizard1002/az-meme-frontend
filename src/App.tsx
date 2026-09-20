@@ -9,6 +9,7 @@ import './styles.css';
 const intervals: Interval[] = ['1s', '1m', '15m', '1h', '4h'];
 const ethPresets = ['0.05', '0.1', '0.25', '0.5'];
 const stablePresets = ['25', '100', '250', '500'];
+const pocUsdgPresets = ['1', '2', '5', '10'];
 const candlePageSize = 300;
 
 function compact(value: string | number): string {
@@ -265,6 +266,7 @@ export default function App() {
   const [marketRefreshMs, setMarketRefreshMs] = useState({ hot: 14_400_000, new: 300_000 });
   const [marketLoading, setMarketLoading] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
+  const [accountMode, setAccountMode] = useState<'AZ_ACCOUNT' | 'MAIN_ACCOUNT_POC' | null>(null);
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferDirection, setTransferDirection] = useState<'SPOT_TO_MEME' | 'MEME_TO_SPOT'>('SPOT_TO_MEME');
   const [transferAsset, setTransferAsset] = useState<Asset>('ETH');
@@ -306,7 +308,7 @@ export default function App() {
   }, []);
 
   const quoteRequest = useMemo(() => {
-    if (!selectedTokenAddress || selectedTradeStatus !== 'TRADABLE'
+    if (!selectedTokenAddress || (selectedTradeStatus !== 'TRADABLE' && accountMode !== 'MAIN_ACCOUNT_POC')
       || !/^\d+(?:\.\d+)?$/.test(amount) || Number(amount) <= 0) return null;
     return {
       side,
@@ -315,7 +317,7 @@ export default function App() {
       amountIn: amount,
       slippageBps,
     } as const;
-  }, [amount, asset, selectedTokenAddress, selectedTradeStatus, side, slippageBps]);
+  }, [accountMode, amount, asset, selectedTokenAddress, selectedTradeStatus, side, slippageBps]);
   const quoteRequestRef = useRef(quoteRequest);
   quoteRequestRef.current = quoteRequest;
 
@@ -384,6 +386,13 @@ export default function App() {
         setExplorerBaseUrl(config.explorerBaseUrl);
         setSlippageBps(config.defaultSlippageBps);
         setMarketRefreshMs(config.marketRefreshMs ?? { hot: 14_400_000, new: 300_000 });
+        const nextAccountMode = config.accountMode ?? 'AZ_ACCOUNT';
+        setAccountMode(nextAccountMode);
+        if (nextAccountMode === 'MAIN_ACCOUNT_POC') {
+          setAsset('USDG');
+          setAmount('1');
+          setActivePreset(null);
+        }
         setTokens(markets.items);
         setSelected(first ?? null);
         if (first) {
@@ -489,8 +498,10 @@ export default function App() {
   }, [search]);
 
   useEffect(() => {
+    if (!accountMode) return;
     let active = true;
-    void azAuth.loginMock()
+    const login = accountMode === 'MAIN_ACCOUNT_POC' ? Promise.resolve() : azAuth.loginMock().then(() => undefined);
+    void login
       .then(async () => {
         if (!active) return;
         setSessionReady(true);
@@ -519,7 +530,7 @@ export default function App() {
         if (active) setError(friendlyError(cause, '登录失败'));
       });
     return () => { active = false; };
-  }, [trackOrder]);
+  }, [accountMode, trackOrder]);
 
   useEffect(() => {
     if (!selectedTokenAddress || !selectedMarketKey) return;
@@ -779,7 +790,7 @@ export default function App() {
   }, [activeTradeKey]);
   const totalPosition = useMemo(() => account?.positions.reduce((sum, item) => sum + Number(item.valueUsd), 0) ?? 0, [account]);
   const balanceLabel = account?.quoteBalances
-    .filter((item) => item.asset === 'ETH' || item.asset === 'USDC' || item.asset === 'USDT')
+    .filter((item) => item.asset === 'ETH' || item.asset === 'USDC' || item.asset === 'USDT' || item.asset === 'USDG')
     .map((item) => `${readableAmount(item.available)} ${item.asset}`)
     .join(' / ') ?? '余额加载中';
   const visibleTokens = useMemo(() => {
@@ -809,14 +820,16 @@ export default function App() {
   }, [discoveryTab, marketLoading, selectToken, selected?.tokenAddress]);
   const tradePresets = useMemo(() => {
     if (side === 'BUY') {
-      const values = asset === 'ETH' ? ethPresets : stablePresets;
+      const values = accountMode === 'MAIN_ACCOUNT_POC'
+        ? pocUsdgPresets
+        : asset === 'ETH' ? ethPresets : stablePresets;
       return values.map((value) => ({ label: value, value }));
     }
     return [25, 50, 75, 100].map((percent) => ({
       label: `${percent}%`,
       value: percentageOf(currentBalance, percent),
     }));
-  }, [asset, currentBalance, side]);
+  }, [accountMode, asset, currentBalance, side]);
 
   const resetTradeDraft = useCallback(() => {
     setQuote(null);
@@ -825,10 +838,11 @@ export default function App() {
 
   const selectSide = useCallback((nextSide: 'BUY' | 'SELL') => {
     setSide(nextSide);
-    setAmount(nextSide === 'BUY' ? (asset === 'ETH' ? '0.1' : '100') : '0');
-    setActivePreset(nextSide === 'BUY' ? (asset === 'ETH' ? '0.1' : '100') : null);
+    const nextBuyAmount = accountMode === 'MAIN_ACCOUNT_POC' ? '1' : asset === 'ETH' ? '0.1' : '100';
+    setAmount(nextSide === 'BUY' ? nextBuyAmount : '0');
+    setActivePreset(nextSide === 'BUY' ? nextBuyAmount : null);
     resetTradeDraft();
-  }, [asset, resetTradeDraft]);
+  }, [accountMode, asset, resetTradeDraft]);
 
   const loadOlderCandles = useCallback(async (before: number): Promise<number> => {
     if (!selected) return 0;
@@ -872,6 +886,20 @@ export default function App() {
     setError(null);
     setOrderState('提交中');
     try {
+      if (accountMode === 'MAIN_ACCOUNT_POC') {
+        if (!selected) throw new Error('请选择代币');
+        const plan = await memeApi.planTrade({
+          side,
+          tokenAddress: selected.tokenAddress,
+          amountIn: quote.amountIn,
+          slippageBps,
+          simulate: true,
+        });
+        if (plan.simulation?.status !== 'SUCCESS') throw new Error('主网检查未通过');
+        setOrderState('主网检查通过');
+        window.setTimeout(() => setOrderState(null), 1800);
+        return;
+      }
       let clientOrderId = orderIdempotencyRef.current.get(quote.quoteId);
       if (!clientOrderId) {
         clientOrderId = crypto.randomUUID();
@@ -892,7 +920,7 @@ export default function App() {
       setOrderState(null);
       setError(friendlyError(cause, '下单失败'));
     }
-  }, [quote, trackOrder]);
+  }, [accountMode, quote, selected, side, slippageBps, trackOrder]);
 
   const submitTransfer = useCallback(async () => {
     if (!sessionReady) return;
@@ -939,8 +967,10 @@ export default function App() {
           <span className="sr-only">搜索代币名称或合约地址</span>
           <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索代币或粘贴合约地址" />
         </label>
-        <button type="button" className="balances" aria-label="打开账户划转" disabled={!sessionReady} onClick={() => setTransferOpen(true)}>{balanceLabel}</button>
-        <div className="mock-badge"><i aria-hidden="true" />{sessionReady ? '已登录' : '登录中'}</div>
+        {accountMode === 'MAIN_ACCOUNT_POC'
+          ? <div className="balances">{balanceLabel}</div>
+          : <button type="button" className="balances" aria-label="打开账户划转" disabled={!sessionReady} onClick={() => setTransferOpen(true)}>{balanceLabel}</button>}
+        <div className="mock-badge"><i aria-hidden="true" />{accountMode === 'MAIN_ACCOUNT_POC' ? '验证账户' : sessionReady ? '已登录' : '登录中'}</div>
       </header>
 
       {error && <div className="notice" role="alert">{error}<button type="button" onClick={() => setError(null)}>关闭</button></div>}
@@ -1071,14 +1101,18 @@ export default function App() {
                 ? <select aria-label="支付资产" value={asset} onChange={(event) => {
                     const nextAsset = event.target.value as Asset;
                     setAsset(nextAsset);
-                    const nextAmount = nextAsset === 'ETH' ? '0.1' : '100';
+                    const nextAmount = accountMode === 'MAIN_ACCOUNT_POC' ? '1' : nextAsset === 'ETH' ? '0.1' : '100';
                     setAmount(nextAmount);
                     setActivePreset(nextAmount);
                     resetTradeDraft();
-                  }}><option>ETH</option><option>USDC</option><option>USDT</option></select>
+                  }}>{accountMode === 'MAIN_ACCOUNT_POC'
+                    ? <option>USDG</option>
+                    : <><option>ETH</option><option>USDC</option><option>USDT</option></>}</select>
                 : <span className="amount-unit">{selected?.symbol}</span>}
             </div>
-            {side === 'SELL' && <label className="settlement"><span>结算资产</span><select aria-label="结算资产" value={asset} onChange={(event) => { setAsset(event.target.value as Asset); resetTradeDraft(); }}><option>ETH</option><option>USDC</option><option>USDT</option></select></label>}
+            {side === 'SELL' && <label className="settlement"><span>结算资产</span><select aria-label="结算资产" value={asset} onChange={(event) => { setAsset(event.target.value as Asset); resetTradeDraft(); }}>{accountMode === 'MAIN_ACCOUNT_POC'
+              ? <option>USDG</option>
+              : <><option>ETH</option><option>USDC</option><option>USDT</option></>}</select></label>}
             <div className="presets">
               {tradePresets.map((preset) => <button
                 type="button"
@@ -1113,7 +1147,7 @@ export default function App() {
         </aside>
       </div>
 
-      {transferOpen && <div className="drawer-backdrop" role="presentation" onMouseDown={() => setTransferOpen(false)}>
+      {accountMode === 'AZ_ACCOUNT' && transferOpen && <div className="drawer-backdrop" role="presentation" onMouseDown={() => setTransferOpen(false)}>
         <section className="account-drawer" role="dialog" aria-modal="true" aria-labelledby="transfer-title" onMouseDown={(event) => event.stopPropagation()}>
           <header><div><strong id="transfer-title">Meme Account 划转</strong><span>仅站内记账，不触发链上交易</span></div><button type="button" aria-label="关闭划转" onClick={() => setTransferOpen(false)}>×</button></header>
           <label>方向<select aria-label="划转方向" value={transferDirection} onChange={(event) => { setTransferDirection(event.target.value as typeof transferDirection); setTransferState(null); }}><option value="SPOT_TO_MEME">Spot → Meme</option><option value="MEME_TO_SPOT">Meme → Spot</option></select></label>

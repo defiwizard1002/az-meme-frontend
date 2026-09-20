@@ -1,4 +1,4 @@
-import type { AccountSummary, Asset, CandleSnapshot, Interval, Order, Quote, Token, Trade } from './types';
+import type { AccountSummary, Asset, CandleSnapshot, Interval, Order, Quote, Token, Trade, TradePlan } from './types';
 
 interface Envelope<T> {
   rc: number;
@@ -85,6 +85,8 @@ export const memeApi = {
     explorerBaseUrl: string;
     defaultSlippageBps: number;
     marketRefreshMs: { hot: number; new: number };
+    accountMode: 'AZ_ACCOUNT' | 'MAIN_ACCOUNT_POC';
+    mainAccountAddress: string | null;
   }>('/sapi/v1/meme/config'),
   getMarkets: (tab: 'hot' | 'new' = 'hot') => request<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?tab=${tab}&limit=50`),
   searchMarkets: (query: string) => request<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?query=${encodeURIComponent(query)}&limit=50`),
@@ -108,6 +110,8 @@ export const memeApi = {
   getOrders: () => request<{ items: Order[]; nextCursor: string | null }>('/sapi/v1/meme/orders'),
   getOrder: (orderId: string) => request<Order>(`/sapi/v1/meme/orders/${orderId}`),
   getWsTicket: () => request<{ ticket: string; expiresAt: number }>('/sapi/v1/meme/ws-ticket', { method: 'POST' }),
+  planTrade: (input: { side: 'BUY' | 'SELL'; tokenAddress: string; amountIn: string; slippageBps: number; simulate: boolean }) =>
+    request<TradePlan>('/sapi/v1/meme/transactions/plan', { method: 'POST', body: JSON.stringify(input) }),
 };
 
 export const wsBaseUrl = import.meta.env.VITE_MEME_WS_URL as string | undefined;
