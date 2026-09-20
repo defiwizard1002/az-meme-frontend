@@ -75,6 +75,7 @@ describe('App', () => {
         chainName: 'Robinhood Chain',
         explorerBaseUrl: 'https://robinhoodchain.blockscout.com',
         defaultSlippageBps: 300,
+        marketRefreshMs: { hot: 14_400_000, new: 300_000 },
       });
       if (url.includes('/markets')) return response({
         items: [{ ...token, pool: { ...token.pool, poolType: 'UNSUPPORTED' }, tradeStatus: 'UNSUPPORTED_POOL_TYPE' }],
@@ -162,7 +163,13 @@ describe('App', () => {
       if (url.endsWith('/uaapi/user/web3/get-nonce')) return response({ nonce: 'mock-nonce', message: 'AZ login message' });
       if (url.endsWith('/uaapi/user/web3/login')) return response({ accessToken: 'mock-az-session-token', expiresAt: Date.now() + 3600000 });
       if (url.endsWith('/uaapi/user/user/getDesensitizedUserInfo')) return response({ userId: 'mock-user', accountId: 'mock-account', loginStatus: 'LOGGED_IN' });
-      if (url.endsWith('/config')) return response({ chainId: 4663, chainName: 'Robinhood Chain', explorerBaseUrl: 'https://robinhoodchain.blockscout.com', defaultSlippageBps: 300 });
+      if (url.endsWith('/config')) return response({
+        chainId: 4663,
+        chainName: 'Robinhood Chain',
+        explorerBaseUrl: 'https://robinhoodchain.blockscout.com',
+        defaultSlippageBps: 300,
+        marketRefreshMs: { hot: 14_400_000, new: 300_000 },
+      });
       if (url.includes('/markets')) return response({ items: [token, second], stale: false });
       if (url.endsWith(`/tokens/${token.tokenAddress}`)) return response(token);
       if (url.endsWith(`/tokens/${second.tokenAddress}`)) {
@@ -221,6 +228,7 @@ describe('App', () => {
         chainName: 'Robinhood Chain',
         explorerBaseUrl: 'https://robinhoodchain.blockscout.com',
         defaultSlippageBps: 300,
+        marketRefreshMs: { hot: 14_400_000, new: 300_000 },
       });
       if (url.includes('/markets')) return response({ items: [token], stale: false });
       if (url.endsWith(`/tokens/${token.tokenAddress}`)) return response(token);

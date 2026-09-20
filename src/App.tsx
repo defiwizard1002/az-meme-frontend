@@ -167,6 +167,7 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [searchResults, setSearchResults] = useState<Token[] | null>(null);
   const [discoveryTab, setDiscoveryTab] = useState<'hot' | 'new'>('hot');
+  const [marketRefreshMs, setMarketRefreshMs] = useState({ hot: 14_400_000, new: 300_000 });
   const [marketLoading, setMarketLoading] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
@@ -292,6 +293,7 @@ export default function App() {
         setChainName(config.chainName);
         setExplorerBaseUrl(config.explorerBaseUrl);
         setSlippageBps(config.defaultSlippageBps);
+        setMarketRefreshMs(config.marketRefreshMs ?? { hot: 14_400_000, new: 300_000 });
         setTokens(markets.items.map((item) => item.tokenAddress === selectedToken?.tokenAddress ? selectedToken : item));
         setSelected(selectedToken);
       })
@@ -299,6 +301,28 @@ export default function App() {
       .finally(() => active && setLoading(false));
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    let refreshing = false;
+    const refresh = async () => {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const result = await memeApi.getMarkets(discoveryTab);
+        if (active) setTokens(result.items);
+      } catch (cause) {
+        if (active) setError(friendlyError(cause, '市场刷新失败'));
+      } finally {
+        refreshing = false;
+      }
+    };
+    const timer = window.setInterval(() => void refresh(), marketRefreshMs[discoveryTab]);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [discoveryTab, marketRefreshMs]);
 
   useEffect(() => {
     setVisibleTradeCount(tradesPerBatch);
