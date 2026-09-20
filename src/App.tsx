@@ -9,6 +9,7 @@ const intervals: Interval[] = ['1s', '1m', '15m', '1h', '4h'];
 const ethPresets = ['0.05', '0.1', '0.25', '0.5'];
 const stablePresets = ['25', '100', '250', '500'];
 const tradesPerBatch = 20;
+const candlePageSize = 300;
 
 function compact(value: string | number): string {
   return Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(Number(value));
@@ -37,6 +38,24 @@ function formatPercent(value: string | number): string {
   const number = Number(value);
   if (!Number.isFinite(number)) return '0.00%';
   return `${number > 0 ? '+' : ''}${number.toFixed(2)}%`;
+}
+
+function TokenChange({ tokenAddress, value }: { tokenAddress: string; value: string }) {
+  const previousValue = useRef(value);
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    if (previousValue.current === value) return;
+    previousValue.current = value;
+    setRevision((current) => current + 1);
+  }, [value]);
+  return (
+    <span
+      key={`${tokenAddress}:${revision}`}
+      className={`token-change ${revision > 0 ? 'change-flash ' : ''}${Number(value) >= 0 ? 'positive' : 'negative'}`}
+    >
+      {formatPercent(value)}
+    </span>
+  );
 }
 
 function age(seconds: number): string {
@@ -68,12 +87,45 @@ function percentageOf(value: string, percent: number): string {
   return resultFraction ? `${resultWhole}.${resultFraction}` : resultWhole.toString();
 }
 
-function securityLabels(token: Token): string[] {
-  const labels: string[] = [];
-  if (token.security.buyTaxPct === '0' && token.security.sellTaxPct === '0') labels.push('无税');
-  if (token.security.liquidityLocked === true) labels.push('锁池');
-  if (token.security.isHoneypot === false) labels.push('非蜜罐');
-  return labels.length > 0 ? labels : ['安全数据待确认'];
+interface SecurityLabel {
+  text: string;
+  tone: 'safe' | 'warning' | 'danger' | 'neutral';
+}
+
+function securityPercent(value: string): string {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return value;
+  return Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(number);
+}
+
+function securityLabels(token: Token): SecurityLabel[] {
+  const labels: SecurityLabel[] = [];
+  const { buyTaxPct, sellTaxPct, liquidityBurnedPct, liquidityLockedPct, liquidityLocked, isHoneypot } = token.security;
+  if (buyTaxPct !== null && sellTaxPct !== null && buyTaxPct === sellTaxPct) {
+    labels.push({ text: `税 ${securityPercent(buyTaxPct)}%`, tone: Number(buyTaxPct) > 0 ? 'warning' : 'safe' });
+  } else {
+    if (buyTaxPct !== null) labels.push({ text: `买税 ${securityPercent(buyTaxPct)}%`, tone: Number(buyTaxPct) > 0 ? 'warning' : 'safe' });
+    if (sellTaxPct !== null) labels.push({ text: `卖税 ${securityPercent(sellTaxPct)}%`, tone: Number(sellTaxPct) > 0 ? 'warning' : 'safe' });
+  }
+  if (liquidityBurnedPct !== null && Number(liquidityBurnedPct) > 0) {
+    labels.push({ text: `已燃烧 ${securityPercent(liquidityBurnedPct)}%`, tone: 'safe' });
+  }
+  if (liquidityLockedPct !== null && Number(liquidityLockedPct) > 0) {
+    labels.push({ text: `已锁仓 ${securityPercent(liquidityLockedPct)}%`, tone: 'safe' });
+  } else if (liquidityLocked === true && !(liquidityBurnedPct !== null && Number(liquidityBurnedPct) > 0)) {
+    labels.push({ text: '已锁池', tone: 'safe' });
+  }
+  if (isHoneypot === false) labels.push({ text: '非蜜罐', tone: 'safe' });
+  if (isHoneypot === true) labels.push({ text: '蜜罐风险', tone: 'danger' });
+  return labels.length > 0 ? labels : [{ text: '安全数据待确认', tone: 'neutral' }];
+}
+
+export function relativeAge(timestamp: number, nowSeconds = Math.floor(Date.now() / 1000)): string {
+  const elapsed = Math.max(0, Math.floor(nowSeconds - timestamp));
+  if (elapsed < 60) return `${elapsed}s`;
+  if (elapsed < 3600) return `${Math.floor(elapsed / 60)}m`;
+  if (elapsed < 86400) return `${Math.floor(elapsed / 3600)}h`;
+  return `${Math.floor(elapsed / 86400)}d`;
 }
 
 function quoteLabel(token: Token): string {
@@ -151,6 +203,7 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<CandleSnapshot | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [visibleTradeCount, setVisibleTradeCount] = useState(tradesPerBatch);
+  const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
   const [interval, setIntervalValue] = useState<Interval>('1m');
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
   const [asset, setAsset] = useState<Asset>('ETH');
@@ -202,6 +255,7 @@ export default function App() {
         return marketKey ? tradeCacheKey(tokenAddress, marketKey) : null;
       })()
     : null;
+  const hasTrades = trades.length > 0;
 
   const setCachedSnapshot = useCallback((update: CandleSnapshot | null | ((current: CandleSnapshot | null) => CandleSnapshot | null)) => {
     setSnapshot((current) => {
@@ -335,6 +389,13 @@ export default function App() {
   }, [activeTradeKey]);
 
   useEffect(() => {
+    if (!hasTrades) return;
+    setNowSeconds(Math.floor(Date.now() / 1000));
+    const timer = window.setInterval(() => setNowSeconds(Math.floor(Date.now() / 1000)), 1_000);
+    return () => window.clearInterval(timer);
+  }, [hasTrades]);
+
+  useEffect(() => {
     let active = true;
     const query = search.trim();
     if (!query) {
@@ -450,10 +511,13 @@ export default function App() {
     const channels = [candleChannel, tradeChannel, marketChannel, hotMarketChannel];
     marketChannelsRef.current = channels;
     const scheduleReconnect = () => {
-      if (disposed) return;
+      if (disposed || reconnectTimer !== undefined) return;
       const delay = Math.min(30_000, 1_000 * 2 ** reconnectAttempt);
       reconnectAttempt += 1;
-      reconnectTimer = window.setTimeout(() => void connect(), delay);
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = undefined;
+        void connect();
+      }, delay);
     };
 
     const upsertCandle = (candle: Candle) => {
@@ -469,17 +533,18 @@ export default function App() {
       try {
         const { ticket } = await memeApi.getWsTicket();
         if (disposed) return;
-        socket = new WebSocket(`${wsBaseUrl}?ticket=${encodeURIComponent(ticket)}`);
-        streamSocketRef.current = socket;
-        socket.addEventListener('open', () => {
+        const nextSocket = new WebSocket(`${wsBaseUrl}?ticket=${encodeURIComponent(ticket)}`);
+        socket = nextSocket;
+        streamSocketRef.current = nextSocket;
+        nextSocket.addEventListener('open', () => {
           reconnectAttempt = 0;
-          socket?.send(JSON.stringify({
+          nextSocket.send(JSON.stringify({
             op: 'subscribe',
             channels,
             ...(sessionReady && quoteRequestRef.current ? { quote: quoteRequestRef.current } : {}),
           }));
         });
-        socket.addEventListener('message', (event) => {
+        nextSocket.addEventListener('message', (event) => {
           try {
             const message = JSON.parse(String(event.data)) as StreamMessage<Candle | Trade | Quote | Token | HotMarketUpdate>;
             const previous = streamState.get(message.channel);
@@ -551,10 +616,12 @@ export default function App() {
             }
           } catch {
             setError('实时行情暂时不可用，正在重连');
-            socket?.close();
+            nextSocket.close();
           }
         });
-        socket.addEventListener('close', () => {
+        nextSocket.addEventListener('error', () => nextSocket.close());
+        nextSocket.addEventListener('close', () => {
+          if (streamSocketRef.current === nextSocket) streamSocketRef.current = null;
           scheduleReconnect();
         });
       } catch (cause) {
@@ -665,7 +732,7 @@ export default function App() {
           && snapshot.interval === interval
           ? snapshot.marketKey
           : selected.pool.poolKey + ':' + selected.quoteAssetKey;
-        const result = await memeApi.getCandles(selected.tokenAddress, interval, { to: before, limit: 120, marketKey });
+        const result = await memeApi.getCandles(selected.tokenAddress, interval, { to: before, limit: candlePageSize, marketKey });
         if (result.status === 'STALE') throw new Error('更早行情加载失败');
         if (result.status === 'READY') {
           setCachedSnapshot((current) => {
@@ -796,7 +863,7 @@ export default function App() {
                     </span>
                   </span>
                   <span>{money(token.marketCapUsd)}</span>
-                  <span className={`token-change ${Number(token.change24h) >= 0 ? 'positive' : 'negative'}`}>{formatPercent(token.change24h)}</span>
+                  <TokenChange tokenAddress={token.tokenAddress} value={token.change24h} />
                   <span>{compact(token.holders)}</span>
                 </button>
                 <button type="button" className="quick-buy" aria-label={`买入 ${token.symbol}`} onClick={() => { void selectToken(token); selectSide('BUY'); }}>买</button>
@@ -852,7 +919,7 @@ export default function App() {
                       <span>{txUrl
                         ? <a className="trade-tx" href={txUrl} target="_blank" rel="noreferrer" aria-label={`查看交易 ${shortAddress(trade.txHash)}`}>{shortAddress(trade.txHash)} ↗</a>
                         : shortAddress(trade.txHash)}</span>
-                      <span>{new Date(trade.t * 1000).toLocaleTimeString('zh-CN', { hour12: false })}</span>
+                      <span>{relativeAge(trade.t, nowSeconds)}</span>
                     </div>
                   );
                 })}
@@ -908,7 +975,7 @@ export default function App() {
               <div><dt>预计得到</dt><dd>{quote ? `≈ ${readableAmount(quote.expectedAmountOut)} ${side === 'BUY' ? selected?.symbol : asset}` : '等待报价'}</dd></div>
               <div><dt>路由</dt><dd>{selected ? poolLabel(selected.pool.poolType) : '未选择'}</dd></div>
               <div><dt>滑点上限</dt><dd>{(slippageBps / 100).toFixed(slippageBps % 100 === 0 ? 0 : 2)}%</dd></div>
-              <div className="security-row"><dt>安全</dt><dd>{safety.map((item) => <span key={item}>{item}</span>)}</dd></div>
+              <div className="security-row"><dt>安全</dt><dd>{safety.map((item) => <span className={`security-${item.tone}`} key={item.text}>{item.text}</span>)}</dd></div>
             </dl>
             <button type="button" className="primary" disabled={!sessionReady || !selected || !quoteRequest || !quote || Boolean(orderState) || (side === 'SELL' && Number(currentBalance) <= 0)} onClick={submitOrder}>
               {!sessionReady ? '等待登录' : orderState ?? (side === 'BUY' ? '买入' : '卖出')}

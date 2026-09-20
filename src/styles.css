@@ -89,6 +89,11 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .token-row.selected { border-left-color: var(--accent); background: #15141d; }
 .token-select { min-width: 0; display: grid; grid-template-columns: minmax(138px, 1fr) 60px 58px 42px; gap: 5px; align-items: center; padding: 8px 8px 8px 10px; border: 0; background: transparent; color: inherit; font: 11px ui-monospace, "SFMono-Regular", monospace; text-align: right; cursor: pointer; }
 .token-change { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.token-change.change-flash { animation: market-change-flash 700ms ease-out; border-radius: 3px; }
+@keyframes market-change-flash {
+  0% { background: currentColor; color: #09080d !important; box-shadow: 0 0 0 3px currentColor; }
+  100% { background: transparent; box-shadow: none; }
+}
 .quick-buy { align-self: center; width: 34px; height: 28px; border: 1px solid #2c6449; border-radius: 5px; background: #123020; color: var(--positive); font-size: 11px; font-weight: 700; cursor: pointer; }
 .quick-buy:hover { background: #193d2a; }
 .quick-buy:disabled { border-color: var(--line); background: transparent; color: var(--subtle); cursor: not-allowed; }
@@ -176,7 +181,11 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .quote-details dt { flex: 0 0 auto; color: var(--muted); }
 .quote-details dd { min-width: 0; margin: 0; color: #d4d0da; text-align: right; overflow-wrap: anywhere; }
 .security-row dd { display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
-.security-row dd span { color: var(--positive); }
+.security-row dd span { white-space: nowrap; }
+.security-row dd .security-safe { color: var(--positive); }
+.security-row dd .security-warning { color: #f2b75e; }
+.security-row dd .security-danger { color: var(--negative); }
+.security-row dd .security-neutral { color: var(--muted); }
 .primary { width: 100%; min-height: 42px; border: 0; border-radius: var(--radius); background: var(--accent); color: #092422; font-weight: 800; cursor: pointer; }
 .primary:hover { background: #7fe1dc; }
 .primary:disabled { cursor: wait; opacity: .5; }
@@ -258,5 +267,5 @@ button:active:not(:disabled) { transform: translateY(1px); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }

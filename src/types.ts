@@ -25,6 +25,8 @@ export interface Token {
     buyTaxPct: string | null;
     sellTaxPct: string | null;
     liquidityLocked: boolean | null;
+    liquidityLockedPct: string | null;
+    liquidityBurnedPct: string | null;
   };
 }
 export interface Candle {

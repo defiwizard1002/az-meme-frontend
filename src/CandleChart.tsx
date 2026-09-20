@@ -92,8 +92,8 @@ export function CandleChart({ candles, symbol, refreshing = false, onLoadBefore 
         timeVisible: true,
         secondsVisible: true,
         rightOffset: 5,
-        barSpacing: 8,
-        minBarSpacing: 2,
+        barSpacing: 3,
+        minBarSpacing: 0.5,
       },
       handleScroll: {
         mouseWheel: true,

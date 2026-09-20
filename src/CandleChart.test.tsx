@@ -72,6 +72,7 @@ describe('CandleChart', () => {
     expect(chartMocks.createChart).toHaveBeenCalledWith(expect.any(HTMLElement), expect.objectContaining({
       handleScroll: expect.objectContaining({ mouseWheel: true, pressedMouseMove: true }),
       handleScale: expect.objectContaining({ mouseWheel: true, pinch: true }),
+      timeScale: expect.objectContaining({ barSpacing: 3, minBarSpacing: 0.5 }),
     }));
     expect(chartMocks.setData).toHaveBeenCalled();
     expect(chartMocks.setData.mock.calls[0]?.[0]).toEqual([

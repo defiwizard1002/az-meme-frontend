@@ -90,7 +90,7 @@ export const memeApi = {
   searchMarkets: (query: string) => request<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?query=${encodeURIComponent(query)}&limit=50`),
   getToken: (tokenAddress: string) => request<Token>(`/sapi/v1/meme/tokens/${tokenAddress}`),
   getCandles: (tokenAddress: string, interval: Interval, options?: { to?: number; limit?: number; marketKey?: string }) => {
-    const query = new URLSearchParams({ interval, limit: String(options?.limit ?? 120) });
+    const query = new URLSearchParams({ interval, limit: String(options?.limit ?? 300) });
     if (options?.to !== undefined) query.set('to', String(options.to));
     if (options?.marketKey) query.set('marketKey', options.marketKey);
     return request<CandleSnapshot>(`/sapi/v1/meme/tokens/${tokenAddress}/candles?${query.toString()}`);

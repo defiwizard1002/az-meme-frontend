@@ -43,7 +43,14 @@ const token = {
   pool: { poolKey: 'pool_cashcat', poolType: 'UNISWAP_V4', liquidityUsd: '3200000' },
   tradeStatus: 'TRADABLE',
   riskFlags: [],
-  security: { isHoneypot: false, buyTaxPct: '0', sellTaxPct: '0', liquidityLocked: true },
+  security: {
+    isHoneypot: false,
+    buyTaxPct: '1',
+    sellTaxPct: '1',
+    liquidityLocked: true,
+    liquidityLockedPct: '0',
+    liquidityBurnedPct: '95',
+  },
 };
 
 function response(result: unknown) {
@@ -95,7 +102,9 @@ describe('App', () => {
         expect(JSON.parse(String(init?.body))).toMatchObject({ from: 'SPOT', to: 'MEME', currency: 'ETH', amount: '0.1' });
         return response(10001);
       }
-      if (url.includes('/candles')) return response({
+      if (url.includes('/candles')) {
+        expect(new URL(url).searchParams.get('limit')).toBe('300');
+        return response({
         chainId: 4663,
         tokenAddress: token.tokenAddress,
         marketKey: 'pool_cashcat:NATIVE',
@@ -103,7 +112,8 @@ describe('App', () => {
         status: 'READY',
         source: 'BITQUERY+CHAIN',
         items: [{ t: 1, o: '0.018', h: '0.019', l: '0.017', c: '0.0184', baseVolume: null, quoteVolume: null, revision: 1 }],
-      });
+        });
+      }
       throw new Error(`Unexpected request ${url}`);
     });
 
@@ -116,6 +126,9 @@ describe('App', () => {
     expect(screen.getByText('3%')).toBeInTheDocument();
     expect(screen.getAllByText('PONS').length).toBeGreaterThan(0);
     expect(screen.getAllByText('UNISWAP V4').length).toBeGreaterThan(0);
+    expect(screen.getByText('税 1%')).toBeInTheDocument();
+    expect(screen.getByText('已燃烧 95%')).toBeInTheDocument();
+    expect(screen.getByText('非蜜罐')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '买入 CASHCAT' })).toBeEnabled();
     expect(screen.queryByText('预览交易')).not.toBeInTheDocument();
     expect(screen.queryByText('下单无需再次签名')).not.toBeInTheDocument();
@@ -203,21 +216,36 @@ describe('App', () => {
       tradeStatus: 'UNSUPPORTED_POOL_TYPE' as const,
     };
     class TestWebSocket {
+      static readonly CONNECTING = 0;
       static readonly OPEN = 1;
+      static readonly CLOSED = 3;
       static latest: TestWebSocket | null = null;
       static created = 0;
-      readonly readyState = TestWebSocket.OPEN;
+      static active = 0;
+      static maxActive = 0;
+      readyState = TestWebSocket.CONNECTING;
       private readonly listeners = new Map<string, Array<(event: Event) => void>>();
       constructor(_url: string) {
         TestWebSocket.created += 1;
+        TestWebSocket.active += 1;
+        TestWebSocket.maxActive = Math.max(TestWebSocket.maxActive, TestWebSocket.active);
         TestWebSocket.latest = this;
-        queueMicrotask(() => this.emit('open', new Event('open')));
+        queueMicrotask(() => {
+          if (this.readyState === TestWebSocket.CLOSED) return;
+          this.readyState = TestWebSocket.OPEN;
+          this.emit('open', new Event('open'));
+        });
       }
       addEventListener(name: string, listener: (event: Event) => void): void {
         this.listeners.set(name, [...(this.listeners.get(name) ?? []), listener]);
       }
       send(payload: string): void { sent.push(payload); }
-      close(): void { this.emit('close', new Event('close')); }
+      close(): void {
+        if (this.readyState === TestWebSocket.CLOSED) return;
+        this.readyState = TestWebSocket.CLOSED;
+        TestWebSocket.active -= 1;
+        this.emit('close', new Event('close'));
+      }
       receive(payload: unknown): void {
         this.emit('message', { data: JSON.stringify(payload) } as MessageEvent);
       }
@@ -243,15 +271,18 @@ describe('App', () => {
       if (url.endsWith('/account/summary')) return response({ quoteBalances: [], positions: [] });
       if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
       if (url.endsWith('/ws-ticket')) return response({ ticket: 'ticket', expiresAt: Date.now() + 30_000 });
-      if (url.includes('/candles')) return response({
-        chainId: 4663,
-        tokenAddress: marketToken.tokenAddress,
-        marketKey: 'pool_cashcat_other:OTHER',
-        interval: '1m',
-        status: 'CATCHING_UP',
-        source: 'BITQUERY+CHAIN',
-        items: [{ t: 1, o: '0.018', h: '0.019', l: '0.017', c: '0.0184', baseVolume: '1', quoteVolume: '1', revision: 1 }],
-      });
+      if (url.includes('/candles')) {
+        const requestedInterval = new URL(url).searchParams.get('interval');
+        return response({
+          chainId: 4663,
+          tokenAddress: marketToken.tokenAddress,
+          marketKey: 'pool_cashcat_other:OTHER',
+          interval: requestedInterval,
+          status: 'CATCHING_UP',
+          source: 'BITQUERY+CHAIN',
+          items: [{ t: 1, o: '0.018', h: '0.019', l: '0.017', c: '0.0184', baseVolume: '1', quoteVolume: '1', revision: 1 }],
+        });
+      }
       throw new Error(`Unexpected request ${url}`);
     });
 
@@ -286,7 +317,7 @@ describe('App', () => {
           sequence,
           data: {
             tradeId: `trade-${sequence}`,
-            t: 1_700_000_000 + sequence,
+            t: Math.floor(Date.now() / 1000) - sequence,
             side: sequence % 2 === 0 ? 'SELL' : 'BUY',
             priceUsd: `0.0${sequence}`,
             baseAmount: String(sequence),
@@ -300,6 +331,8 @@ describe('App', () => {
     });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     expect(TestWebSocket.created).toBe(1);
+    expect(TestWebSocket.active).toBe(1);
+    expect(TestWebSocket.maxActive).toBe(1);
 
     expect(await screen.findByText('25 笔')).toBeInTheDocument();
     const newestTxLink = screen.getAllByRole('link', { name: /查看交易/ })[0];
@@ -313,8 +346,18 @@ describe('App', () => {
     });
     fireEvent.scroll(tradeRows);
     expect(screen.getAllByRole('link', { name: /查看交易/ })).toHaveLength(25);
+    expect(screen.getAllByText(/2[5-7]s/).length).toBeGreaterThan(0);
+
+    act(() => TestWebSocket.latest?.close());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_100)); });
+    await waitFor(() => expect(TestWebSocket.created).toBe(2));
+    expect(TestWebSocket.active).toBe(1);
+    expect(TestWebSocket.maxActive).toBe(1);
 
     fireEvent.click(screen.getByRole('button', { name: '1s' }));
+    await waitFor(() => expect(TestWebSocket.created).toBe(3));
+    expect(TestWebSocket.active).toBe(1);
+    expect(TestWebSocket.maxActive).toBe(1);
     expect(screen.getByText('25 笔')).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: /查看交易/ })).toHaveLength(25);
   });
