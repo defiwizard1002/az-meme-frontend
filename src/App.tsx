@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, azAuth, azFundApi, memeApi, setSessionToken, wsBaseUrl } from './api';
 import { CandleChart } from './CandleChart';
+import { CandleReplayQueue, streamBatchItems } from './candle-replay';
 import { pollOrderUntilTerminal } from './order-tracker';
 import type { AccountSummary, Asset, Candle, CandleSnapshot, Interval, Quote, Token, Trade } from './types';
 import './styles.css';
@@ -143,6 +144,10 @@ interface StreamMessage<T> {
 
 interface HotMarketUpdate {
   items: Token[];
+}
+
+interface StreamBatch<T> {
+  items: T[];
 }
 
 function candleCacheKey(tokenAddress: string, interval: Interval): string {
@@ -516,6 +521,7 @@ export default function App() {
         return { ...current, items: [...byTime.values()].sort((a, b) => a.t - b.t) };
       });
     };
+    const candleReplay = new CandleReplayQueue(upsertCandle);
 
     const connect = async () => {
       try {
@@ -534,7 +540,7 @@ export default function App() {
         });
         nextSocket.addEventListener('message', (event) => {
           try {
-            const message = JSON.parse(String(event.data)) as StreamMessage<Candle | CandleSnapshot | Trade | Quote | Token | HotMarketUpdate>;
+            const message = JSON.parse(String(event.data)) as StreamMessage<Candle | CandleSnapshot | Trade | Quote | Token | HotMarketUpdate | StreamBatch<Candle> | StreamBatch<Trade>>;
             const previous = streamState.get(message.channel);
             const duplicate = previous !== undefined
               && message.epoch === previous.epoch
@@ -592,25 +598,29 @@ export default function App() {
               return;
             }
             if (message.channel === candleChannel) {
-              const candle = message.data as Candle;
+              const candles = streamBatchItems(message.data as Candle | StreamBatch<Candle>);
               if (requiresResync) {
                 void memeApi.getCandles(selectedTokenAddress, interval, { marketKey: activeSnapshot.marketKey })
                   .then((fresh) => {
                     if (!disposed) {
                       setCachedSnapshot((current) => mergeSnapshots(current, fresh));
-                      upsertCandle(candle);
+                      if (interval === '1s') candleReplay.enqueue(candles);
+                      else candles.forEach(upsertCandle);
                     }
                   })
                   .catch(() => setError('行情更新中断，正在恢复'));
                 return;
               }
-              upsertCandle(candle);
+              if (interval === '1s') candleReplay.enqueue(candles);
+              else candles.forEach(upsertCandle);
               return;
             }
             if (message.channel === tradeChannel) {
-              const trade = message.data as Trade;
+              const batch = streamBatchItems(message.data as Trade | StreamBatch<Trade>);
               const current = tradeCacheRef.current.get(currentTradeCacheKey) ?? [];
-              const next = [trade, ...current.filter((item) => item.tradeId !== trade.tradeId)];
+              const incoming = [...batch].reverse();
+              const incomingIds = new Set(incoming.map((trade) => trade.tradeId));
+              const next = [...incoming, ...current.filter((trade) => !incomingIds.has(trade.tradeId))];
               tradeCacheRef.current.set(currentTradeCacheKey, next);
               setTrades(next);
             }
@@ -643,6 +653,7 @@ export default function App() {
     void connect();
     return () => {
       disposed = true;
+      candleReplay.stop();
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
       if (streamSocketRef.current === socket) streamSocketRef.current = null;
       socket?.close();

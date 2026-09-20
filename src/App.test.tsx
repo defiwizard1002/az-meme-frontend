@@ -314,22 +314,28 @@ describe('App', () => {
         sequence: 1,
         data: { items: [{ ...marketToken, priceUsd: '0.02', change24h: '90' }] },
       });
-      for (let sequence = 1; sequence <= 25; sequence += 1) {
-        const suffix = sequence.toString(16).padStart(64, '0');
+      for (let sequence = 1; sequence <= 5; sequence += 1) {
+        const start = (sequence - 1) * 5 + 1;
         TestWebSocket.latest?.receive({
           channel: tradeChannel,
           epoch: 'epoch-1',
           sequence,
           data: {
-            tradeId: `trade-${sequence}`,
-            t: Math.floor(Date.now() / 1000) - sequence,
-            side: sequence % 2 === 0 ? 'SELL' : 'BUY',
-            priceUsd: `0.0${sequence}`,
-            baseAmount: String(sequence),
-            quoteAmount: '0.1',
-            quoteAsset: 'ETH',
-            trader: `0x${String(sequence).padStart(40, '0')}`,
-            txHash: `0x${suffix}`,
+            items: Array.from({ length: 5 }, (_, offset) => {
+              const tradeNumber = start + offset;
+              const suffix = tradeNumber.toString(16).padStart(64, '0');
+              return {
+                tradeId: `trade-${tradeNumber}`,
+                t: Math.floor(Date.now() / 1000) - tradeNumber,
+                side: tradeNumber % 2 === 0 ? 'SELL' : 'BUY',
+                priceUsd: `0.0${tradeNumber}`,
+                baseAmount: String(tradeNumber),
+                quoteAmount: '0.1',
+                quoteAsset: 'ETH',
+                trader: `0x${String(tradeNumber).padStart(40, '0')}`,
+                txHash: `0x${suffix}`,
+              };
+            }),
           },
         });
       }
