@@ -185,6 +185,8 @@ export default function App() {
   const streamSocketRef = useRef<WebSocket | null>(null);
   const marketChannelsRef = useRef<string[]>([]);
   const selectionRequestRef = useRef(0);
+  const selectedTokenAddress = selected?.tokenAddress ?? null;
+  const selectedTradeStatus = selected?.tradeStatus ?? null;
   const selectedMarketKey = selected ? `${selected.pool.poolKey}:${selected.quoteAssetKey}` : null;
   const activeSnapshot = selected
     ? (snapshot?.tokenAddress.toLowerCase() === selected.tokenAddress.toLowerCase()
@@ -213,15 +215,16 @@ export default function App() {
   }, []);
 
   const quoteRequest = useMemo(() => {
-    if (!selected || !/^\d+(?:\.\d+)?$/.test(amount) || Number(amount) <= 0) return null;
+    if (!selectedTokenAddress || selectedTradeStatus !== 'TRADABLE'
+      || !/^\d+(?:\.\d+)?$/.test(amount) || Number(amount) <= 0) return null;
     return {
       side,
-      tokenAddress: selected.tokenAddress,
+      tokenAddress: selectedTokenAddress,
       settlementAsset: asset,
       amountIn: amount,
       slippageBps,
     } as const;
-  }, [amount, asset, selected, side, slippageBps]);
+  }, [amount, asset, selectedTokenAddress, selectedTradeStatus, side, slippageBps]);
   const quoteRequestRef = useRef(quoteRequest);
   quoteRequestRef.current = quoteRequest;
 
@@ -383,12 +386,12 @@ export default function App() {
   }, [trackOrder]);
 
   useEffect(() => {
-    if (!selected) return;
+    if (!selectedTokenAddress || !selectedMarketKey) return;
     let active = true;
     let pollTimer: number | undefined;
     let consecutiveFailures = 0;
-    const cacheKey = candleCacheKey(selected.tokenAddress, interval);
-    const requestedMarketKey = selected.pool.poolKey + ':' + selected.quoteAssetKey;
+    const cacheKey = candleCacheKey(selectedTokenAddress, interval);
+    const requestedMarketKey = selectedMarketKey;
     const cached = candleCacheRef.current.get(cacheKey) ?? null;
     setChartLoading(true);
     setMarketError(null);
@@ -398,7 +401,7 @@ export default function App() {
 
     const loadCandles = async () => {
       try {
-        const result = await memeApi.getCandles(selected.tokenAddress, interval, { marketKey: requestedMarketKey });
+        const result = await memeApi.getCandles(selectedTokenAddress, interval, { marketKey: requestedMarketKey });
         if (!active) return;
         consecutiveFailures = 0;
         const merged = mergeSnapshots(candleCacheRef.current.get(cacheKey) ?? null, result);
@@ -413,7 +416,7 @@ export default function App() {
           setMarketError('行情暂时不可用');
           return;
         }
-        pollTimer = window.setTimeout(() => void loadCandles(), 500);
+        pollTimer = window.setTimeout(() => void loadCandles(), 1_000);
       } catch (cause) {
         if (!active) return;
         consecutiveFailures += 1;
@@ -430,19 +433,19 @@ export default function App() {
       active = false;
       if (pollTimer !== undefined) window.clearTimeout(pollTimer);
     };
-  }, [selected, interval, marketRetry, setCachedSnapshot]);
+  }, [selectedTokenAddress, selectedMarketKey, interval, marketRetry, setCachedSnapshot]);
 
   useEffect(() => {
-    if (!selected || !activeSnapshot || activeSnapshot.status === 'STALE' || typeof WebSocket === 'undefined') return;
+    if (!selectedTokenAddress || !activeSnapshot || activeSnapshot.status === 'STALE' || typeof WebSocket === 'undefined') return;
     let socket: WebSocket | null = null;
     let disposed = false;
     let reconnectTimer: number | undefined;
     let reconnectAttempt = 0;
     const streamState = new Map<string, { epoch: string; sequence: number }>();
-    const candleChannel = `candle:${selected.tokenAddress}:${activeSnapshot.marketKey}:${interval}`;
-    const tradeChannel = `trade:${selected.tokenAddress}:${activeSnapshot.marketKey}`;
-    const currentTradeCacheKey = tradeCacheKey(selected.tokenAddress, activeSnapshot.marketKey);
-    const marketChannel = `market:${selected.tokenAddress.toLowerCase()}`;
+    const candleChannel = `candle:${selectedTokenAddress}:${activeSnapshot.marketKey}:${interval}`;
+    const tradeChannel = `trade:${selectedTokenAddress}:${activeSnapshot.marketKey}`;
+    const currentTradeCacheKey = tradeCacheKey(selectedTokenAddress, activeSnapshot.marketKey);
+    const marketChannel = `market:${selectedTokenAddress.toLowerCase()}`;
     const hotMarketChannel = 'markets:hot';
     const channels = [candleChannel, tradeChannel, marketChannel, hotMarketChannel];
     marketChannelsRef.current = channels;
@@ -455,7 +458,7 @@ export default function App() {
 
     const upsertCandle = (candle: Candle) => {
       setCachedSnapshot((current) => {
-        if (!current || current.tokenAddress.toLowerCase() !== selected.tokenAddress.toLowerCase() || current.interval !== interval) return current;
+        if (!current || current.tokenAddress.toLowerCase() !== selectedTokenAddress.toLowerCase() || current.interval !== interval) return current;
         const byTime = new Map(current.items.map((item) => [item.t, item]));
         byTime.set(candle.t, chooseNewerCandle(byTime.get(candle.t), candle));
         return { ...current, items: [...byTime.values()].sort((a, b) => a.t - b.t) };
@@ -502,11 +505,11 @@ export default function App() {
             }
             if (message.channel === marketChannel) {
               const refreshedToken = message.data as Token;
-              const tokenPrefix = `${selected.tokenAddress.toLowerCase()}:`;
+              const tokenPrefix = `${selectedTokenAddress.toLowerCase()}:`;
               for (const key of candleCacheRef.current.keys()) {
                 if (key.startsWith(tokenPrefix)) candleCacheRef.current.delete(key);
               }
-              tradeMarketKeyRef.current.delete(selected.tokenAddress.toLowerCase());
+              tradeMarketKeyRef.current.delete(selectedTokenAddress.toLowerCase());
               setSnapshot(null);
               setSelected(refreshedToken);
               return;
@@ -526,7 +529,7 @@ export default function App() {
             if (message.channel === candleChannel) {
               const candle = message.data as Candle;
               if (requiresResync) {
-                void memeApi.getCandles(selected.tokenAddress, interval, { marketKey: activeSnapshot.marketKey })
+                void memeApi.getCandles(selectedTokenAddress, interval, { marketKey: activeSnapshot.marketKey })
                   .then((fresh) => {
                     if (!disposed) {
                       setCachedSnapshot((current) => mergeSnapshots(current, fresh));
@@ -577,19 +580,19 @@ export default function App() {
       if (streamSocketRef.current === socket) streamSocketRef.current = null;
       socket?.close();
     };
-  }, [sessionReady, selected, activeSnapshot?.marketKey, interval, setCachedSnapshot]);
+  }, [sessionReady, selectedTokenAddress, activeSnapshot?.marketKey, interval, setCachedSnapshot]);
 
   useEffect(() => {
     setQuote(null);
     const socket = streamSocketRef.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN || !selected) return;
-    if (!marketChannelsRef.current.some((channel) => channel.includes(selected.tokenAddress))) return;
+    if (!socket || socket.readyState !== WebSocket.OPEN || !selectedTokenAddress) return;
+    if (!marketChannelsRef.current.some((channel) => channel.includes(selectedTokenAddress))) return;
     socket.send(JSON.stringify({
       op: 'subscribe',
       channels: marketChannelsRef.current,
       ...(sessionReady && quoteRequest ? { quote: quoteRequest } : {}),
     }));
-  }, [quoteRequest, selected, sessionReady]);
+  }, [quoteRequest, selectedTokenAddress, sessionReady]);
 
   const selectedPosition = account?.positions.find((item) => item.tokenAddress.toLowerCase() === selected?.tokenAddress.toLowerCase());
   const currentBalance = side === 'BUY'

@@ -196,12 +196,20 @@ describe('App', () => {
 
   it('subscribes while catching up but keeps the chart hidden until READY', async () => {
     const sent: string[] = [];
+    const marketToken = {
+      ...token,
+      quoteAssetKey: 'OTHER' as const,
+      pool: { ...token.pool, poolKey: 'pool_cashcat_other', quoteTokenSymbol: 'GOOGL' },
+      tradeStatus: 'UNSUPPORTED_POOL_TYPE' as const,
+    };
     class TestWebSocket {
       static readonly OPEN = 1;
       static latest: TestWebSocket | null = null;
+      static created = 0;
       readonly readyState = TestWebSocket.OPEN;
       private readonly listeners = new Map<string, Array<(event: Event) => void>>();
       constructor(_url: string) {
+        TestWebSocket.created += 1;
         TestWebSocket.latest = this;
         queueMicrotask(() => this.emit('open', new Event('open')));
       }
@@ -230,15 +238,15 @@ describe('App', () => {
         defaultSlippageBps: 300,
         marketRefreshMs: { hot: 14_400_000, new: 300_000 },
       });
-      if (url.includes('/markets')) return response({ items: [token], stale: false });
-      if (url.endsWith(`/tokens/${token.tokenAddress}`)) return response(token);
+      if (url.includes('/markets')) return response({ items: [marketToken], stale: false });
+      if (url.endsWith(`/tokens/${marketToken.tokenAddress}`)) return response(marketToken);
       if (url.endsWith('/account/summary')) return response({ quoteBalances: [], positions: [] });
       if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
       if (url.endsWith('/ws-ticket')) return response({ ticket: 'ticket', expiresAt: Date.now() + 30_000 });
       if (url.includes('/candles')) return response({
         chainId: 4663,
-        tokenAddress: token.tokenAddress,
-        marketKey: 'pool_cashcat:NATIVE',
+        tokenAddress: marketToken.tokenAddress,
+        marketKey: 'pool_cashcat_other:OTHER',
         interval: '1m',
         status: 'CATCHING_UP',
         source: 'BITQUERY+CHAIN',
@@ -258,11 +266,18 @@ describe('App', () => {
     const subscription = sent
       .map((payload) => JSON.parse(payload) as { channels?: string[] })
       .find((message) => message.channels?.some((channel) => channel.startsWith('trade:')));
+    expect(subscription).not.toHaveProperty('quote');
     const tradeChannel = subscription?.channels?.find((channel) => channel.startsWith('trade:'));
     expect(tradeChannel).toBeDefined();
     expect(TestWebSocket.latest).not.toBeNull();
 
     act(() => {
+      TestWebSocket.latest?.receive({
+        channel: 'markets:hot',
+        epoch: 'epoch-1',
+        sequence: 1,
+        data: { items: [{ ...marketToken, priceUsd: '0.02', change24h: '90' }] },
+      });
       for (let sequence = 1; sequence <= 25; sequence += 1) {
         const suffix = sequence.toString(16).padStart(64, '0');
         TestWebSocket.latest?.receive({
@@ -283,6 +298,8 @@ describe('App', () => {
         });
       }
     });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(TestWebSocket.created).toBe(1);
 
     expect(await screen.findByText('25 笔')).toBeInTheDocument();
     const newestTxLink = screen.getAllByRole('link', { name: /查看交易/ })[0];
