@@ -8,7 +8,7 @@ export interface Token {
   name: string;
   launchpad: string;
   stage: 'CURVE' | 'GRADUATED';
-  quoteAssetKey: 'NATIVE' | 'USDC' | 'USDT' | 'USDG';
+  quoteAssetKey: 'NATIVE' | 'USDC' | 'USDT' | 'USDG' | 'OTHER';
   priceQuote: string;
   priceUsd: string;
   marketCapUsd: string;
@@ -17,7 +17,7 @@ export interface Token {
   change24h: string;
   holders: number;
   ageSeconds: number;
-  pool: { poolKey: string; poolType: string; liquidityUsd: string };
+  pool: { poolKey: string; poolType: string; liquidityUsd: string; quoteTokenSymbol?: string };
   tradeStatus: 'TRADABLE' | 'UNSUPPORTED_POOL_TYPE';
   riskFlags: string[];
   security: {

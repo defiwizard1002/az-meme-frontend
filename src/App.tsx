@@ -77,7 +77,9 @@ function securityLabels(token: Token): string[] {
 }
 
 function quoteLabel(token: Token): string {
-  return token.quoteAssetKey === 'NATIVE' ? 'ETH' : token.quoteAssetKey;
+  if (token.quoteAssetKey === 'NATIVE') return 'ETH';
+  if (token.quoteAssetKey === 'OTHER') return token.pool.quoteTokenSymbol ?? 'OTHER';
+  return token.quoteAssetKey;
 }
 
 interface StreamMessage<T> {
