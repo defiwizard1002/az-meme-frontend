@@ -59,7 +59,7 @@ export interface Trade {
   priceUsd: string;
   baseAmount: string;
   quoteAmount: string;
-  quoteAsset: 'ETH' | 'USDC' | 'USDT' | 'USDG';
+  quoteAsset: string;
   trader: string;
   txHash: string;
 }

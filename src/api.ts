@@ -1,4 +1,4 @@
-import type { AccountSummary, Asset, CandleSnapshot, Interval, Order, Quote, Token } from './types';
+import type { AccountSummary, Asset, CandleSnapshot, Interval, Order, Quote, Token, Trade } from './types';
 
 interface Envelope<T> {
   rc: number;
@@ -94,6 +94,11 @@ export const memeApi = {
     if (options?.to !== undefined) query.set('to', String(options.to));
     if (options?.marketKey) query.set('marketKey', options.marketKey);
     return request<CandleSnapshot>(`/sapi/v1/meme/tokens/${tokenAddress}/candles?${query.toString()}`);
+  },
+  getTrades: (tokenAddress: string, marketKey: string, cursor?: string) => {
+    const query = new URLSearchParams({ marketKey, limit: '100' });
+    if (cursor) query.set('cursor', cursor);
+    return request<{ items: Trade[]; nextCursor: string | null }>(`/sapi/v1/meme/tokens/${tokenAddress}/trades?${query.toString()}`);
   },
   getAccount: () => request<AccountSummary>('/sapi/v1/meme/account/summary'),
   createQuote: (input: { side: 'BUY' | 'SELL'; tokenAddress: string; settlementAsset: Asset; amountIn: string; slippageBps: number }) =>

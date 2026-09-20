@@ -100,6 +100,7 @@ describe('App', () => {
         });
       }
       if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
+      if (url.includes('/trades?')) return response({ items: [], nextCursor: null });
       if (url.endsWith('/sapi/v4/fund/balance/transfer')) {
         expect(new Headers(init?.headers).get('authorization')).toBe('Bearer mock-az-session-token');
         expect(JSON.parse(String(init?.body))).toMatchObject({ from: 'SPOT', to: 'MEME', currency: 'ETH', amount: '0.1' });
@@ -202,6 +203,7 @@ describe('App', () => {
       });
       if (url.endsWith('/account/summary')) return response({ quoteBalances: [], positions: [] });
       if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
+      if (url.includes('/trades?')) return response({ items: [], nextCursor: null });
       throw new Error(`Unexpected request ${url}`);
     });
 
@@ -277,6 +279,7 @@ describe('App', () => {
       if (url.endsWith('/account/summary')) return response({ quoteBalances: [], positions: [] });
       if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
       if (url.endsWith('/ws-ticket')) return response({ ticket: 'ticket', expiresAt: Date.now() + 30_000 });
+      if (url.includes('/trades?')) return response({ items: [], nextCursor: null });
       if (url.includes('/candles')) {
         const requestedInterval = new URL(url).searchParams.get('interval');
         return response({
@@ -348,7 +351,7 @@ describe('App', () => {
     expect(await screen.findByText('25 笔')).toBeInTheDocument();
     const newestTxLink = screen.getAllByRole('link', { name: /查看交易/ })[0];
     expect(newestTxLink).toHaveAttribute('href', `https://robinhoodchain.blockscout.com/tx/0x${'19'.padStart(64, '0')}`);
-    expect(screen.getAllByRole('link', { name: /查看交易/ })).toHaveLength(20);
+    expect(screen.getAllByRole('link', { name: /查看交易/ })).toHaveLength(25);
     const tradeRows = screen.getByLabelText('实时成交').querySelector('.trade-rows') as HTMLDivElement;
     Object.defineProperties(tradeRows, {
       scrollHeight: { configurable: true, value: 1_000 },
@@ -391,5 +394,80 @@ describe('App', () => {
     expect(TestWebSocket.maxActive).toBe(1);
     expect(screen.getByText('25 笔')).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: /查看交易/ })).toHaveLength(25);
+  });
+
+  it('loads 100 persisted trades, pages to older rows, and copies rendered addresses', async () => {
+    vi.stubGlobal('WebSocket', undefined);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const storedTrades = Array.from({ length: 102 }, (_, index) => ({
+      tradeId: `stored-${index}`,
+      t: Math.floor(Date.now() / 1000) - index,
+      side: index % 2 === 0 ? 'BUY' : 'SELL',
+      priceUsd: String(0.02 + index / 10_000),
+      baseAmount: String(index + 1),
+      quoteAmount: '0.1',
+      quoteAsset: 'SPCX',
+      trader: `0x${index.toString(16).padStart(40, '0')}`,
+      txHash: `0x${index.toString(16).padStart(64, '0')}`,
+    }));
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith('/uaapi/user/web3/get-nonce')) return response({ nonce: 'mock-nonce', message: 'AZ login message' });
+      if (url.endsWith('/uaapi/user/web3/login')) return response({ accessToken: 'mock-az-session-token', expiresAt: Date.now() + 3600000 });
+      if (url.endsWith('/uaapi/user/user/getDesensitizedUserInfo')) return response({ userId: 'mock-user', accountId: 'mock-account', loginStatus: 'LOGGED_IN' });
+      if (url.endsWith('/config')) return response({
+        chainId: 4663,
+        chainName: 'Robinhood Chain',
+        explorerBaseUrl: 'https://robinhoodchain.blockscout.com',
+        defaultSlippageBps: 300,
+        marketRefreshMs: { hot: 14_400_000, new: 300_000 },
+      });
+      if (url.includes('/markets')) return response({ items: [token], stale: false });
+      if (url.endsWith(`/tokens/${token.tokenAddress}`)) return response(token);
+      if (url.endsWith('/account/summary')) return response({ quoteBalances: [], positions: [] });
+      if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
+      if (url.includes('/candles')) return response({
+        chainId: 4663,
+        tokenAddress: token.tokenAddress,
+        marketKey: 'pool_cashcat:NATIVE',
+        interval: '1m',
+        status: 'READY',
+        source: 'BITQUERY+CHAIN',
+        items: [],
+      });
+      if (url.includes('/trades?')) {
+        const cursor = new URL(url).searchParams.get('cursor');
+        return cursor === 'older-page'
+          ? response({ items: storedTrades.slice(100), nextCursor: null })
+          : response({ items: storedTrades.slice(0, 100), nextCursor: 'older-page' });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    });
+
+    render(<App />);
+    expect(await screen.findByText('100 笔')).toBeInTheDocument();
+    expect(screen.getByText('Quote')).toBeInTheDocument();
+    expect(screen.getByText('Value')).toBeInTheDocument();
+    expect(screen.getAllByText('0.1 SPCX')).toHaveLength(100);
+    expect(screen.getAllByTestId('trade-value')[0]).toHaveTextContent('$0.02');
+    expect(screen.getAllByRole('link', { name: /打开交易者地址/ })[0]).toHaveAttribute(
+      'href',
+      `https://robinhoodchain.blockscout.com/address/${storedTrades[0]!.trader}`,
+    );
+    const tradeRows = screen.getByLabelText('实时成交').querySelector('.trade-rows') as HTMLDivElement;
+    Object.defineProperties(tradeRows, {
+      scrollHeight: { configurable: true, value: 1_000 },
+      clientHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, value: 600 },
+    });
+    fireEvent.scroll(tradeRows);
+    expect(await screen.findByText('102 笔')).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: /查看交易/ })).toHaveLength(102);
+
+    fireEvent.click(screen.getByRole('button', { name: `复制地址 ${token.tokenAddress}` }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(token.tokenAddress));
+    fireEvent.click(screen.getByRole('button', { name: `复制地址 ${storedTrades[0]!.trader}` }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(storedTrades[0]!.trader));
   });
 });

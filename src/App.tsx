@@ -9,7 +9,6 @@ import './styles.css';
 const intervals: Interval[] = ['1s', '1m', '15m', '1h', '4h'];
 const ethPresets = ['0.05', '0.1', '0.25', '0.5'];
 const stablePresets = ['25', '100', '250', '500'];
-const tradesPerBatch = 20;
 const candlePageSize = 300;
 
 function compact(value: string | number): string {
@@ -68,6 +67,24 @@ function age(seconds: number): string {
 
 function shortAddress(value: string): string {
   return `${value.slice(0, 5)}...${value.slice(-4)}`;
+}
+
+function CopyableAddress({ value, iconOnly = false }: { value: string; iconOnly?: boolean }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setState('copied');
+    } catch {
+      setState('failed');
+    }
+    window.setTimeout(() => setState('idle'), 1_200);
+  };
+  return (
+    <button type="button" className="copy-address" onClick={() => void copy()} aria-label={`复制地址 ${value}`} title={value}>
+      {state === 'copied' ? (iconOnly ? '✓' : '已复制') : state === 'failed' ? (iconOnly ? '×' : '复制失败') : iconOnly ? '⧉' : shortAddress(value)}
+    </button>
+  );
 }
 
 function poolLabel(poolType: string): string {
@@ -150,6 +167,12 @@ interface StreamBatch<T> {
   items: T[];
 }
 
+interface TradeCacheEntry {
+  items: Trade[];
+  nextCursor: string | null;
+  initialized: boolean;
+}
+
 function candleCacheKey(tokenAddress: string, interval: Interval): string {
   return `${tokenAddress.toLowerCase()}:${interval}`;
 }
@@ -161,6 +184,16 @@ function tradeCacheKey(tokenAddress: string, marketKey: string): string {
 function transactionUrl(explorerBaseUrl: string, txHash: string): string | null {
   if (!explorerBaseUrl || !/^0x[a-fA-F0-9]{64}$/.test(txHash)) return null;
   return `${explorerBaseUrl.replace(/\/+$/, '')}/tx/${txHash}`;
+}
+
+function addressUrl(explorerBaseUrl: string, address: string): string | null {
+  if (!explorerBaseUrl || !/^0x[a-fA-F0-9]{40}$/.test(address)) return null;
+  return `${explorerBaseUrl.replace(/\/+$/, '')}/address/${address}`;
+}
+
+function tradeValueUsd(trade: Trade): string {
+  const value = Number(trade.baseAmount) * Number(trade.priceUsd);
+  return Number.isFinite(value) ? money(value) : '$0';
 }
 
 function normalizedDecimal(value: string): string {
@@ -207,7 +240,8 @@ export default function App() {
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [snapshot, setSnapshot] = useState<CandleSnapshot | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
-  const [visibleTradeCount, setVisibleTradeCount] = useState(tradesPerBatch);
+  const [tradeNextCursor, setTradeNextCursor] = useState<string | null>(null);
+  const [tradesLoading, setTradesLoading] = useState(false);
   const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
   const [interval, setIntervalValue] = useState<Interval>('1m');
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
@@ -236,7 +270,7 @@ export default function App() {
   const [transferAmount, setTransferAmount] = useState('0.1');
   const [transferState, setTransferState] = useState<string | null>(null);
   const candleCacheRef = useRef(new Map<string, CandleSnapshot>());
-  const tradeCacheRef = useRef(new Map<string, Trade[]>());
+  const tradeCacheRef = useRef(new Map<string, TradeCacheEntry>());
   const tradeMarketKeyRef = useRef(new Map<string, string>());
   const orderIdempotencyRef = useRef(new Map<string, string>());
   const orderPollsRef = useRef(new Map<string, { controller: AbortController; promise: Promise<void> }>());
@@ -253,12 +287,8 @@ export default function App() {
         ? snapshot
         : null)
     : null;
-  const activeTradeKey = selected
-    ? (() => {
-        const tokenAddress = selected.tokenAddress.toLowerCase();
-        const marketKey = activeSnapshot?.marketKey ?? tradeMarketKeyRef.current.get(tokenAddress);
-        return marketKey ? tradeCacheKey(tokenAddress, marketKey) : null;
-      })()
+  const activeTradeKey = selected && selectedMarketKey
+    ? tradeCacheKey(selected.tokenAddress, selectedMarketKey)
     : null;
   const hasTrades = trades.length > 0;
 
@@ -392,9 +422,37 @@ export default function App() {
   }, [discoveryTab, marketRefreshMs]);
 
   useEffect(() => {
-    setVisibleTradeCount(tradesPerBatch);
-    setTrades(activeTradeKey ? tradeCacheRef.current.get(activeTradeKey) ?? [] : []);
-  }, [activeTradeKey]);
+    if (!activeTradeKey || !selectedTokenAddress || !selectedMarketKey) {
+      setTrades([]);
+      setTradeNextCursor(null);
+      return;
+    }
+    let active = true;
+    const cached = tradeCacheRef.current.get(activeTradeKey);
+    setTrades(cached?.items ?? []);
+    setTradeNextCursor(cached?.nextCursor ?? null);
+    setTradesLoading(true);
+    void memeApi.getTrades(selectedTokenAddress, selectedMarketKey)
+      .then((page) => {
+        if (!active) return;
+        const current = tradeCacheRef.current.get(activeTradeKey);
+        const existing = current?.items ?? [];
+        const seen = new Set(page.items.map((trade) => trade.tradeId));
+        const items = [...page.items, ...existing.filter((trade) => !seen.has(trade.tradeId))];
+        const nextCursor = current?.initialized && existing.length >= 100
+          ? current.nextCursor
+          : page.nextCursor;
+        const entry = { items, nextCursor, initialized: true };
+        tradeCacheRef.current.set(activeTradeKey, entry);
+        setTrades(items);
+        setTradeNextCursor(nextCursor);
+      })
+      .catch((cause: unknown) => {
+        if (active) setError(friendlyError(cause, '成交加载失败'));
+      })
+      .finally(() => { if (active) setTradesLoading(false); });
+    return () => { active = false; };
+  }, [activeTradeKey, selectedMarketKey, selectedTokenAddress]);
 
   useEffect(() => {
     if (!hasTrades) return;
@@ -427,12 +485,14 @@ export default function App() {
   useEffect(() => {
     let active = true;
     void azAuth.loginMock()
-      .then(() => memeApi.getAccount())
-      .then((summary) => {
+      .then(async () => {
         if (!active) return;
-        setAccount(summary);
         setSessionReady(true);
-        void memeApi.getOrders()
+        await Promise.all([
+          memeApi.getAccount()
+            .then((summary) => { if (active) setAccount(summary); })
+            .catch((cause: unknown) => { if (active) setError(friendlyError(cause, '账户余额加载失败')); }),
+          memeApi.getOrders()
           .then(({ items }) => {
             if (!active) return;
             const pending = items.filter((order) => order.status !== 'SETTLED'
@@ -445,7 +505,8 @@ export default function App() {
           })
           .catch((cause: unknown) => {
             if (active) setError(friendlyError(cause, '订单状态恢复失败'));
-          });
+          }),
+        ]);
       })
       .catch((cause: unknown) => {
         setSessionToken(null);
@@ -617,12 +678,13 @@ export default function App() {
             }
             if (message.channel === tradeChannel) {
               const batch = streamBatchItems(message.data as Trade | StreamBatch<Trade>);
-              const current = tradeCacheRef.current.get(currentTradeCacheKey) ?? [];
+              const current = tradeCacheRef.current.get(currentTradeCacheKey)
+                ?? { items: [], nextCursor: null, initialized: false };
               const incoming = [...batch].reverse();
               const incomingIds = new Set(incoming.map((trade) => trade.tradeId));
-              const next = [...incoming, ...current.filter((trade) => !incomingIds.has(trade.tradeId))];
-              tradeCacheRef.current.set(currentTradeCacheKey, next);
-              setTrades(next);
+              const items = [...incoming, ...current.items.filter((trade) => !incomingIds.has(trade.tradeId))];
+              tradeCacheRef.current.set(currentTradeCacheKey, { ...current, items });
+              setTrades(items);
             }
           } catch {
             setError('实时行情暂时不可用，正在重连');
@@ -677,11 +739,24 @@ export default function App() {
     ? account?.quoteBalances.find((item) => item.asset === asset)?.available ?? '0'
     : selectedPosition?.available ?? '0';
   const displayedPrice = activeSnapshot?.items.at(-1)?.c ?? selected?.priceUsd ?? '0';
-  const visibleTrades = trades.slice(0, visibleTradeCount);
   const loadMoreTrades = useCallback((element: HTMLDivElement) => {
     if (element.scrollHeight - element.scrollTop - element.clientHeight > 40) return;
-    setVisibleTradeCount((count) => Math.min(trades.length, count + tradesPerBatch));
-  }, [trades.length]);
+    if (!activeTradeKey || !selectedTokenAddress || !selectedMarketKey || !tradeNextCursor || tradesLoading) return;
+    setTradesLoading(true);
+    void memeApi.getTrades(selectedTokenAddress, selectedMarketKey, tradeNextCursor)
+      .then((page) => {
+        const current = tradeCacheRef.current.get(activeTradeKey)
+          ?? { items: [], nextCursor: tradeNextCursor, initialized: true };
+        const seen = new Set(current.items.map((trade) => trade.tradeId));
+        const items = [...current.items, ...page.items.filter((trade) => !seen.has(trade.tradeId))];
+        const entry = { items, nextCursor: page.nextCursor, initialized: true };
+        tradeCacheRef.current.set(activeTradeKey, entry);
+        setTrades(items);
+        setTradeNextCursor(page.nextCursor);
+      })
+      .catch((cause: unknown) => setError(friendlyError(cause, '更早成交加载失败')))
+      .finally(() => setTradesLoading(false));
+  }, [activeTradeKey, selectedMarketKey, selectedTokenAddress, tradeNextCursor, tradesLoading]);
   const totalPosition = useMemo(() => account?.positions.reduce((sum, item) => sum + Number(item.valueUsd), 0) ?? 0, [account]);
   const balanceLabel = account?.quoteBalances
     .filter((item) => item.asset === 'ETH' || item.asset === 'USDC' || item.asset === 'USDT')
@@ -890,7 +965,7 @@ export default function App() {
                 <TokenMark token={selected} />
                 <div>
                   <div className="token-title"><strong>{selected.symbol} / {quoteLabel(selected)}</strong><span className={selected.stage === 'GRADUATED' ? 'badge graduated' : 'badge curve'}>{stageLabel(selected)}</span><span className="badge launchpad">{selected.launchpad}</span><span className="badge pool">{poolLabel(selected.pool.poolType)}</span></div>
-                  <small>{selected.name} / {shortAddress(selected.tokenAddress)}</small>
+                  <small>{selected.name} / <CopyableAddress value={selected.tokenAddress} /></small>
                 </div>
               </div>
               <div className="market-stats">
@@ -918,16 +993,21 @@ export default function App() {
                 <strong>实时成交</strong>
                 <span className="trade-count">{trades.length > 0 ? `${trades.length} 笔` : '最新成交'}</span>
               </header>
-              <div className="trade-head"><span>方向 / 数量</span><span>成交价</span><span>交易者</span><span>Tx</span><span>时间</span></div>
+              <div className="trade-head"><span>方向 / 数量</span><span>成交价</span><span>Quote</span><span>Value</span><span>交易者</span><span>Tx</span><span>时间</span></div>
               <div className="trade-rows" onScroll={(event) => loadMoreTrades(event.currentTarget)}>
-                {trades.length === 0 && <div className="trade-empty">等待最新成交</div>}
-                {visibleTrades.map((trade) => {
+                {trades.length === 0 && <div className="trade-empty">{tradesLoading ? '正在加载成交' : '暂无成交'}</div>}
+                {trades.map((trade) => {
                   const txUrl = transactionUrl(explorerBaseUrl, trade.txHash);
+                  const traderUrl = addressUrl(explorerBaseUrl, trade.trader);
                   return (
                     <div className="trade-row" key={trade.tradeId}>
                       <span className={trade.side === 'BUY' ? 'positive' : 'negative'}>{trade.side === 'BUY' ? '买' : '卖'} {compact(trade.baseAmount)} {selected.symbol}</span>
                       <span data-testid="trade-price">{money(trade.priceUsd)}</span>
-                      <span>{shortAddress(trade.trader)}</span>
+                      <span>{compact(trade.quoteAmount)} {trade.quoteAsset}</span>
+                      <span data-testid="trade-value">{tradeValueUsd(trade)}</span>
+                      <span className="trader-address">{traderUrl
+                        ? <a className="trade-tx" href={traderUrl} target="_blank" rel="noreferrer" aria-label={`打开交易者地址 ${shortAddress(trade.trader)}`}>{shortAddress(trade.trader)} ↗</a>
+                        : shortAddress(trade.trader)}<CopyableAddress value={trade.trader} iconOnly /></span>
                       <span>{txUrl
                         ? <a className="trade-tx" href={txUrl} target="_blank" rel="noreferrer" aria-label={`查看交易 ${shortAddress(trade.txHash)}`}>{shortAddress(trade.txHash)} ↗</a>
                         : shortAddress(trade.txHash)}</span>
@@ -935,7 +1015,8 @@ export default function App() {
                     </div>
                   );
                 })}
-                {visibleTrades.length < trades.length && <div className="trade-more">向下滚动加载更多</div>}
+                {tradesLoading && trades.length > 0 && <div className="trade-more">正在加载</div>}
+                {!tradesLoading && tradeNextCursor && <div className="trade-more">向下滚动加载更多</div>}
               </div>
             </section>
           </> : <div className="empty">请选择代币</div>}
