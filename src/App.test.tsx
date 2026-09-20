@@ -362,6 +362,31 @@ describe('App', () => {
     expect(screen.getAllByRole('link', { name: /查看交易/ })).toHaveLength(25);
     expect(screen.getAllByText(/2[5-7]s/).length).toBeGreaterThan(0);
 
+    fireEvent.click(screen.getByRole('button', { name: '暂停' }));
+    act(() => {
+      TestWebSocket.latest?.receive({
+        channel: tradeChannel,
+        epoch: 'epoch-1',
+        sequence: 6,
+        data: {
+          items: [{
+            tradeId: 'trade-26',
+            t: Math.floor(Date.now() / 1000),
+            side: 'BUY',
+            priceUsd: '0.026',
+            baseAmount: '26',
+            quoteAmount: '0.1',
+            quoteAsset: 'ETH',
+            trader: `0x${'26'.padStart(40, '0')}`,
+            txHash: `0x${'1a'.padStart(64, '0')}`,
+          }],
+        },
+      });
+    });
+    expect(screen.getByText('25 笔')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    expect(await screen.findByText('26 笔')).toBeInTheDocument();
+
     const candleStatusChannel = subscription?.channels?.find((channel) => channel.startsWith('candle-status:'));
     expect(candleStatusChannel).toBeDefined();
     act(() => {
@@ -392,8 +417,8 @@ describe('App', () => {
     await waitFor(() => expect(TestWebSocket.created).toBe(3));
     expect(TestWebSocket.active).toBe(1);
     expect(TestWebSocket.maxActive).toBe(1);
-    expect(screen.getByText('25 笔')).toBeInTheDocument();
-    expect(screen.getAllByRole('link', { name: /查看交易/ })).toHaveLength(25);
+    expect(screen.getByText('26 笔')).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: /查看交易/ })).toHaveLength(26);
   });
 
   it('loads 100 persisted trades, pages to older rows, and copies rendered addresses', async () => {

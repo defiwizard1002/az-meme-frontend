@@ -242,6 +242,7 @@ export default function App() {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [tradeNextCursor, setTradeNextCursor] = useState<string | null>(null);
   const [tradesLoading, setTradesLoading] = useState(false);
+  const [tradesPaused, setTradesPaused] = useState(false);
   const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
   const [interval, setIntervalValue] = useState<Interval>('1m');
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
@@ -271,6 +272,7 @@ export default function App() {
   const [transferState, setTransferState] = useState<string | null>(null);
   const candleCacheRef = useRef(new Map<string, CandleSnapshot>());
   const tradeCacheRef = useRef(new Map<string, TradeCacheEntry>());
+  const tradesPausedRef = useRef(false);
   const tradeMarketKeyRef = useRef(new Map<string, string>());
   const orderIdempotencyRef = useRef(new Map<string, string>());
   const orderPollsRef = useRef(new Map<string, { controller: AbortController; promise: Promise<void> }>());
@@ -356,6 +358,8 @@ export default function App() {
     const requestId = ++selectionRequestRef.current;
     setError(null);
     setMarketError(null);
+    tradesPausedRef.current = false;
+    setTradesPaused(false);
     setSelected(summary);
     try {
       const detail = await memeApi.getToken(summary.tokenAddress);
@@ -444,8 +448,10 @@ export default function App() {
           : page.nextCursor;
         const entry = { items, nextCursor, initialized: true };
         tradeCacheRef.current.set(activeTradeKey, entry);
-        setTrades(items);
-        setTradeNextCursor(nextCursor);
+        if (!tradesPausedRef.current) {
+          setTrades(items);
+          setTradeNextCursor(nextCursor);
+        }
       })
       .catch((cause: unknown) => {
         if (active) setError(friendlyError(cause, '成交加载失败'));
@@ -455,11 +461,11 @@ export default function App() {
   }, [activeTradeKey, selectedMarketKey, selectedTokenAddress]);
 
   useEffect(() => {
-    if (!hasTrades) return;
+    if (!hasTrades || tradesPaused) return;
     setNowSeconds(Math.floor(Date.now() / 1000));
     const timer = window.setInterval(() => setNowSeconds(Math.floor(Date.now() / 1000)), 1_000);
     return () => window.clearInterval(timer);
-  }, [hasTrades]);
+  }, [hasTrades, tradesPaused]);
 
   useEffect(() => {
     let active = true;
@@ -538,7 +544,7 @@ export default function App() {
           setMarketError(null);
         } else if (result.status === 'STALE') {
           setChartLoading(false);
-          setMarketError('行情暂时不可用');
+          setMarketError(merged.items.length > 0 ? null : '行情暂时不可用');
         }
       })
       .catch((cause: unknown) => {
@@ -631,7 +637,7 @@ export default function App() {
                 setMarketError(null);
               } else if (nextSnapshot.status === 'STALE') {
                 setChartLoading(false);
-                setMarketError('行情暂时不可用');
+                setMarketError(nextSnapshot.items.length > 0 ? null : '行情暂时不可用');
               }
               return;
             }
@@ -684,7 +690,7 @@ export default function App() {
               const incomingIds = new Set(incoming.map((trade) => trade.tradeId));
               const items = [...incoming, ...current.items.filter((trade) => !incomingIds.has(trade.tradeId))];
               tradeCacheRef.current.set(currentTradeCacheKey, { ...current, items });
-              setTrades(items);
+              if (!tradesPausedRef.current) setTrades(items);
             }
           } catch {
             setError('实时行情暂时不可用，正在重连');
@@ -740,6 +746,7 @@ export default function App() {
     : selectedPosition?.available ?? '0';
   const displayedPrice = activeSnapshot?.items.at(-1)?.c ?? selected?.priceUsd ?? '0';
   const loadMoreTrades = useCallback((element: HTMLDivElement) => {
+    if (tradesPausedRef.current) return;
     if (element.scrollHeight - element.scrollTop - element.clientHeight > 40) return;
     if (!activeTradeKey || !selectedTokenAddress || !selectedMarketKey || !tradeNextCursor || tradesLoading) return;
     setTradesLoading(true);
@@ -751,12 +758,25 @@ export default function App() {
         const items = [...current.items, ...page.items.filter((trade) => !seen.has(trade.tradeId))];
         const entry = { items, nextCursor: page.nextCursor, initialized: true };
         tradeCacheRef.current.set(activeTradeKey, entry);
-        setTrades(items);
+        if (!tradesPausedRef.current) setTrades(items);
         setTradeNextCursor(page.nextCursor);
       })
       .catch((cause: unknown) => setError(friendlyError(cause, '更早成交加载失败')))
       .finally(() => setTradesLoading(false));
   }, [activeTradeKey, selectedMarketKey, selectedTokenAddress, tradeNextCursor, tradesLoading]);
+  const toggleTradesPaused = useCallback(() => {
+    const next = !tradesPausedRef.current;
+    tradesPausedRef.current = next;
+    setTradesPaused(next);
+    if (!next && activeTradeKey) {
+      const cached = tradeCacheRef.current.get(activeTradeKey);
+      if (cached) {
+        setTrades(cached.items);
+        setTradeNextCursor(cached.nextCursor);
+      }
+      setNowSeconds(Math.floor(Date.now() / 1000));
+    }
+  }, [activeTradeKey]);
   const totalPosition = useMemo(() => account?.positions.reduce((sum, item) => sum + Number(item.valueUsd), 0) ?? 0, [account]);
   const balanceLabel = account?.quoteBalances
     .filter((item) => item.asset === 'ETH' || item.asset === 'USDC' || item.asset === 'USDT')
@@ -813,13 +833,13 @@ export default function App() {
   const loadOlderCandles = useCallback(async (before: number): Promise<number> => {
     if (!selected) return 0;
     try {
-      for (let attempt = 0; attempt < 40; attempt += 1) {
+      const deadline = Date.now() + 25_000;
+      while (Date.now() < deadline) {
         const marketKey = snapshot?.tokenAddress.toLowerCase() === selected.tokenAddress.toLowerCase()
           && snapshot.interval === interval
           ? snapshot.marketKey
           : selected.pool.poolKey + ':' + selected.quoteAssetKey;
         const result = await memeApi.getCandles(selected.tokenAddress, interval, { to: before, limit: candlePageSize, marketKey });
-        if (result.status === 'STALE') throw new Error('更早行情加载失败');
         if (result.status === 'READY') {
           setCachedSnapshot((current) => {
             if (!current
@@ -832,7 +852,10 @@ export default function App() {
           });
           return result.items.length;
         }
-        await new Promise((resolvePromise) => window.setTimeout(resolvePromise, 250));
+        // Bitquery may use its full 15 second upstream timeout. STALE is retryable
+        // here because the backend keeps cached candles visible and expires the
+        // failed load key before this deadline.
+        await new Promise((resolvePromise) => window.setTimeout(resolvePromise, result.status === 'STALE' ? 1_000 : 500));
       }
       throw new Error('更早行情加载超时');
     } catch (cause) {
@@ -982,8 +1005,7 @@ export default function App() {
               </div>
               <span className={Number(selected.change24h) >= 0 ? 'positive' : 'negative'}>{formatPercent(selected.change24h)} / 24h</span>
             </div>
-            {activeSnapshot && (activeSnapshot.status === 'READY'
-              || (activeSnapshot.status === 'CATCHING_UP' && activeSnapshot.items.length > 0))
+            {activeSnapshot && (activeSnapshot.status !== 'STALE' || activeSnapshot.items.length > 0)
               ? <CandleChart key={`${selected.tokenAddress}:${activeSnapshot.marketKey}:${interval}`} candles={activeSnapshot.items} symbol={selected.symbol} refreshing={chartLoading} onLoadBefore={loadOlderCandles} />
               : <div className="chart-state">{marketError
                   ? <div className="market-retry"><span>{marketError}</span><button type="button" onClick={() => setMarketRetry((value) => value + 1)}>重试</button></div>
@@ -991,7 +1013,12 @@ export default function App() {
             <section className="trade-tape" aria-label="实时成交">
               <header>
                 <strong>实时成交</strong>
-                <span className="trade-count">{trades.length > 0 ? `${trades.length} 笔` : '最新成交'}</span>
+                <div className="trade-actions">
+                  <span className="trade-count">{trades.length > 0 ? `${trades.length} 笔` : '最新成交'}</span>
+                  <button type="button" className={tradesPaused ? 'trade-pause active' : 'trade-pause'} onClick={toggleTradesPaused}>
+                    {tradesPaused ? '继续' : '暂停'}
+                  </button>
+                </div>
               </header>
               <div className="trade-head"><span>方向 / 数量</span><span>成交价</span><span>Quote</span><span>Value</span><span>交易者</span><span>Tx</span><span>时间</span></div>
               <div className="trade-rows" onScroll={(event) => loadMoreTrades(event.currentTarget)}>

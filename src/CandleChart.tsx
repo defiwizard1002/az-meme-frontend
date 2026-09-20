@@ -236,8 +236,12 @@ export function CandleChart({ candles, symbol, refreshing = false, onLoadBefore 
   return (
     <figure className="chart" aria-label={`${symbol} K 线图`}>
       <div ref={containerRef} className="chart-canvas" data-testid="tradingview-chart" data-history-loading={historyLoading ? 'true' : 'false'} />
-      {candles.length === 0 && <div className="chart-empty">暂无成交 K 线</div>}
-      {(historyLoading || refreshing) && <div className="history-loading">{historyLoading ? '正在加载更早行情' : '正在更新行情'}</div>}
+      {candles.length === 0 && !refreshing && <div className="chart-empty">暂无成交 K 线</div>}
+      {(historyLoading || refreshing) && <div
+        className="history-loading"
+        role="status"
+        aria-label={historyLoading ? '正在加载更早行情' : '正在加载行情'}
+      ><span /><span /><span /></div>}
     </figure>
   );
 }

@@ -106,4 +106,27 @@ describe('CandleChart', () => {
     expect(screen.getByText('暂无成交 K 线')).toBeInTheDocument();
     expect(chartMocks.setData).toHaveBeenCalledWith([]);
   });
+
+  it('shows a compact animated status while Bitquery history is loading', () => {
+    chartMocks.createChart.mockReturnValue({
+      addSeries: vi.fn(() => ({
+        setData: chartMocks.setData,
+        update: chartMocks.update,
+        priceScale: () => ({ applyOptions: vi.fn() }),
+      })),
+      applyOptions: vi.fn(),
+      timeScale: () => ({
+        fitContent: chartMocks.fitContent,
+        subscribeVisibleLogicalRangeChange: chartMocks.subscribeVisibleRange,
+        unsubscribeVisibleLogicalRangeChange: chartMocks.unsubscribeVisibleRange,
+        getVisibleLogicalRange: chartMocks.getVisibleRange,
+        setVisibleLogicalRange: chartMocks.setVisibleRange,
+      }),
+      remove: vi.fn(),
+    });
+
+    render(<CandleChart symbol="JEV" candles={[]} refreshing />);
+
+    expect(screen.getByRole('status', { name: '正在加载行情' }).querySelectorAll('span')).toHaveLength(3);
+  });
 });

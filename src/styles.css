@@ -132,7 +132,11 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .chart { position: relative; margin: 0; border-bottom: 1px solid var(--line); }
 .chart-canvas { width: 100%; height: clamp(480px, calc(100dvh - 232px), 720px); }
 .chart-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 11px; pointer-events: none; }
-.history-loading { position: absolute; top: 10px; left: 12px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 5px; background: rgb(13 12 18 / 88%); color: var(--muted); font-size: 9px; pointer-events: none; }
+.history-loading { position: absolute; top: 10px; left: 12px; display: flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: 1px solid var(--line); border-radius: 5px; background: rgb(13 12 18 / 88%); pointer-events: none; }
+.history-loading span { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); animation: history-dot 1s ease-in-out infinite; }
+.history-loading span:nth-child(2) { animation-delay: .14s; }
+.history-loading span:nth-child(3) { animation-delay: .28s; }
+@keyframes history-dot { 0%, 60%, 100% { opacity: .28; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
 .chart-state, .full-state { display: grid; place-items: center; color: var(--muted); }
 .chart-state { min-height: clamp(480px, calc(100dvh - 232px), 720px); border-bottom: 1px solid var(--line); }
 .market-retry { display: flex; align-items: center; gap: 10px; }
@@ -149,6 +153,9 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .trade-pagination button:hover:not(:disabled) { border-color: var(--line-strong); color: var(--text); }
 .trade-pagination button:disabled { cursor: default; opacity: .35; }
 .trade-count { color: var(--subtle); font-size: 9px; }
+.trade-actions { display: flex; align-items: center; gap: 8px; }
+.trade-pause { height: 22px; padding: 0 8px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: var(--muted); font-size: 9px; cursor: pointer; }
+.trade-pause:hover, .trade-pause.active { border-color: var(--accent-dim); color: var(--accent); }
 .trade-head, .trade-row { display: grid; grid-template-columns: 1.3fr .72fr .8fr .72fr .9fr .8fr .55fr; gap: 10px; align-items: center; }
 .trade-head { height: 28px; padding: 0 14px; color: var(--subtle); font-size: 9px; }
 .trade-row { height: 29px; padding: 0 14px; border-top: 1px solid #15131b; color: #a7a2ae; font: 10px ui-monospace, monospace; }
