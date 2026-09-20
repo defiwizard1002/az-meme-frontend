@@ -69,6 +69,9 @@ describe('App', () => {
 
   it('renders markets, READY candles and account balances from API responses', async () => {
     vi.stubGlobal('WebSocket', undefined);
+    let resolveTokenDetail!: (value: Response) => void;
+    const tokenDetail = new Promise<Response>((resolve) => { resolveTokenDetail = resolve; });
+    let candleRequestedBeforeDetail = false;
     vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith('/uaapi/user/web3/get-nonce')) return response({ nonce: 'mock-nonce', message: 'AZ login message' });
@@ -88,7 +91,7 @@ describe('App', () => {
         items: [{ ...token, pool: { ...token.pool, poolType: 'UNSUPPORTED' }, tradeStatus: 'UNSUPPORTED_POOL_TYPE' }],
         stale: false,
       });
-      if (url.endsWith(`/tokens/${token.tokenAddress}`)) return response(token);
+      if (url.endsWith(`/tokens/${token.tokenAddress}`)) return tokenDetail;
       if (url.endsWith('/account/summary')) {
         expect(new Headers(init?.headers).get('authorization')).toBe('Bearer mock-az-session-token');
         return response({
@@ -103,6 +106,7 @@ describe('App', () => {
         return response(10001);
       }
       if (url.includes('/candles')) {
+        candleRequestedBeforeDetail = true;
         expect(new URL(url).searchParams.get('limit')).toBe('300');
         return response({
         chainId: 4663,
@@ -121,11 +125,13 @@ describe('App', () => {
     expect(screen.getByText('正在加载')).toBeInTheDocument();
     expect(await screen.findAllByText('CASHCAT')).not.toHaveLength(0);
     await waitFor(() => expect(screen.getByLabelText('CASHCAT K 线图')).toBeInTheDocument());
+    expect(candleRequestedBeforeDetail).toBe(true);
+    resolveTokenDetail(await response(token));
     expect(screen.getByText('可用 0.42 ETH')).toBeInTheDocument();
     expect(screen.getByText('已登录')).toBeInTheDocument();
     expect(screen.getByText('3%')).toBeInTheDocument();
     expect(screen.getAllByText('PONS').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('UNISWAP V4').length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.getAllByText('UNISWAP V4').length).toBeGreaterThan(0));
     expect(screen.getByText('税 1%')).toBeInTheDocument();
     expect(screen.getByText('已燃烧 95%')).toBeInTheDocument();
     expect(screen.getByText('非蜜罐')).toBeInTheDocument();
@@ -304,7 +310,7 @@ describe('App', () => {
 
     act(() => {
       TestWebSocket.latest?.receive({
-        channel: 'markets:hot',
+        channel: 'markets:live',
         epoch: 'epoch-1',
         sequence: 1,
         data: { items: [{ ...marketToken, priceUsd: '0.02', change24h: '90' }] },
@@ -347,6 +353,26 @@ describe('App', () => {
     fireEvent.scroll(tradeRows);
     expect(screen.getAllByRole('link', { name: /查看交易/ })).toHaveLength(25);
     expect(screen.getAllByText(/2[5-7]s/).length).toBeGreaterThan(0);
+
+    const candleStatusChannel = subscription?.channels?.find((channel) => channel.startsWith('candle-status:'));
+    expect(candleStatusChannel).toBeDefined();
+    act(() => {
+      TestWebSocket.latest?.receive({
+        channel: candleStatusChannel,
+        epoch: 'epoch-1',
+        sequence: 1,
+        data: {
+          chainId: 4663,
+          tokenAddress: marketToken.tokenAddress,
+          marketKey: 'pool_cashcat_other:OTHER',
+          interval: '1m',
+          status: 'READY',
+          source: 'BITQUERY+CHAIN',
+          items: [{ t: 1, o: '0.018', h: '0.019', l: '0.017', c: '0.0184', baseVolume: '1', quoteVolume: '1', revision: 1 }],
+        },
+      });
+    });
+    expect(await screen.findByLabelText('CASHCAT K 线图')).toBeInTheDocument();
 
     act(() => TestWebSocket.latest?.close());
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_100)); });
