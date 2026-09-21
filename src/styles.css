@@ -215,6 +215,7 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .transaction-status { align-self: start; color: var(--muted); }
 .status-confirmed { color: var(--positive); }
 .status-failed { color: var(--negative); }
+.status-submission_unknown { color: var(--warning); }
 .transaction-links { display: flex; grid-column: 1 / -1; gap: 8px; flex-wrap: wrap; }
 .transaction-links a { color: var(--accent); text-decoration: none; }
 .empty { padding: 28px 14px; color: var(--muted); text-align: center; }

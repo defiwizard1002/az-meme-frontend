@@ -210,6 +210,7 @@ describe('App', () => {
           txHashes: [`0x${'a'.repeat(64)}`],
           errorMessage: null,
           createdAt: 1,
+          updatedAt: 1,
         }],
       });
       if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
@@ -242,6 +243,166 @@ describe('App', () => {
     );
     expect(screen.queryByRole('button', { name: '打开账户划转' })).not.toBeInTheDocument();
     expect(azRequests).toBe(0);
+  });
+
+  it('submits a real local main-account trade from the button and refreshes its result', async () => {
+    const sent: string[] = [];
+    let submittedBody: Record<string, unknown> | null = null;
+    let accountLoads = 0;
+    const executionId = '06983bd8-79ef-4e70-b4d4-e3cb4532bb58';
+    class TradeWebSocket {
+      static readonly CONNECTING = 0;
+      static readonly OPEN = 1;
+      static readonly CLOSED = 3;
+      static latest: TradeWebSocket | null = null;
+      readyState = TradeWebSocket.CONNECTING;
+      private readonly listeners = new Map<string, Array<(event: Event) => void>>();
+      constructor(_url: string) {
+        TradeWebSocket.latest = this;
+        queueMicrotask(() => {
+          this.readyState = TradeWebSocket.OPEN;
+          this.emit('open', new Event('open'));
+        });
+      }
+      addEventListener(name: string, listener: (event: Event) => void): void {
+        this.listeners.set(name, [...(this.listeners.get(name) ?? []), listener]);
+      }
+      send(payload: string): void { sent.push(payload); }
+      close(): void {
+        if (this.readyState === TradeWebSocket.CLOSED) return;
+        this.readyState = TradeWebSocket.CLOSED;
+        this.emit('close', new Event('close'));
+      }
+      receive(payload: unknown): void {
+        this.emit('message', { data: JSON.stringify(payload) } as MessageEvent);
+      }
+      private emit(name: string, event: Event): void {
+        for (const listener of this.listeners.get(name) ?? []) listener(event);
+      }
+    }
+    vi.stubGlobal('WebSocket', TradeWebSocket);
+    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(executionId);
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith('/config')) return response({
+        chainId: 4663,
+        chainName: 'Robinhood Chain',
+        explorerBaseUrl: 'https://robinhoodchain.blockscout.com',
+        defaultSlippageBps: 300,
+        marketRefreshMs: { hot: 14_400_000, new: 300_000 },
+        accountMode: 'MAIN_ACCOUNT_POC',
+        mainAccountAddress: '0x9999999999999999999999999999999999999999',
+        settlementAssets: ['USDG', 'ETH'],
+      });
+      if (url.includes('/markets')) return response({ items: [token], stale: false });
+      if (url.endsWith(`/tokens/${token.tokenAddress}`)) return response(token);
+      if (url.endsWith('/account/summary')) {
+        accountLoads += 1;
+        return response({
+          quoteBalances: [{ asset: 'USDG', available: accountLoads > 1 ? '9.9' : '10', frozen: '0' }],
+          positions: accountLoads > 1
+            ? [{ tokenAddress: token.tokenAddress, symbol: token.symbol, available: '123', costUsd: '0', valueUsd: '2.26' }]
+            : [],
+        });
+      }
+      if (url.includes('/account/transactions?')) return response({
+        items: submittedBody ? [{
+          executionId,
+          tokenAddress: token.tokenAddress,
+          tokenSymbol: token.symbol,
+          side: 'BUY',
+          settlementAsset: 'USDG',
+          amountIn: '1',
+          amountOut: '123',
+          status: 'CONFIRMED',
+          txHashes: [`0x${'d'.repeat(64)}`],
+          errorMessage: null,
+          createdAt: 1,
+          updatedAt: 2,
+        }] : [],
+      });
+      if (url.endsWith('/account/transactions') && init?.method === 'POST') {
+        submittedBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return response({
+          executionId,
+          tokenAddress: token.tokenAddress,
+          tokenSymbol: token.symbol,
+          side: 'BUY',
+          settlementAsset: 'USDG',
+          amountIn: '1',
+          amountOut: null,
+          status: 'PENDING',
+          txHashes: [],
+          errorMessage: null,
+          createdAt: 1,
+          updatedAt: 1,
+        });
+      }
+      if (url.endsWith(`/account/transactions/${executionId}`)) return response({
+        executionId,
+        tokenAddress: token.tokenAddress,
+        tokenSymbol: token.symbol,
+        side: 'BUY',
+        settlementAsset: 'USDG',
+        amountIn: '1',
+        amountOut: '123',
+        status: 'CONFIRMED',
+        txHashes: [`0x${'d'.repeat(64)}`],
+        errorMessage: null,
+        createdAt: 1,
+        updatedAt: 2,
+      });
+      if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
+      if (url.endsWith('/ws-ticket')) return response({ ticket: 'trade-ticket', expiresAt: Date.now() + 30_000 });
+      if (url.includes('/trades?')) return response({ items: [], nextCursor: null });
+      if (url.includes('/candles')) return response({
+        chainId: 4663,
+        tokenAddress: token.tokenAddress,
+        marketKey: 'pool_cashcat:NATIVE',
+        interval: '1m',
+        status: 'READY',
+        source: 'BITQUERY+CHAIN',
+        items: [],
+      });
+      throw new Error(`Unexpected request ${url}`);
+    });
+
+    render(<App />);
+    await waitFor(() => expect(sent.some((payload) => (JSON.parse(payload) as { quote?: unknown }).quote)).toBe(true));
+    act(() => {
+      TradeWebSocket.latest?.receive({
+        channel: `quote:${token.tokenAddress.toLowerCase()}`,
+        epoch: 'trade-epoch',
+        sequence: 1,
+        data: {
+          quoteId: 'live-quote-1',
+          tokenAddress: token.tokenAddress,
+          side: 'BUY',
+          settlementAsset: 'USDG',
+          amountIn: '1',
+          expectedAmountOut: '123',
+          minAmountOut: '120',
+          fees: [],
+          expiresAt: Date.now() + 10_000,
+        },
+      });
+    });
+
+    const buy = (await screen.findAllByRole('button', { name: '买入' })).at(-1)!;
+    await waitFor(() => expect(buy).toBeEnabled());
+    fireEvent.click(buy);
+
+    await waitFor(() => expect(submittedBody).toMatchObject({
+      clientExecutionId: executionId,
+      side: 'BUY',
+      tokenAddress: token.tokenAddress,
+      settlementAsset: 'USDG',
+      amountIn: '1',
+      slippageBps: 300,
+    }));
+    expect(await screen.findByText('交易成功')).toBeInTheDocument();
+    expect(await screen.findByText('1 USDG → 123 CASHCAT')).toBeInTheDocument();
+    expect(await screen.findByText('123 枚')).toBeInTheDocument();
   });
 
   it('switches to the requested token even when its detail request fails', async () => {

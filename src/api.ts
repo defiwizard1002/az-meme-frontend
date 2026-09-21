@@ -105,6 +105,18 @@ export const memeApi = {
   },
   getAccount: () => request<AccountSummary>('/sapi/v1/meme/account/summary'),
   getAccountTransactions: () => request<{ items: AccountTransaction[] }>('/sapi/v1/meme/account/transactions?limit=50'),
+  getAccountTransaction: (executionId: string) => request<AccountTransaction>(`/sapi/v1/meme/account/transactions/${executionId}`),
+  executeMainAccountTrade: (input: {
+    clientExecutionId: string;
+    side: 'BUY' | 'SELL';
+    tokenAddress: string;
+    settlementAsset: 'USDG' | 'ETH' | 'USDC';
+    amountIn: string;
+    slippageBps: number;
+  }) => request<AccountTransaction>('/sapi/v1/meme/account/transactions', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }),
   createQuote: (input: { side: 'BUY' | 'SELL'; tokenAddress: string; settlementAsset: Asset; amountIn: string; slippageBps: number }) =>
     request<Quote>('/sapi/v1/meme/quotes', { method: 'POST', body: JSON.stringify(input) }),
   createOrder: (input: { clientOrderId: string; quoteId: string; maxAmountIn: string; minAmountOut: string }) =>

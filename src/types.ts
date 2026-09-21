@@ -96,10 +96,11 @@ export interface AccountTransaction {
   settlementAsset: 'USDG' | 'ETH' | 'USDC';
   amountIn: string;
   amountOut: string | null;
-  status: 'PENDING' | 'CONFIRMED' | 'FAILED';
+  status: 'PENDING' | 'CONFIRMED' | 'FAILED' | 'SUBMISSION_UNKNOWN';
   txHashes: string[];
   errorMessage: string | null;
   createdAt: number;
+  updatedAt: number;
 }
 
 export interface TradePlan {

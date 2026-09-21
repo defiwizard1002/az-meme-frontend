@@ -3,6 +3,7 @@ import { ApiError, azAuth, azFundApi, memeApi, setSessionToken, wsBaseUrl } from
 import { CandleChart } from './CandleChart';
 import { CandleReplayQueue, streamBatchItems } from './candle-replay';
 import { pollOrderUntilTerminal } from './order-tracker';
+import { pollTransactionUntilTerminal } from './transaction-tracker';
 import type { AccountSummary, AccountTransaction, Asset, Candle, CandleSnapshot, Interval, Quote, Token, Trade } from './types';
 import './styles.css';
 
@@ -204,6 +205,11 @@ function normalizedDecimal(value: string): string {
   return normalizedFraction ? normalizedWhole + '.' + normalizedFraction : normalizedWhole;
 }
 
+function upsertAccountTransaction(items: AccountTransaction[], next: AccountTransaction): AccountTransaction[] {
+  return [next, ...items.filter((item) => item.executionId !== next.executionId)]
+    .sort((left, right) => right.createdAt - left.createdAt);
+}
+
 function friendlyError(cause: unknown, fallback: string): string {
   if (!(cause instanceof ApiError)) return cause instanceof Error ? cause.message : fallback;
   const messages: Record<string, string> = {
@@ -212,6 +218,10 @@ function friendlyError(cause: unknown, fallback: string): string {
     MEME_MARKET_MISMATCH: '池子已更新，正在刷新行情',
     MEME_QUOTE_EXPIRED: '报价已过期，请使用最新报价',
     MEME_EXECUTION_DISABLED: '当前环境暂不开放交易',
+    MEME_MAIN_ACCOUNT_BUSY: '上一笔交易仍在处理中',
+    MEME_INSUFFICIENT_MAIN_ACCOUNT_BALANCE: '可用余额不足',
+    MEME_INSUFFICIENT_MAIN_ACCOUNT_GAS: 'Gas 余额不足',
+    MEME_UNSUPPORTED_POOL_TYPE: '当前池暂不支持交易',
   };
   return messages[cause.code] ?? fallback;
 }
@@ -280,6 +290,8 @@ export default function App() {
   const tradeMarketKeyRef = useRef(new Map<string, string>());
   const orderIdempotencyRef = useRef(new Map<string, string>());
   const orderPollsRef = useRef(new Map<string, { controller: AbortController; promise: Promise<void> }>());
+  const mainAccountIdempotencyRef = useRef(new Map<string, string>());
+  const transactionPollsRef = useRef(new Map<string, { controller: AbortController; promise: Promise<void> }>());
   const streamSocketRef = useRef<WebSocket | null>(null);
   const marketChannelsRef = useRef<string[]>([]);
   const selectionRequestRef = useRef(0);
@@ -353,9 +365,56 @@ export default function App() {
     return await promise;
   }, []);
 
+  const refreshMainAccount = useCallback(async () => {
+    const [summary, transactions] = await Promise.all([
+      memeApi.getAccount(),
+      memeApi.getAccountTransactions(),
+    ]);
+    setAccount(summary);
+    setAccountTransactions(transactions.items);
+  }, []);
+
+  const trackMainAccountTransaction = useCallback(async (executionId: string) => {
+    const existing = transactionPollsRef.current.get(executionId);
+    if (existing) return await existing.promise;
+    const controller = new AbortController();
+    const promise = pollTransactionUntilTerminal(executionId, {
+      signal: controller.signal,
+      loadTransaction: memeApi.getAccountTransaction,
+      onUpdate: (latest) => {
+        setAccountTransactions((current) => upsertAccountTransaction(current, latest));
+        if (latest.status === 'CONFIRMED') {
+          setOrderState('交易成功');
+          for (const [key, value] of mainAccountIdempotencyRef.current) {
+            if (value === executionId) mainAccountIdempotencyRef.current.delete(key);
+          }
+          void refreshMainAccount().catch((cause: unknown) => {
+            setError(friendlyError(cause, '余额刷新失败'));
+          });
+          window.setTimeout(() => setOrderState(null), 1200);
+        } else if (latest.status === 'FAILED') {
+          setOrderState('交易失败');
+          for (const [key, value] of mainAccountIdempotencyRef.current) {
+            if (value === executionId) mainAccountIdempotencyRef.current.delete(key);
+          }
+          window.setTimeout(() => setOrderState(null), 1800);
+        } else if (latest.status === 'SUBMISSION_UNKNOWN') {
+          setOrderState('结果待确认');
+        } else {
+          setOrderState('处理中');
+        }
+      },
+      onTemporaryError: () => setOrderState('状态同步中'),
+    }).then(() => undefined).finally(() => transactionPollsRef.current.delete(executionId));
+    transactionPollsRef.current.set(executionId, { controller, promise });
+    return await promise;
+  }, [refreshMainAccount]);
+
   useEffect(() => () => {
     for (const { controller } of orderPollsRef.current.values()) controller.abort();
     orderPollsRef.current.clear();
+    for (const { controller } of transactionPollsRef.current.values()) controller.abort();
+    transactionPollsRef.current.clear();
   }, []);
 
   const selectToken = useCallback(async (summary: Token) => {
@@ -519,7 +578,17 @@ export default function App() {
             .catch((cause: unknown) => { if (active) setError(friendlyError(cause, '账户余额加载失败')); }),
           accountMode === 'MAIN_ACCOUNT_POC'
             ? memeApi.getAccountTransactions()
-                .then(({ items }) => { if (active) setAccountTransactions(items); })
+                .then(({ items }) => {
+                  if (!active) return;
+                  setAccountTransactions(items);
+                  for (const transaction of items) {
+                    if (transaction.status === 'PENDING') {
+                      void trackMainAccountTransaction(transaction.executionId).catch((cause: unknown) => {
+                        if (active) setError(friendlyError(cause, '交易状态同步失败'));
+                      });
+                    }
+                  }
+                })
                 .catch((cause: unknown) => { if (active) setError(friendlyError(cause, '交易记录加载失败')); })
             : Promise.resolve(),
           memeApi.getOrders()
@@ -543,7 +612,7 @@ export default function App() {
         if (active) setError(friendlyError(cause, '登录失败'));
       });
     return () => { active = false; };
-  }, [accountMode, trackOrder]);
+  }, [accountMode, trackMainAccountTransaction, trackOrder]);
 
   useEffect(() => {
     if (!sessionReady || accountMode !== 'MAIN_ACCOUNT_POC') return;
@@ -911,17 +980,33 @@ export default function App() {
     try {
       if (accountMode === 'MAIN_ACCOUNT_POC') {
         if (!selected) throw new Error('请选择代币');
-        const plan = await memeApi.planTrade({
+        const settlementAsset = asset === 'USDT' ? 'USDG' : asset;
+        const requestKey = [
+          side,
+          selected.tokenAddress.toLowerCase(),
+          settlementAsset,
+          normalizedDecimal(quote.amountIn),
+          slippageBps,
+        ].join(':');
+        let clientExecutionId = mainAccountIdempotencyRef.current.get(requestKey);
+        if (!clientExecutionId) {
+          clientExecutionId = crypto.randomUUID();
+          mainAccountIdempotencyRef.current.set(requestKey, clientExecutionId);
+        }
+        const transaction = await memeApi.executeMainAccountTrade({
+          clientExecutionId,
           side,
           tokenAddress: selected.tokenAddress,
-          settlementAsset: asset === 'USDT' ? 'USDG' : asset,
+          settlementAsset,
           amountIn: quote.amountIn,
           slippageBps,
-          simulate: true,
         });
-        if (plan.simulation?.status !== 'SUCCESS') throw new Error('主网检查未通过');
-        setOrderState('主网检查通过');
-        window.setTimeout(() => setOrderState(null), 1800);
+        setAccountTransactions((current) => upsertAccountTransaction(current, transaction));
+        setOrderState('处理中');
+        void trackMainAccountTransaction(transaction.executionId).catch((cause: unknown) => {
+          setOrderState(null);
+          setError(friendlyError(cause, '交易状态同步失败'));
+        });
         return;
       }
       let clientOrderId = orderIdempotencyRef.current.get(quote.quoteId);
@@ -944,7 +1029,7 @@ export default function App() {
       setOrderState(null);
       setError(friendlyError(cause, '下单失败'));
     }
-  }, [accountMode, asset, quote, selected, side, slippageBps, trackOrder]);
+  }, [accountMode, asset, quote, selected, side, slippageBps, trackMainAccountTransaction, trackOrder]);
 
   const submitTransfer = useCallback(async () => {
     if (!sessionReady) return;
@@ -1170,9 +1255,22 @@ export default function App() {
                 : accountTransactions.map((transaction) => <div className="account-transaction" key={transaction.executionId}>
                     <span>
                       <b className={transaction.side === 'BUY' ? 'positive' : 'negative'}>{transaction.side === 'BUY' ? '买入' : '卖出'} {transaction.tokenSymbol}</b>
-                      <small>{readableAmount(transaction.amountIn)} {transaction.side === 'BUY' ? transaction.settlementAsset : transaction.tokenSymbol}</small>
+                      <small>
+                        {readableAmount(transaction.amountIn)} {transaction.side === 'BUY' ? transaction.settlementAsset : transaction.tokenSymbol}
+                        {transaction.amountOut
+                          ? ` → ${readableAmount(transaction.amountOut)} ${transaction.side === 'BUY' ? transaction.tokenSymbol : transaction.settlementAsset}`
+                          : ''}
+                      </small>
                     </span>
-                    <span className={`transaction-status status-${transaction.status.toLowerCase()}`}>{transaction.status === 'CONFIRMED' ? '已完成' : transaction.status === 'FAILED' ? '失败' : '处理中'}</span>
+                    <span className={`transaction-status status-${transaction.status.toLowerCase()}`}>
+                      {transaction.status === 'CONFIRMED'
+                        ? '已完成'
+                        : transaction.status === 'FAILED'
+                          ? '失败'
+                          : transaction.status === 'SUBMISSION_UNKNOWN'
+                            ? '待确认'
+                            : '处理中'}
+                    </span>
                     <span className="transaction-links">{transaction.txHashes.map((hash, index) => {
                       const url = transactionUrl(explorerBaseUrl, hash);
                       return url ? <a href={url} target="_blank" rel="noreferrer" key={hash}>Tx{index + 1} ↗</a> : null;
