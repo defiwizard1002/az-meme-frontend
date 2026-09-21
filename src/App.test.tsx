@@ -186,6 +186,7 @@ describe('App', () => {
         marketRefreshMs: { hot: 14_400_000, new: 300_000 },
         accountMode: 'MAIN_ACCOUNT_POC',
         mainAccountAddress: '0x9999999999999999999999999999999999999999',
+        settlementAssets: ['USDG', 'ETH'],
       });
       if (url.includes('/markets')) return response({ items: [token], stale: false });
       if (url.endsWith(`/tokens/${token.tokenAddress}`)) return response(token);
@@ -195,6 +196,21 @@ describe('App', () => {
           { asset: 'ETH', available: '0.01', frozen: '0' },
         ],
         positions: [],
+      });
+      if (url.includes('/account/transactions?')) return response({
+        items: [{
+          executionId: 'poc_history_1',
+          tokenAddress: token.tokenAddress,
+          tokenSymbol: token.symbol,
+          side: 'BUY',
+          settlementAsset: 'USDG',
+          amountIn: '0.1',
+          amountOut: '1000',
+          status: 'CONFIRMED',
+          txHashes: [`0x${'a'.repeat(64)}`],
+          errorMessage: null,
+          createdAt: 1,
+        }],
       });
       if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
       if (url.includes('/trades?')) return response({ items: [], nextCursor: null });
@@ -214,8 +230,16 @@ describe('App', () => {
 
     expect(await screen.findByText('10 USDG / 0.01 ETH')).toBeInTheDocument();
     expect(screen.getByText('验证账户')).toBeInTheDocument();
-    expect(screen.getByLabelText('支付资产')).toHaveValue('USDG');
+    const paymentAsset = screen.getByLabelText('支付资产') as HTMLSelectElement;
+    expect(paymentAsset).toHaveValue('USDG');
+    expect(Array.from(paymentAsset.options, (option) => option.value)).toEqual(['USDG', 'ETH']);
     expect(screen.getByLabelText('买入金额')).toHaveValue('1');
+    expect(screen.getByText('交易记录')).toBeInTheDocument();
+    expect(screen.getByText('买入 CASHCAT')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Tx1 ↗' })).toHaveAttribute(
+      'href',
+      `https://robinhoodchain.blockscout.com/tx/0x${'a'.repeat(64)}`,
+    );
     expect(screen.queryByRole('button', { name: '打开账户划转' })).not.toBeInTheDocument();
     expect(azRequests).toBe(0);
   });

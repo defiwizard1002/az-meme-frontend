@@ -1,4 +1,4 @@
-import type { AccountSummary, Asset, CandleSnapshot, Interval, Order, Quote, Token, Trade, TradePlan } from './types';
+import type { AccountSummary, AccountTransaction, Asset, CandleSnapshot, Interval, Order, Quote, Token, Trade, TradePlan } from './types';
 
 interface Envelope<T> {
   rc: number;
@@ -87,6 +87,7 @@ export const memeApi = {
     marketRefreshMs: { hot: number; new: number };
     accountMode: 'AZ_ACCOUNT' | 'MAIN_ACCOUNT_POC';
     mainAccountAddress: string | null;
+    settlementAssets: Asset[];
   }>('/sapi/v1/meme/config'),
   getMarkets: (tab: 'hot' | 'new' = 'hot') => request<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?tab=${tab}&limit=50`),
   searchMarkets: (query: string) => request<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?query=${encodeURIComponent(query)}&limit=50`),
@@ -103,6 +104,7 @@ export const memeApi = {
     return request<{ items: Trade[]; nextCursor: string | null }>(`/sapi/v1/meme/tokens/${tokenAddress}/trades?${query.toString()}`);
   },
   getAccount: () => request<AccountSummary>('/sapi/v1/meme/account/summary'),
+  getAccountTransactions: () => request<{ items: AccountTransaction[] }>('/sapi/v1/meme/account/transactions?limit=50'),
   createQuote: (input: { side: 'BUY' | 'SELL'; tokenAddress: string; settlementAsset: Asset; amountIn: string; slippageBps: number }) =>
     request<Quote>('/sapi/v1/meme/quotes', { method: 'POST', body: JSON.stringify(input) }),
   createOrder: (input: { clientOrderId: string; quoteId: string; maxAmountIn: string; minAmountOut: string }) =>
@@ -110,7 +112,7 @@ export const memeApi = {
   getOrders: () => request<{ items: Order[]; nextCursor: string | null }>('/sapi/v1/meme/orders'),
   getOrder: (orderId: string) => request<Order>(`/sapi/v1/meme/orders/${orderId}`),
   getWsTicket: () => request<{ ticket: string; expiresAt: number }>('/sapi/v1/meme/ws-ticket', { method: 'POST' }),
-  planTrade: (input: { side: 'BUY' | 'SELL'; tokenAddress: string; amountIn: string; slippageBps: number; simulate: boolean }) =>
+  planTrade: (input: { side: 'BUY' | 'SELL'; tokenAddress: string; settlementAsset?: 'USDG' | 'ETH' | 'USDC'; amountIn: string; slippageBps: number; simulate: boolean }) =>
     request<TradePlan>('/sapi/v1/meme/transactions/plan', { method: 'POST', body: JSON.stringify(input) }),
 };
 

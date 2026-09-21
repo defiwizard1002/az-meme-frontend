@@ -3,7 +3,7 @@ import { ApiError, azAuth, azFundApi, memeApi, setSessionToken, wsBaseUrl } from
 import { CandleChart } from './CandleChart';
 import { CandleReplayQueue, streamBatchItems } from './candle-replay';
 import { pollOrderUntilTerminal } from './order-tracker';
-import type { AccountSummary, Asset, Candle, CandleSnapshot, Interval, Quote, Token, Trade } from './types';
+import type { AccountSummary, AccountTransaction, Asset, Candle, CandleSnapshot, Interval, Quote, Token, Trade } from './types';
 import './styles.css';
 
 const intervals: Interval[] = ['1s', '1m', '15m', '1h', '4h'];
@@ -239,6 +239,7 @@ export default function App() {
   const [tokens, setTokens] = useState<Token[]>([]);
   const [selected, setSelected] = useState<Token | null>(null);
   const [account, setAccount] = useState<AccountSummary | null>(null);
+  const [accountTransactions, setAccountTransactions] = useState<AccountTransaction[]>([]);
   const [snapshot, setSnapshot] = useState<CandleSnapshot | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [tradeNextCursor, setTradeNextCursor] = useState<string | null>(null);
@@ -267,6 +268,7 @@ export default function App() {
   const [marketLoading, setMarketLoading] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
   const [accountMode, setAccountMode] = useState<'AZ_ACCOUNT' | 'MAIN_ACCOUNT_POC' | null>(null);
+  const [settlementAssets, setSettlementAssets] = useState<Asset[]>(['ETH', 'USDC', 'USDT']);
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferDirection, setTransferDirection] = useState<'SPOT_TO_MEME' | 'MEME_TO_SPOT'>('SPOT_TO_MEME');
   const [transferAsset, setTransferAsset] = useState<Asset>('ETH');
@@ -387,9 +389,15 @@ export default function App() {
         setSlippageBps(config.defaultSlippageBps);
         setMarketRefreshMs(config.marketRefreshMs ?? { hot: 14_400_000, new: 300_000 });
         const nextAccountMode = config.accountMode ?? 'AZ_ACCOUNT';
+        const nextSettlementAssets = config.settlementAssets?.length
+          ? config.settlementAssets
+          : nextAccountMode === 'MAIN_ACCOUNT_POC'
+            ? ['USDG', 'ETH'] as Asset[]
+            : ['ETH', 'USDC', 'USDT'] as Asset[];
         setAccountMode(nextAccountMode);
+        setSettlementAssets(nextSettlementAssets);
         if (nextAccountMode === 'MAIN_ACCOUNT_POC') {
-          setAsset('USDG');
+          setAsset(nextSettlementAssets[0] ?? 'USDG');
           setAmount('1');
           setActivePreset(null);
         }
@@ -509,6 +517,11 @@ export default function App() {
           memeApi.getAccount()
             .then((summary) => { if (active) setAccount(summary); })
             .catch((cause: unknown) => { if (active) setError(friendlyError(cause, '账户余额加载失败')); }),
+          accountMode === 'MAIN_ACCOUNT_POC'
+            ? memeApi.getAccountTransactions()
+                .then(({ items }) => { if (active) setAccountTransactions(items); })
+                .catch((cause: unknown) => { if (active) setError(friendlyError(cause, '交易记录加载失败')); })
+            : Promise.resolve(),
           memeApi.getOrders()
           .then(({ items }) => {
             if (!active) return;
@@ -531,6 +544,16 @@ export default function App() {
       });
     return () => { active = false; };
   }, [accountMode, trackOrder]);
+
+  useEffect(() => {
+    if (!sessionReady || accountMode !== 'MAIN_ACCOUNT_POC') return;
+    const timer = window.setInterval(() => {
+      void memeApi.getAccountTransactions()
+        .then(({ items }) => setAccountTransactions(items))
+        .catch((cause: unknown) => setError(friendlyError(cause, '交易记录刷新失败')));
+    }, 5_000);
+    return () => window.clearInterval(timer);
+  }, [accountMode, sessionReady]);
 
   useEffect(() => {
     if (!selectedTokenAddress || !selectedMarketKey) return;
@@ -891,6 +914,7 @@ export default function App() {
         const plan = await memeApi.planTrade({
           side,
           tokenAddress: selected.tokenAddress,
+          settlementAsset: asset === 'USDT' ? 'USDG' : asset,
           amountIn: quote.amountIn,
           slippageBps,
           simulate: true,
@@ -920,7 +944,7 @@ export default function App() {
       setOrderState(null);
       setError(friendlyError(cause, '下单失败'));
     }
-  }, [accountMode, quote, selected, side, slippageBps, trackOrder]);
+  }, [accountMode, asset, quote, selected, side, slippageBps, trackOrder]);
 
   const submitTransfer = useCallback(async () => {
     if (!sessionReady) return;
@@ -1105,14 +1129,10 @@ export default function App() {
                     setAmount(nextAmount);
                     setActivePreset(nextAmount);
                     resetTradeDraft();
-                  }}>{accountMode === 'MAIN_ACCOUNT_POC'
-                    ? <option>USDG</option>
-                    : <><option>ETH</option><option>USDC</option><option>USDT</option></>}</select>
+                  }}>{settlementAssets.map((item) => <option key={item}>{item}</option>)}</select>
                 : <span className="amount-unit">{selected?.symbol}</span>}
             </div>
-            {side === 'SELL' && <label className="settlement"><span>结算资产</span><select aria-label="结算资产" value={asset} onChange={(event) => { setAsset(event.target.value as Asset); resetTradeDraft(); }}>{accountMode === 'MAIN_ACCOUNT_POC'
-              ? <option>USDG</option>
-              : <><option>ETH</option><option>USDC</option><option>USDT</option></>}</select></label>}
+            {side === 'SELL' && <label className="settlement"><span>结算资产</span><select aria-label="结算资产" value={asset} onChange={(event) => { setAsset(event.target.value as Asset); resetTradeDraft(); }}>{settlementAssets.map((item) => <option key={item}>{item}</option>)}</select></label>}
             <div className="presets">
               {tradePresets.map((preset) => <button
                 type="button"
@@ -1143,6 +1163,22 @@ export default function App() {
               const pnl = cost > 0 ? `${((Number(position.valueUsd) / cost - 1) * 100).toFixed(0)}%` : '-';
               return <div className="position" key={position.tokenAddress}><span><b>{position.symbol}</b><small>{compact(position.available)} 枚</small></span><span className={cost > 0 && Number(position.valueUsd) >= cost ? 'positive' : 'negative'}>{pnl}</span><button type="button" onClick={() => { setSelected(tokens.find((token) => token.tokenAddress.toLowerCase() === position.tokenAddress.toLowerCase()) ?? null); selectSide('SELL'); }}>卖</button></div>;
             })}
+            <div className="transaction-history">
+              <div className="positions-head"><strong>交易记录</strong><span>{accountTransactions.length} 笔</span></div>
+              {accountTransactions.length === 0
+                ? <div className="transaction-empty">暂无交易</div>
+                : accountTransactions.map((transaction) => <div className="account-transaction" key={transaction.executionId}>
+                    <span>
+                      <b className={transaction.side === 'BUY' ? 'positive' : 'negative'}>{transaction.side === 'BUY' ? '买入' : '卖出'} {transaction.tokenSymbol}</b>
+                      <small>{readableAmount(transaction.amountIn)} {transaction.side === 'BUY' ? transaction.settlementAsset : transaction.tokenSymbol}</small>
+                    </span>
+                    <span className={`transaction-status status-${transaction.status.toLowerCase()}`}>{transaction.status === 'CONFIRMED' ? '已完成' : transaction.status === 'FAILED' ? '失败' : '处理中'}</span>
+                    <span className="transaction-links">{transaction.txHashes.map((hash, index) => {
+                      const url = transactionUrl(explorerBaseUrl, hash);
+                      return url ? <a href={url} target="_blank" rel="noreferrer" key={hash}>Tx{index + 1} ↗</a> : null;
+                    })}</span>
+                  </div>)}
+            </div>
           </div>
         </aside>
       </div>

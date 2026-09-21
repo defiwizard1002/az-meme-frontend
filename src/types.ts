@@ -88,8 +88,22 @@ export interface Order {
   txHash?: string;
 }
 
+export interface AccountTransaction {
+  executionId: string;
+  tokenAddress: string;
+  tokenSymbol: string;
+  side: 'BUY' | 'SELL';
+  settlementAsset: 'USDG' | 'ETH' | 'USDC';
+  amountIn: string;
+  amountOut: string | null;
+  status: 'PENDING' | 'CONFIRMED' | 'FAILED';
+  txHashes: string[];
+  errorMessage: string | null;
+  createdAt: number;
+}
+
 export interface TradePlan {
-  route: 'DIRECT' | 'USDG_BRIDGE';
+  route: 'DIRECT' | 'USDG_BRIDGE' | 'SETTLEMENT_BRIDGE';
   selectedPool: { poolType: string; liquidityUsd: string; quoteTokenSymbol?: string };
   simulation?: { status: 'SUCCESS'; bufferedGas: string; estimatedFeeWei: string };
 }
