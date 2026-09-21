@@ -345,7 +345,7 @@ export default function App() {
       onUpdate: (latest) => {
         if (latest.status === 'SETTLED') {
           setOrderState('交易成功');
-          window.setTimeout(() => setOrderState(null), 1200);
+          window.setTimeout(() => setOrderState(null), 3000);
         } else if (latest.status === 'FAILED_FINAL' && latest.fundStatus === 'RELEASED') {
           setOrderState('交易失败，资金已释放');
           window.setTimeout(() => setOrderState(null), 1200);
@@ -391,7 +391,7 @@ export default function App() {
           void refreshMainAccount().catch((cause: unknown) => {
             setError(friendlyError(cause, '余额刷新失败'));
           });
-          window.setTimeout(() => setOrderState(null), 1200);
+          window.setTimeout(() => setOrderState(null), 3000);
         } else if (latest.status === 'FAILED') {
           setOrderState('交易失败');
           for (const [key, value] of mainAccountIdempotencyRef.current) {
@@ -487,19 +487,25 @@ export default function App() {
       refreshing = true;
       try {
         const result = await memeApi.getMarkets(discoveryTab);
-        if (active) setTokens(result.items);
+        if (active) {
+          setTokens(result.items);
+          setSelected((current) => current ?? result.items[0] ?? null);
+        }
       } catch (cause) {
         if (active) setError(friendlyError(cause, '市场刷新失败'));
       } finally {
         refreshing = false;
       }
     };
-    const timer = window.setInterval(() => void refresh(), marketRefreshMs[discoveryTab]);
+    const timer = window.setInterval(
+      () => void refresh(),
+      tokens.length === 0 ? 1_000 : marketRefreshMs[discoveryTab],
+    );
     return () => {
       active = false;
       window.clearInterval(timer);
     };
-  }, [discoveryTab, marketRefreshMs]);
+  }, [discoveryTab, marketRefreshMs, tokens.length]);
 
   useEffect(() => {
     if (!activeTradeKey || !selectedTokenAddress || !selectedMarketKey) {

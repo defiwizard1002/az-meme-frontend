@@ -235,7 +235,13 @@ export function CandleChart({ candles, symbol, refreshing = false, onLoadBefore 
 
   return (
     <figure className="chart" aria-label={`${symbol} K 线图`}>
-      <div ref={containerRef} className="chart-canvas" data-testid="tradingview-chart" data-history-loading={historyLoading ? 'true' : 'false'} />
+      <div
+        ref={containerRef}
+        className="chart-canvas"
+        data-testid="tradingview-chart"
+        data-candle-count={candles.length}
+        data-history-loading={historyLoading ? 'true' : 'false'}
+      />
       {candles.length === 0 && !refreshing && <div className="chart-empty">暂无成交 K 线</div>}
       {(historyLoading || refreshing) && <div
         className="history-loading"

@@ -169,6 +169,47 @@ describe('App', () => {
     expect(await screen.findByText('启动失败：mock provider unavailable')).toBeInTheDocument();
   });
 
+  it('retries an empty market snapshot while workers warm the database', async () => {
+    vi.stubGlobal('WebSocket', undefined);
+    let marketCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith('/config')) return response({
+        chainId: 4663,
+        chainName: 'Robinhood Chain',
+        explorerBaseUrl: 'https://robinhoodchain.blockscout.com',
+        defaultSlippageBps: 300,
+        marketRefreshMs: { hot: 14_400_000, new: 300_000 },
+      });
+      if (url.includes('/markets')) {
+        marketCalls += 1;
+        return response({ items: marketCalls === 1 ? [] : [token], stale: false });
+      }
+      if (url.endsWith(`/tokens/${token.tokenAddress}`)) return response(token);
+      if (url.includes('/candles')) return response({
+        chainId: 4663,
+        tokenAddress: token.tokenAddress,
+        marketKey: 'pool_cashcat:NATIVE',
+        interval: '1m',
+        status: 'READY',
+        source: 'CHAIN',
+        items: [{ t: 1, o: '0.018', h: '0.019', l: '0.017', c: '0.0184', baseVolume: null, quoteVolume: null, revision: 1 }],
+      });
+      if (url.includes('/trades?')) return response({ items: [], nextCursor: null });
+      if (url.endsWith('/uaapi/user/web3/get-nonce')) return response({ nonce: 'mock-nonce', message: 'AZ login message' });
+      if (url.endsWith('/uaapi/user/web3/login')) return response({ accessToken: 'mock-az-session-token', expiresAt: Date.now() + 3600000 });
+      if (url.endsWith('/uaapi/user/user/getDesensitizedUserInfo')) return response({ userId: 'mock-user', accountId: 'mock-account', loginStatus: 'LOGGED_IN' });
+      if (url.endsWith('/account/summary')) return response({ quoteBalances: [], positions: [] });
+      if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
+      throw new Error(`Unexpected request ${url}`);
+    });
+
+    render(<App />);
+    expect(await screen.findByText('没有匹配的代币')).toBeInTheDocument();
+    expect(await screen.findAllByText('CASHCAT', {}, { timeout: 2_500 })).not.toHaveLength(0);
+    expect(marketCalls).toBeGreaterThanOrEqual(2);
+  });
+
   it('uses the local main account without AZ login or transfer controls', async () => {
     vi.stubGlobal('WebSocket', undefined);
     let azRequests = 0;
