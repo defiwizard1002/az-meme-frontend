@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, azAuth, azFundApi, memeApi, setSessionToken, wsBaseUrl } from './api';
 import { CandleChart } from './CandleChart';
-import { CandleReplayQueue, streamBatchItems } from './candle-replay';
+import { streamBatchItems, streamSequenceAction } from './stream-batches';
 import { pollOrderUntilTerminal } from './order-tracker';
 import { pollTransactionUntilTerminal } from './transaction-tracker';
 import type { AccountSummary, AccountTransaction, Asset, Candle, CandleSnapshot, Interval, Quote, Token, Trade } from './types';
@@ -226,19 +226,32 @@ function friendlyError(cause: unknown, fallback: string): string {
   return messages[cause.code] ?? fallback;
 }
 
-function chooseNewerCandle(previous: Candle | undefined, next: Candle): Candle {
-  if (!previous || next.revision >= previous.revision) return next;
+export function chooseNewerCandle(previous: Candle | undefined, next: Candle): Candle {
+  if (!previous || BigInt(next.revision) >= BigInt(previous.revision)) return next;
   return previous;
 }
 
-function mergeSnapshots(previous: CandleSnapshot | null, next: CandleSnapshot): CandleSnapshot {
+function boundedMapSet<T>(map: Map<string, T>, key: string, value: T, capacity: number): void {
+  map.delete(key);
+  if (map.size >= capacity) map.delete(map.keys().next().value!);
+  map.set(key, value);
+}
+
+export function mergeSnapshots(previous: CandleSnapshot | null, next: CandleSnapshot): CandleSnapshot {
   if (!previous
     || previous.tokenAddress.toLowerCase() !== next.tokenAddress.toLowerCase()
     || previous.marketKey !== next.marketKey
     || previous.interval !== next.interval) return next;
   const byTime = new Map(previous.items.map((item) => [item.t, item]));
   for (const item of next.items) byTime.set(item.t, chooseNewerCandle(byTime.get(item.t), item));
-  return { ...next, items: [...byTime.values()].sort((a, b) => a.t - b.t) };
+  const limits = [previous.coverage, next.coverage];
+  const from = limits.map((value) => value.from).filter((value): value is number => value !== null);
+  const to = limits.map((value) => value.to).filter((value): value is number => value !== null);
+  return { ...next,
+    revision: BigInt(previous.revision) > BigInt(next.revision) ? previous.revision : next.revision,
+    asOfBlock: Math.max(previous.asOfBlock ?? 0, next.asOfBlock ?? 0) || null,
+    coverage: { from: from.length ? Math.min(...from) : null, to: to.length ? Math.max(...to) : null },
+    items: [...byTime.values()].sort((a, b) => a.t - b.t).slice(-2000) };
 }
 
 function TokenMark({ token }: { token: Token }) {
@@ -297,7 +310,7 @@ export default function App() {
   const selectionRequestRef = useRef(0);
   const selectedTokenAddress = selected?.tokenAddress ?? null;
   const selectedTradeStatus = selected?.tradeStatus ?? null;
-  const selectedMarketKey = selected ? `${selected.pool.poolKey}:${selected.quoteAssetKey}` : null;
+  const selectedMarketKey = selected ? 'USD:USDG' : null;
   const activeSnapshot = selected
     ? (snapshot?.tokenAddress.toLowerCase() === selected.tokenAddress.toLowerCase()
         && snapshot.marketKey === selectedMarketKey
@@ -314,8 +327,8 @@ export default function App() {
     setSnapshot((current) => {
       const next = typeof update === 'function' ? update(current) : update;
       if (next) {
-        candleCacheRef.current.set(candleCacheKey(next.tokenAddress, next.interval), next);
-        tradeMarketKeyRef.current.set(next.tokenAddress.toLowerCase(), next.marketKey);
+        boundedMapSet(candleCacheRef.current, candleCacheKey(next.tokenAddress, next.interval), next, 64);
+        boundedMapSet(tradeMarketKeyRef.current, next.tokenAddress.toLowerCase(), next.marketKey, 64);
       }
       return next;
     });
@@ -518,18 +531,18 @@ export default function App() {
     setTrades(cached?.items ?? []);
     setTradeNextCursor(cached?.nextCursor ?? null);
     setTradesLoading(true);
-    void memeApi.getTrades(selectedTokenAddress, selectedMarketKey)
+    void memeApi.getTrades(selectedTokenAddress)
       .then((page) => {
         if (!active) return;
         const current = tradeCacheRef.current.get(activeTradeKey);
         const existing = current?.items ?? [];
         const seen = new Set(page.items.map((trade) => trade.tradeId));
-        const items = [...page.items, ...existing.filter((trade) => !seen.has(trade.tradeId))];
+        const items = [...page.items, ...existing.filter((trade) => !seen.has(trade.tradeId))].slice(0, 5000);
         const nextCursor = current?.initialized && existing.length >= 100
           ? current.nextCursor
           : page.nextCursor;
         const entry = { items, nextCursor, initialized: true };
-        tradeCacheRef.current.set(activeTradeKey, entry);
+        boundedMapSet(tradeCacheRef.current, activeTradeKey, entry, 64);
         if (!tradesPausedRef.current) {
           setTrades(items);
           setTradeNextCursor(nextCursor);
@@ -637,21 +650,21 @@ export default function App() {
     const requestedMarketKey = selectedMarketKey;
     const cachedSnapshot = candleCacheRef.current.get(cacheKey) ?? null;
     const cached = cachedSnapshot?.marketKey === requestedMarketKey ? cachedSnapshot : null;
-    setChartLoading(cached?.status !== 'READY');
+    setChartLoading(cached?.syncStatus !== 'READY');
     setMarketError(null);
     setSnapshot(cached);
     setQuote(null);
     setOrderState(null);
 
-    void memeApi.getCandles(selectedTokenAddress, interval, { marketKey: requestedMarketKey })
+    void memeApi.getCandles(selectedTokenAddress, interval)
       .then((result) => {
         if (!active) return;
         const merged = mergeSnapshots(candleCacheRef.current.get(cacheKey) ?? null, result);
         setCachedSnapshot(merged);
-        if (result.status === 'READY') {
+        if (result.syncStatus === 'READY') {
           setChartLoading(false);
           setMarketError(null);
-        } else if (result.status === 'STALE') {
+        } else if (result.syncStatus === 'STALE') {
           setChartLoading(false);
           setMarketError(merged.items.length > 0 ? null : '行情暂时不可用');
         }
@@ -665,19 +678,19 @@ export default function App() {
   }, [selectedTokenAddress, selectedMarketKey, interval, marketRetry, setCachedSnapshot]);
 
   useEffect(() => {
-    if (!selectedTokenAddress || !activeSnapshot || activeSnapshot.status === 'STALE' || typeof WebSocket === 'undefined') return;
+    if (!selectedTokenAddress || !activeSnapshot || activeSnapshot.syncStatus === 'STALE' || typeof WebSocket === 'undefined') return;
     let socket: WebSocket | null = null;
     let disposed = false;
     let reconnectTimer: number | undefined;
     let reconnectAttempt = 0;
+    let hasConnected = false;
     const streamState = new Map<string, { epoch: string; sequence: number }>();
-    const candleChannel = `candle:${selectedTokenAddress}:${activeSnapshot.marketKey}:${interval}`;
-    const candleStatusChannel = `candle-status:${selectedTokenAddress}:${activeSnapshot.marketKey}:${interval}`;
-    const tradeChannel = `trade:${selectedTokenAddress}:${activeSnapshot.marketKey}`;
+    const candleChannel = `candle:${selectedTokenAddress.toLowerCase()}:${activeSnapshot.marketKey}:${interval}`;
+    const tradeChannel = `trade:${selectedTokenAddress.toLowerCase()}:${activeSnapshot.marketKey}`;
     const currentTradeCacheKey = tradeCacheKey(selectedTokenAddress, activeSnapshot.marketKey);
     const marketChannel = `market:${selectedTokenAddress.toLowerCase()}`;
     const liveMarketChannel = 'markets:live';
-    const channels = [candleChannel, candleStatusChannel, tradeChannel, marketChannel, liveMarketChannel];
+    const channels = [candleChannel, tradeChannel, marketChannel, liveMarketChannel];
     marketChannelsRef.current = channels;
     const scheduleReconnect = () => {
       if (disposed || reconnectTimer !== undefined) return;
@@ -694,10 +707,9 @@ export default function App() {
         if (!current || current.tokenAddress.toLowerCase() !== selectedTokenAddress.toLowerCase() || current.interval !== interval) return current;
         const byTime = new Map(current.items.map((item) => [item.t, item]));
         byTime.set(candle.t, chooseNewerCandle(byTime.get(candle.t), candle));
-        return { ...current, items: [...byTime.values()].sort((a, b) => a.t - b.t) };
+        return { ...current, items: [...byTime.values()].sort((a, b) => a.t - b.t).slice(-2000) };
       });
     };
-    const candleReplay = new CandleReplayQueue(upsertCandle);
 
     const connect = async () => {
       try {
@@ -707,6 +719,22 @@ export default function App() {
         socket = nextSocket;
         streamSocketRef.current = nextSocket;
         nextSocket.addEventListener('open', () => {
+          if (hasConnected) {
+            void memeApi.getCandles(selectedTokenAddress, interval)
+              .then((fresh) => { if (!disposed) setCachedSnapshot((current) => mergeSnapshots(current, fresh)); })
+              .catch(() => setError('行情更新中断，正在恢复'));
+            void memeApi.getTrades(selectedTokenAddress)
+              .then((page) => {
+                if (disposed) return;
+                const current = tradeCacheRef.current.get(currentTradeCacheKey);
+                const seen = new Set(page.items.map((trade) => trade.tradeId));
+                const items = [...page.items, ...(current?.items ?? []).filter((trade) => !seen.has(trade.tradeId))].slice(0, 5000);
+                boundedMapSet(tradeCacheRef.current, currentTradeCacheKey, { items, nextCursor: page.nextCursor, initialized: true }, 64);
+                if (!tradesPausedRef.current) setTrades(items);
+              })
+              .catch(() => setError('成交更新中断，正在恢复'));
+          }
+          hasConnected = true;
           reconnectAttempt = 0;
           nextSocket.send(JSON.stringify({
             op: 'subscribe',
@@ -718,12 +746,9 @@ export default function App() {
           try {
             const message = JSON.parse(String(event.data)) as StreamMessage<Candle | CandleSnapshot | Trade | Quote | Token | HotMarketUpdate | StreamBatch<Candle> | StreamBatch<Trade>>;
             const previous = streamState.get(message.channel);
-            const duplicate = previous !== undefined
-              && message.epoch === previous.epoch
-              && message.sequence <= previous.sequence;
-            if (duplicate) return;
-            const requiresResync = previous !== undefined
-              && (message.epoch !== previous.epoch || message.sequence > previous.sequence + 1);
+            const action = streamSequenceAction(previous, message);
+            if (action === 'DUPLICATE') return;
+            const requiresResync = action === 'RESYNC';
             streamState.set(message.channel, { epoch: message.epoch, sequence: message.sequence });
 
             if (message.channel === liveMarketChannel) {
@@ -736,18 +761,6 @@ export default function App() {
                 const update = byAddress.get(current.tokenAddress.toLowerCase());
                 return update ? { ...current, priceUsd: update.priceUsd, priceQuote: update.priceQuote, change24h: update.change24h } : current;
               });
-              return;
-            }
-            if (message.channel === candleStatusChannel) {
-              const nextSnapshot = message.data as CandleSnapshot;
-              setCachedSnapshot((current) => mergeSnapshots(current, nextSnapshot));
-              if (nextSnapshot.status === 'READY') {
-                setChartLoading(false);
-                setMarketError(null);
-              } else if (nextSnapshot.status === 'STALE') {
-                setChartLoading(false);
-                setMarketError(nextSnapshot.items.length > 0 ? null : '行情暂时不可用');
-              }
               return;
             }
             if (message.channel === marketChannel) {
@@ -776,29 +789,36 @@ export default function App() {
             if (message.channel === candleChannel) {
               const candles = streamBatchItems(message.data as Candle | StreamBatch<Candle>);
               if (requiresResync) {
-                void memeApi.getCandles(selectedTokenAddress, interval, { marketKey: activeSnapshot.marketKey })
+                void memeApi.getCandles(selectedTokenAddress, interval)
                   .then((fresh) => {
                     if (!disposed) {
                       setCachedSnapshot((current) => mergeSnapshots(current, fresh));
-                      if (interval === '1s') candleReplay.enqueue(candles);
-                      else candles.forEach(upsertCandle);
+                      candles.forEach(upsertCandle);
                     }
                   })
                   .catch(() => setError('行情更新中断，正在恢复'));
                 return;
               }
-              if (interval === '1s') candleReplay.enqueue(candles);
-              else candles.forEach(upsertCandle);
+              candles.forEach(upsertCandle);
               return;
             }
             if (message.channel === tradeChannel) {
+              if (requiresResync) {
+                void memeApi.getTrades(selectedTokenAddress).then((page) => {
+                  if (!disposed) {
+                    boundedMapSet(tradeCacheRef.current, currentTradeCacheKey, { ...page, initialized: true }, 64);
+                    if (!tradesPausedRef.current) setTrades(page.items);
+                  }
+                }).catch(() => setError('成交更新中断，正在恢复'));
+                return;
+              }
               const batch = streamBatchItems(message.data as Trade | StreamBatch<Trade>);
               const current = tradeCacheRef.current.get(currentTradeCacheKey)
                 ?? { items: [], nextCursor: null, initialized: false };
               const incoming = [...batch].reverse();
               const incomingIds = new Set(incoming.map((trade) => trade.tradeId));
-              const items = [...incoming, ...current.items.filter((trade) => !incomingIds.has(trade.tradeId))];
-              tradeCacheRef.current.set(currentTradeCacheKey, { ...current, items });
+              const items = [...incoming, ...current.items.filter((trade) => !incomingIds.has(trade.tradeId))].slice(0, 5000);
+              boundedMapSet(tradeCacheRef.current, currentTradeCacheKey, { ...current, items }, 64);
               if (!tradesPausedRef.current) setTrades(items);
             }
           } catch {
@@ -830,7 +850,6 @@ export default function App() {
     void connect();
     return () => {
       disposed = true;
-      candleReplay.stop();
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
       if (streamSocketRef.current === socket) streamSocketRef.current = null;
       socket?.close();
@@ -859,16 +878,16 @@ export default function App() {
     if (element.scrollHeight - element.scrollTop - element.clientHeight > 40) return;
     if (!activeTradeKey || !selectedTokenAddress || !selectedMarketKey || !tradeNextCursor || tradesLoading) return;
     setTradesLoading(true);
-    void memeApi.getTrades(selectedTokenAddress, selectedMarketKey, tradeNextCursor)
+    void memeApi.getTrades(selectedTokenAddress, tradeNextCursor)
       .then((page) => {
         const current = tradeCacheRef.current.get(activeTradeKey)
           ?? { items: [], nextCursor: tradeNextCursor, initialized: true };
         const seen = new Set(current.items.map((trade) => trade.tradeId));
-        const items = [...current.items, ...page.items.filter((trade) => !seen.has(trade.tradeId))];
-        const entry = { items, nextCursor: page.nextCursor, initialized: true };
-        tradeCacheRef.current.set(activeTradeKey, entry);
+        const items = [...current.items, ...page.items.filter((trade) => !seen.has(trade.tradeId))].slice(0, 5000);
+        const entry = { items, nextCursor: items.length >= 5000 ? null : page.nextCursor, initialized: true };
+        boundedMapSet(tradeCacheRef.current, activeTradeKey, entry, 64);
         if (!tradesPausedRef.current) setTrades(items);
-        setTradeNextCursor(page.nextCursor);
+        setTradeNextCursor(entry.nextCursor);
       })
       .catch((cause: unknown) => setError(friendlyError(cause, '更早成交加载失败')))
       .finally(() => setTradesLoading(false));
@@ -945,36 +964,14 @@ export default function App() {
   const loadOlderCandles = useCallback(async (before: number): Promise<number> => {
     if (!selected) return 0;
     try {
-      const deadline = Date.now() + 25_000;
-      while (Date.now() < deadline) {
-        const marketKey = snapshot?.tokenAddress.toLowerCase() === selected.tokenAddress.toLowerCase()
-          && snapshot.interval === interval
-          ? snapshot.marketKey
-          : selected.pool.poolKey + ':' + selected.quoteAssetKey;
-        const result = await memeApi.getCandles(selected.tokenAddress, interval, { to: before, limit: candlePageSize, marketKey });
-        if (result.status === 'READY') {
-          setCachedSnapshot((current) => {
-            if (!current
-              || current.tokenAddress.toLowerCase() !== result.tokenAddress.toLowerCase()
-              || current.marketKey !== result.marketKey
-              || current.interval !== result.interval) return current;
-            const byTime = new Map(current.items.map((item) => [item.t, item]));
-            for (const item of result.items) byTime.set(item.t, chooseNewerCandle(byTime.get(item.t), item));
-            return { ...current, items: [...byTime.values()].sort((a, b) => a.t - b.t) };
-          });
-          return result.items.length;
-        }
-        // Bitquery may use its full 15 second upstream timeout. STALE is retryable
-        // here because the backend keeps cached candles visible and expires the
-        // failed load key before this deadline.
-        await new Promise((resolvePromise) => window.setTimeout(resolvePromise, result.status === 'STALE' ? 1_000 : 500));
-      }
-      throw new Error('更早行情加载超时');
+      const result = await memeApi.getCandles(selected.tokenAddress, interval, { to: before, limit: candlePageSize });
+      setCachedSnapshot((current) => mergeSnapshots(current, result));
+      return result.items.length;
     } catch (cause) {
       setError(friendlyError(cause, '更早行情加载失败'));
       return 0;
     }
-  }, [interval, selected, setCachedSnapshot, snapshot]);
+  }, [interval, selected, setCachedSnapshot]);
 
   const submitOrder = useCallback(async () => {
     if (!quote) {
@@ -1150,11 +1147,13 @@ export default function App() {
               </div>
               <span className={Number(selected.change24h) >= 0 ? 'positive' : 'negative'}>{formatPercent(selected.change24h)} / 24h</span>
             </div>
-            {activeSnapshot && (activeSnapshot.status !== 'STALE' || activeSnapshot.items.length > 0)
+            {activeSnapshot && (activeSnapshot.syncStatus !== 'STALE' || activeSnapshot.items.length > 0)
               ? <CandleChart key={`${selected.tokenAddress}:${activeSnapshot.marketKey}:${interval}`} candles={activeSnapshot.items} symbol={selected.symbol} refreshing={chartLoading} onLoadBefore={loadOlderCandles} />
               : <div className="chart-state">{marketError
                   ? <div className="market-retry"><span>{marketError}</span><button type="button" onClick={() => setMarketRetry((value) => value + 1)}>重试</button></div>
                   : '正在加载行情'}</div>}
+            {activeSnapshot?.availability === 'PARTIAL' && <div className="chart-availability" role="status">历史 K 线部分缺失：{activeSnapshot.gaps.map((gap) => `${gap.reason === 'EVENT_EXPIRED' ? '成交已过保留期' : '早于扫描起点'} ${new Date(gap.from * 1000).toLocaleString()}–${new Date(gap.to * 1000).toLocaleString()}`).join('；')}</div>}
+            {activeSnapshot?.availability === 'UNAVAILABLE_BEFORE_START' && <div className="chart-availability" role="status">请求区间早于扫描起点，暂无可用 K 线</div>}
             <section className="trade-tape" aria-label="实时成交">
               <header>
                 <strong>实时成交</strong>

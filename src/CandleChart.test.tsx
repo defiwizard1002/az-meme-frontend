@@ -54,7 +54,7 @@ describe('CandleChart', () => {
         c: '0.018',
         baseVolume: '1200',
         quoteVolume: '0.42',
-        revision: 1,
+        revision: '1',
       },
       {
         t: 1_789_600_002,
@@ -64,7 +64,7 @@ describe('CandleChart', () => {
         c: '0.0184',
         baseVolume: '900',
         quoteVolume: '0.31',
-        revision: 1,
+        revision: '1',
       },
     ]} />);
 

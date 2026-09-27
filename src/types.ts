@@ -39,7 +39,7 @@ export interface Candle {
   quoteVolume: string | null;
   rawVolume?: string;
   rawVolumeUnit?: 'BASE' | 'QUOTE' | 'USD' | 'UNKNOWN';
-  revision: number;
+  revision: string;
 }
 
 export interface CandleSnapshot {
@@ -47,8 +47,13 @@ export interface CandleSnapshot {
   tokenAddress: string;
   marketKey: string;
   interval: Interval;
-  status: 'BACKFILLING' | 'CATCHING_UP' | 'READY' | 'STALE';
-  source: string;
+  syncStatus: 'BACKFILLING' | 'CATCHING_UP' | 'READY' | 'STALE';
+  availability: 'COMPLETE' | 'PARTIAL' | 'UNAVAILABLE_BEFORE_START';
+  coverage: { from: number | null; to: number | null };
+  gaps: Array<{ from: number; to: number; reason: 'BEFORE_SCAN_START' | 'EVENT_EXPIRED' }>;
+  revision: string;
+  asOfBlock: number | null;
+  source: 'CHAIN';
   items: Candle[];
 }
 

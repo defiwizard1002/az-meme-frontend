@@ -294,3 +294,9 @@ button:active:not(:disabled) { transform: translateY(1px); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+.chart-availability {
+  padding: 8px 12px;
+  color: #b47719;
+  font-size: 12px;
+  line-height: 1.5;
+}

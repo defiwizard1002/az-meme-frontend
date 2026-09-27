@@ -92,14 +92,14 @@ export const memeApi = {
   getMarkets: (tab: 'hot' | 'new' = 'hot') => request<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?tab=${tab}&limit=50`),
   searchMarkets: (query: string) => request<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?query=${encodeURIComponent(query)}&limit=50`),
   getToken: (tokenAddress: string) => request<Token>(`/sapi/v1/meme/tokens/${tokenAddress}`),
-  getCandles: (tokenAddress: string, interval: Interval, options?: { to?: number; limit?: number; marketKey?: string }) => {
+  getCandles: (tokenAddress: string, interval: Interval, options?: { from?: number; to?: number; limit?: number }) => {
     const query = new URLSearchParams({ interval, limit: String(options?.limit ?? 300) });
+    if (options?.from !== undefined) query.set('from', String(options.from));
     if (options?.to !== undefined) query.set('to', String(options.to));
-    if (options?.marketKey) query.set('marketKey', options.marketKey);
     return request<CandleSnapshot>(`/sapi/v1/meme/tokens/${tokenAddress}/candles?${query.toString()}`);
   },
-  getTrades: (tokenAddress: string, marketKey: string, cursor?: string) => {
-    const query = new URLSearchParams({ marketKey, limit: '100' });
+  getTrades: (tokenAddress: string, cursor?: string) => {
+    const query = new URLSearchParams({ limit: '100' });
     if (cursor) query.set('cursor', cursor);
     return request<{ items: Trade[]; nextCursor: string | null }>(`/sapi/v1/meme/tokens/${tokenAddress}/trades?${query.toString()}`);
   },
