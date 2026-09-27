@@ -117,8 +117,8 @@ export const memeApi = {
     method: 'POST',
     body: JSON.stringify(input),
   }),
-  createQuote: (input: { side: 'BUY' | 'SELL'; tokenAddress: string; settlementAsset: Asset; amountIn: string; slippageBps: number }) =>
-    request<Quote>('/sapi/v1/meme/quotes', { method: 'POST', body: JSON.stringify(input) }),
+  createQuote: (input: { side: 'BUY' | 'SELL'; tokenAddress: string; settlementAsset: Asset; amountIn: string; slippageBps: number }, signal?: AbortSignal) =>
+    request<Quote>('/sapi/v1/meme/quotes', { method: 'POST', body: JSON.stringify(input), signal }),
   createOrder: (input: { clientOrderId: string; quoteId: string; maxAmountIn: string; minAmountOut: string }) =>
     request<Order>('/sapi/v1/meme/orders', { method: 'POST', body: JSON.stringify(input) }),
   getOrders: () => request<{ items: Order[]; nextCursor: string | null }>('/sapi/v1/meme/orders'),

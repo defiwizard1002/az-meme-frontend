@@ -66,6 +66,84 @@ function response(result: unknown) {
   }));
 }
 
+function quoteResult(init?: RequestInit) {
+  const input = JSON.parse(String(init?.body)) as { tokenAddress: string; side: 'BUY' | 'SELL'; settlementAsset: 'USDG' | 'ETH'; amountIn: string };
+  return { ...input, quoteId: 'rest-quote', expectedAmountOut: '100', minAmountOut: '95', fees: [], expiresAt: Date.now() + 10_000 };
+}
+
+class ControlledQuoteSocket {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 3;
+  static latest: ControlledQuoteSocket | null = null;
+  readyState = ControlledQuoteSocket.CONNECTING;
+  sent: string[] = [];
+  private readonly listeners = new Map<string, Array<(event: Event) => void>>();
+
+  constructor(_url: string) { ControlledQuoteSocket.latest = this; }
+  addEventListener(name: string, listener: (event: Event) => void): void {
+    this.listeners.set(name, [...(this.listeners.get(name) ?? []), listener]);
+  }
+  send(payload: string): void { this.sent.push(payload); }
+  open(): void {
+    this.readyState = ControlledQuoteSocket.OPEN;
+    this.emit('open', new Event('open'));
+  }
+  receive(payload: unknown): void {
+    this.emit('message', { data: JSON.stringify(payload) } as MessageEvent);
+  }
+  close(): void {
+    if (this.readyState === ControlledQuoteSocket.CLOSED) return;
+    this.readyState = ControlledQuoteSocket.CLOSED;
+    this.emit('close', new Event('close'));
+  }
+  private emit(name: string, event: Event): void {
+    for (const listener of this.listeners.get(name) ?? []) listener(event);
+  }
+}
+
+function renderWithDeferredQuotes() {
+  const quotes: Array<{ input: ReturnType<typeof quoteResult>; signal: AbortSignal | undefined; resolve: (value: Response) => void }> = [];
+  ControlledQuoteSocket.latest = null;
+  vi.stubGlobal('WebSocket', ControlledQuoteSocket);
+  vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+    const url = String(input);
+    if (url.endsWith('/config')) return response({
+      chainId: 4663,
+      chainName: 'Robinhood Chain',
+      explorerBaseUrl: 'https://robinhoodchain.blockscout.com',
+      defaultSlippageBps: 300,
+      marketRefreshMs: { hot: 14_400_000, new: 300_000 },
+      accountMode: 'MAIN_ACCOUNT_POC',
+      mainAccountAddress: '0x9999999999999999999999999999999999999999',
+      settlementAssets: ['USDG', 'ETH'],
+    });
+    if (url.includes('/markets')) return response({ items: [token], stale: false });
+    if (url.endsWith(`/tokens/${token.tokenAddress}`)) return response(token);
+    if (url.endsWith('/account/summary')) return response({ quoteBalances: [{ asset: 'USDG', available: '10', frozen: '0' }], positions: [] });
+    if (url.includes('/account/transactions?')) return response({ items: [] });
+    if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
+    if (url.endsWith('/ws-ticket')) return response({ ticket: 'test-ticket', expiresAt: Date.now() + 30_000 });
+    if (url.includes('/trades?')) return response({ items: [], nextCursor: null });
+    if (url.includes('/candles')) return response({
+      chainId: 4663, tokenAddress: token.tokenAddress, interval: '1m', source: 'CHAIN',
+      items: [{ t: 1, o: '0.018', h: '0.019', l: '0.017', c: '0.0184', baseVolume: null, quoteVolume: null }],
+    });
+    if (url.endsWith('/quotes')) {
+      let resolve!: (value: Response) => void;
+      const promise = new Promise<Response>((done) => { resolve = done; });
+      quotes.push({ input: quoteResult(init), signal: init?.signal as AbortSignal | undefined, resolve });
+      return promise;
+    }
+    throw new Error(`Unexpected request ${url}`);
+  });
+  return { ...render(<App />), quotes };
+}
+
+function displayedQuote(): string | null {
+  return document.querySelector('.quote-details dd')?.textContent ?? null;
+}
+
 describe('App', () => {
   afterEach(() => {
     cleanup();
@@ -106,6 +184,7 @@ describe('App', () => {
         });
       }
       if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
+      if (url.endsWith('/quotes')) return response(quoteResult(init));
       if (url.includes('/trades?')) return response({ items: [], nextCursor: null });
       if (url.endsWith('/sapi/v4/fund/balance/transfer')) {
         expect(new Headers(init?.headers).get('authorization')).toBe('Bearer mock-az-session-token');
@@ -178,7 +257,7 @@ describe('App', () => {
   it('retries an empty market snapshot while workers warm the database', async () => {
     vi.stubGlobal('WebSocket', undefined);
     let marketCalls = 0;
-    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith('/config')) return response({
         chainId: 4663,
@@ -207,6 +286,7 @@ describe('App', () => {
       if (url.endsWith('/uaapi/user/user/getDesensitizedUserInfo')) return response({ userId: 'mock-user', accountId: 'mock-account', loginStatus: 'LOGGED_IN' });
       if (url.endsWith('/account/summary')) return response({ quoteBalances: [], positions: [] });
       if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
+      if (url.endsWith('/quotes')) return response(quoteResult(init));
       throw new Error(`Unexpected request ${url}`);
     });
 
@@ -219,7 +299,7 @@ describe('App', () => {
   it('uses the local main account without AZ login or transfer controls', async () => {
     vi.stubGlobal('WebSocket', undefined);
     let azRequests = 0;
-    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
       const url = String(input);
       if (url.includes('/az-auth/') || url.includes('/sapi/v4/fund/')) {
         azRequests += 1;
@@ -261,6 +341,7 @@ describe('App', () => {
         }],
       });
       if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
+      if (url.endsWith('/quotes')) return response(quoteResult(init));
       if (url.includes('/trades?')) return response({ items: [], nextCursor: null });
       if (url.includes('/candles')) return response({
         chainId: 4663,
@@ -400,6 +481,7 @@ describe('App', () => {
         updatedAt: 2,
       });
       if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
+      if (url.endsWith('/quotes')) return response(quoteResult(init));
       if (url.endsWith('/ws-ticket')) return response({ ticket: 'trade-ticket', expiresAt: Date.now() + 30_000 });
       if (url.includes('/trades?')) return response({ items: [], nextCursor: null });
       if (url.includes('/candles')) return response({
@@ -461,7 +543,7 @@ describe('App', () => {
       name: 'Second token',
       pool: { ...token.pool, poolKey: 'pool_second' },
     };
-    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith('/uaapi/user/web3/get-nonce')) return response({ nonce: 'mock-nonce', message: 'AZ login message' });
       if (url.endsWith('/uaapi/user/web3/login')) return response({ accessToken: 'mock-az-session-token', expiresAt: Date.now() + 3600000 });
@@ -486,6 +568,7 @@ describe('App', () => {
       });
       if (url.endsWith('/account/summary')) return response({ quoteBalances: [], positions: [] });
       if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
+      if (url.endsWith('/quotes')) return response(quoteResult(init));
       if (url.includes('/trades?')) return response({ items: [], nextCursor: null });
       throw new Error(`Unexpected request ${url}`);
     });
@@ -513,7 +596,7 @@ describe('App', () => {
       trader: `0x${index.toString(16).padStart(40, '0')}`,
       txHash: `0x${index.toString(16).padStart(64, '0')}`,
     }));
-    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith('/uaapi/user/web3/get-nonce')) return response({ nonce: 'mock-nonce', message: 'AZ login message' });
       if (url.endsWith('/uaapi/user/web3/login')) return response({ accessToken: 'mock-az-session-token', expiresAt: Date.now() + 3600000 });
@@ -529,6 +612,7 @@ describe('App', () => {
       if (url.endsWith(`/tokens/${token.tokenAddress}`)) return response(token);
       if (url.endsWith('/account/summary')) return response({ quoteBalances: [], positions: [] });
       if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
+      if (url.endsWith('/quotes')) return response(quoteResult(init));
       if (url.includes('/candles')) return response({
         chainId: 4663,
         tokenAddress: token.tokenAddress,
@@ -571,5 +655,72 @@ describe('App', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(token.tokenAddress));
     fireEvent.click(screen.getByRole('button', { name: `复制地址 ${storedTrades[0]!.trader}` }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(storedTrades[0]!.trader));
+  });
+
+  it('loads an initial REST quote while the market socket is still connecting', async () => {
+    const { quotes } = renderWithDeferredQuotes();
+    await waitFor(() => expect(quotes).toHaveLength(1));
+    await waitFor(() => expect(ControlledQuoteSocket.latest).not.toBeNull());
+    expect(ControlledQuoteSocket.latest?.readyState).toBe(ControlledQuoteSocket.CONNECTING);
+    expect(quotes[0]!.input).toMatchObject({ side: 'BUY', tokenAddress: token.tokenAddress, settlementAsset: 'USDG', amountIn: '1' });
+
+    await act(async () => { quotes[0]!.resolve(await response({ ...quotes[0]!.input, expectedAmountOut: '100' })); });
+    await waitFor(() => expect(displayedQuote()).toBe('≈ 100 CASHCAT'));
+
+    act(() => ControlledQuoteSocket.latest?.open());
+    expect(ControlledQuoteSocket.latest?.sent.some((payload) =>
+      (JSON.parse(payload) as { quote?: { amountIn: string } }).quote?.amountIn === '1')).toBe(true);
+    expect(quotes).toHaveLength(1);
+  });
+
+  it('keeps the quote when quick buy and an already selected amount leave the request unchanged', async () => {
+    const { quotes } = renderWithDeferredQuotes();
+    await waitFor(() => expect(quotes).toHaveLength(1));
+    await act(async () => { quotes[0]!.resolve(await response({ ...quotes[0]!.input, expectedAmountOut: '100' })); });
+    await waitFor(() => expect(displayedQuote()).toBe('≈ 100 CASHCAT'));
+
+    fireEvent.click(screen.getByRole('button', { name: '买入 CASHCAT' }));
+    fireEvent.click(screen.getByRole('button', { name: /^1$/ }));
+    expect(displayedQuote()).toBe('≈ 100 CASHCAT');
+    expect(quotes).toHaveLength(1);
+  });
+
+  it('rejects a late REST quote after the amount changes', async () => {
+    const { quotes } = renderWithDeferredQuotes();
+    await waitFor(() => expect(quotes).toHaveLength(1));
+    fireEvent.change(screen.getByLabelText('买入金额'), { target: { value: '2' } });
+    await waitFor(() => expect(quotes).toHaveLength(2));
+    expect(quotes[0]!.signal?.aborted).toBe(true);
+    expect(quotes[1]!.input.amountIn).toBe('2');
+
+    await act(async () => { quotes[1]!.resolve(await response({ ...quotes[1]!.input, expectedAmountOut: '200' })); });
+    await waitFor(() => expect(displayedQuote()).toBe('≈ 200 CASHCAT'));
+    await act(async () => { quotes[0]!.resolve(await response({ ...quotes[0]!.input, expectedAmountOut: '999' })); });
+    expect(displayedQuote()).toBe('≈ 200 CASHCAT');
+  });
+
+  it('lets matching live WS quotes replace REST quotes and ignores an older REST completion', async () => {
+    const { quotes } = renderWithDeferredQuotes();
+    await waitFor(() => expect(quotes).toHaveLength(1));
+    await act(async () => { quotes[0]!.resolve(await response({ ...quotes[0]!.input, expectedAmountOut: '100' })); });
+    await waitFor(() => expect(displayedQuote()).toBe('≈ 100 CASHCAT'));
+    await waitFor(() => expect(ControlledQuoteSocket.latest).not.toBeNull());
+    act(() => ControlledQuoteSocket.latest?.open());
+
+    act(() => ControlledQuoteSocket.latest?.receive({
+      channel: `quote:${token.tokenAddress.toLowerCase()}`, epoch: 'quote-test', sequence: 1,
+      data: { ...quotes[0]!.input, quoteId: 'live-quote', expectedAmountOut: '150' },
+    }));
+    expect(displayedQuote()).toBe('≈ 150 CASHCAT');
+
+    fireEvent.change(screen.getByLabelText('买入金额'), { target: { value: '2' } });
+    await waitFor(() => expect(quotes).toHaveLength(2));
+    act(() => ControlledQuoteSocket.latest?.receive({
+      channel: `quote:${token.tokenAddress.toLowerCase()}`, epoch: 'quote-test', sequence: 2,
+      data: { ...quotes[1]!.input, quoteId: 'new-live-quote', expectedAmountOut: '250' },
+    }));
+    expect(displayedQuote()).toBe('≈ 250 CASHCAT');
+    await act(async () => { quotes[1]!.resolve(await response({ ...quotes[1]!.input, expectedAmountOut: '200' })); });
+    expect(displayedQuote()).toBe('≈ 250 CASHCAT');
   });
 });

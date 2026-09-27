@@ -205,6 +205,13 @@ function normalizedDecimal(value: string): string {
   return normalizedFraction ? normalizedWhole + '.' + normalizedFraction : normalizedWhole;
 }
 
+function matchesQuoteRequest(quote: Quote, request: NonNullable<Parameters<typeof memeApi.createQuote>[0]>): boolean {
+  return quote.tokenAddress.toLowerCase() === request.tokenAddress.toLowerCase()
+    && quote.side === request.side
+    && quote.settlementAsset === request.settlementAsset
+    && normalizedDecimal(quote.amountIn) === normalizedDecimal(request.amountIn);
+}
+
 function upsertAccountTransaction(items: AccountTransaction[], next: AccountTransaction): AccountTransaction[] {
   return [next, ...items.filter((item) => item.executionId !== next.executionId)]
     .sort((left, right) => right.createdAt - left.createdAt);
@@ -274,7 +281,7 @@ export default function App() {
   const [asset, setAsset] = useState<Asset>('ETH');
   const [amount, setAmount] = useState('0.1');
   const [activePreset, setActivePreset] = useState<string | null>('0.1');
-  const [quote, setQuote] = useState<Quote | null>(null);
+  const [quoteState, setQuoteState] = useState<{ value: Quote; request: Parameters<typeof memeApi.createQuote>[0] } | null>(null);
   const [orderState, setOrderState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(false);
@@ -347,6 +354,8 @@ export default function App() {
   }, [accountMode, amount, asset, selectedTokenAddress, selectedTradeStatus, side, slippageBps]);
   const quoteRequestRef = useRef(quoteRequest);
   quoteRequestRef.current = quoteRequest;
+  const quoteVersionRef = useRef(0);
+  const quote = quoteState?.request === quoteRequest ? quoteState.value : null;
 
   const trackOrder = useCallback(async (orderId: string) => {
     const existing = orderPollsRef.current.get(orderId);
@@ -653,7 +662,6 @@ export default function App() {
     setChartLoading(cached?.syncStatus !== 'READY');
     setMarketError(null);
     setSnapshot(cached);
-    setQuote(null);
     setOrderState(null);
 
     void memeApi.getCandles(selectedTokenAddress, interval)
@@ -777,12 +785,9 @@ export default function App() {
             if (message.channel.startsWith('quote:')) {
               const liveQuote = message.data as Quote;
               const expected = quoteRequestRef.current;
-              if (expected
-                && liveQuote.tokenAddress.toLowerCase() === expected.tokenAddress.toLowerCase()
-                && liveQuote.side === expected.side
-                && liveQuote.settlementAsset === expected.settlementAsset
-                && normalizedDecimal(liveQuote.amountIn) === normalizedDecimal(expected.amountIn)) {
-                setQuote(liveQuote);
+              if (expected && matchesQuoteRequest(liveQuote, expected)) {
+                quoteVersionRef.current += 1;
+                setQuoteState({ value: liveQuote, request: expected });
               }
               return;
             }
@@ -837,7 +842,7 @@ export default function App() {
             setSessionToken(null);
             setSessionReady(false);
             setAccount(null);
-            setQuote(null);
+            setQuoteState(null);
             setError('登录已失效，请重新登录');
             return;
           }
@@ -857,15 +862,32 @@ export default function App() {
   }, [sessionReady, selectedTokenAddress, activeSnapshot?.marketKey, interval, setCachedSnapshot]);
 
   useEffect(() => {
-    setQuote(null);
+    const controller = new AbortController();
+    const version = ++quoteVersionRef.current;
+    setQuoteState(null);
     const socket = streamSocketRef.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN || !selectedTokenAddress) return;
-    if (!marketChannelsRef.current.some((channel) => channel.includes(selectedTokenAddress))) return;
-    socket.send(JSON.stringify({
-      op: 'subscribe',
-      channels: marketChannelsRef.current,
-      ...(sessionReady && quoteRequest ? { quote: quoteRequest } : {}),
-    }));
+    if (sessionReady && quoteRequest) {
+      void memeApi.createQuote(quoteRequest, controller.signal)
+        .then((freshQuote) => {
+          if (controller.signal.aborted || quoteRequestRef.current !== quoteRequest || quoteVersionRef.current !== version) return;
+          if (!matchesQuoteRequest(freshQuote, quoteRequest)) throw new Error('报价与当前请求不匹配');
+          setQuoteState({ value: freshQuote, request: quoteRequest });
+        })
+        .catch((cause: unknown) => {
+          if (!controller.signal.aborted && quoteRequestRef.current === quoteRequest && quoteVersionRef.current === version) {
+            setError(friendlyError(cause, '报价暂时不可用'));
+          }
+        });
+    }
+    if (socket && socket.readyState === WebSocket.OPEN && selectedTokenAddress
+      && marketChannelsRef.current.some((channel) => channel.includes(selectedTokenAddress))) {
+      socket.send(JSON.stringify({
+        op: 'subscribe',
+        channels: marketChannelsRef.current,
+        ...(sessionReady && quoteRequest ? { quote: quoteRequest } : {}),
+      }));
+    }
+    return () => controller.abort();
   }, [quoteRequest, selectedTokenAddress, sessionReady]);
 
   const selectedPosition = account?.positions.find((item) => item.tokenAddress.toLowerCase() === selected?.tokenAddress.toLowerCase());
@@ -949,7 +971,6 @@ export default function App() {
   }, [accountMode, asset, currentBalance, side]);
 
   const resetTradeDraft = useCallback(() => {
-    setQuote(null);
     setOrderState(null);
   }, []);
 
