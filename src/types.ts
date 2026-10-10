@@ -58,6 +58,12 @@ export interface CandleSnapshot {
 }
 
 export interface Trade {
+  /** Available on chain Trade projections; older providers may omit these facts. */
+  protocol?: string;
+  poolKey?: string;
+  notionalUsd?: string;
+  counterAmount?: string;
+  counterAddress?: string;
   tradeId: string;
   t: number;
   side: 'BUY' | 'SELL';

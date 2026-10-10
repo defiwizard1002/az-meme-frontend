@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
+import { setSessionToken } from './api';
 
 vi.mock('lightweight-charts', () => ({
   CandlestickSeries: 'Candlestick',
@@ -56,7 +57,7 @@ const token = {
 function response(result: unknown) {
   if (result && typeof result === 'object' && 'interval' in result && 'tokenAddress' in result && 'items' in result) {
     const candle = result as Record<string, unknown> & { items: Array<Record<string, unknown>> };
-    result = { ...candle, marketKey: 'USD:USDG', syncStatus: candle.syncStatus ?? candle.status ?? 'READY',
+    result = { ...candle, marketKey: 'USD:USDG', syncStatus: candle.syncStatus ?? 'READY',
       availability: 'COMPLETE', coverage: { from: 1, to: 100 }, gaps: [], revision: '1',
       asOfBlock: 100, source: 'CHAIN', items: candle.items.map((item) => ({ ...item, revision: String(item.revision ?? 1) })) };
   }
@@ -145,8 +146,164 @@ function displayedQuote(): string | null {
 }
 
 describe('App', () => {
+  it('retries an empty HTTP account failure and restores the account session', async () => {
+    renderWithDeferredQuotes();
+    const fetch = vi.mocked(globalThis.fetch);
+    const fallback = fetch.getMockImplementation()!;
+    let accountCalls = 0;
+    fetch.mockImplementation((input, init) => {
+      if (String(input).endsWith('/account/summary') && ++accountCalls === 1) return Promise.resolve(new Response('', { status: 502 }));
+      return fallback(input, init);
+    });
+    expect(await screen.findByRole('alert')).toHaveTextContent('HTTP 502');
+    fireEvent.click(screen.getByRole('button', { name: '重试账户连接' }));
+    await waitFor(() => expect(accountCalls).toBe(2));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '重试账户连接' })).not.toBeInTheDocument());
+    expect(screen.queryByText('账户连接失败')).not.toBeInTheDocument();
+  });
+
+  it('keeps newer WS trades when a single gap snapshot resolves late', async () => {
+    renderWithDeferredQuotes();
+    const mockedFetch = vi.mocked(globalThis.fetch);
+    const fallback = mockedFetch.getMockImplementation()!;
+    let resolveSnapshot!: (response: Response) => void;
+    let snapshotCalls = 0;
+    let defer = false;
+    mockedFetch.mockImplementation((input, init) => {
+      if (String(input).includes('/trades?') && defer) {
+        snapshotCalls += 1;
+        return new Promise<Response>((resolve) => { resolveSnapshot = resolve; });
+      }
+      return fallback(input, init);
+    });
+    await waitFor(() => expect(ControlledQuoteSocket.latest).not.toBeNull());
+    const socket = ControlledQuoteSocket.latest!;
+    act(() => socket.open());
+    await waitFor(() => expect(socket.sent.length).toBeGreaterThan(0));
+    const trade = (index: number) => ({ tradeId: `gap-trade-${index}`, t: 100 + index, side: 'BUY',
+      priceUsd: String(index), baseAmount: '2', quoteAmount: '2', quoteAsset: 'USD',
+      trader: `0x${'a'.repeat(40)}`, txHash: `0x${'b'.repeat(64)}` });
+    const send = (sequence: number) => socket.receive({ channel: `trade:${token.tokenAddress}:USD:USDG`,
+      epoch: 'gap-test', sequence, data: { items: [trade(sequence)] } });
+    act(() => send(1));
+    defer = true;
+    act(() => { send(3); send(5); send(6); });
+    expect(snapshotCalls).toBe(1);
+    await act(async () => resolveSnapshot(await response({ items: [trade(2)], nextCursor: null })));
+    await waitFor(() => expect(screen.getAllByTestId('trade-price')).toHaveLength(5));
+    expect(screen.getAllByTestId('trade-price')[0]).toHaveTextContent('$6');
+  });
+  it.each(['candle', 'trade'] as const)('retries failed %s gap recovery single-flight and applies payloads while dirty', async (kind) => {
+    const view = renderWithDeferredQuotes();
+    const mockedFetch = vi.mocked(globalThis.fetch), fallback = mockedFetch.getMockImplementation()!;
+    await waitFor(() => expect(ControlledQuoteSocket.latest).not.toBeNull());
+    const socket = ControlledQuoteSocket.latest!;
+    act(() => socket.open());
+    let calls = 0;
+    const candle = (t: number) => ({ t, o: '1', h: '1', l: '1', c: '1', revision: '3', baseVolume: null, quoteVolume: null });
+    const trade = (t: number) => ({ tradeId: `recovery-${t}`, t, side: 'BUY', priceUsd: '1', baseAmount: '2',
+      quoteAmount: '2', quoteAsset: 'USD', trader: `0x${'a'.repeat(40)}`, txHash: `0x${'b'.repeat(64)}` });
+    mockedFetch.mockImplementation((input, init) => {
+      if (String(input).includes(kind === 'candle' ? '/candles?' : '/trades?')) {
+        calls++;
+        if (calls === 1) return Promise.reject(new Error('offline recovery failure'));
+        return kind === 'candle' ? response({ chainId: 4663, tokenAddress: token.tokenAddress,
+          interval: '1m', items: [candle(2)] }) : response({ items: [trade(2)], nextCursor: null });
+      }
+      return fallback(input, init);
+    });
+    const send = (sequence: number) => socket.receive({ channel: `${kind}:${token.tokenAddress}:USD:USDG${kind === 'candle' ? ':1m' : ''}`,
+      epoch: 'retry-gap', sequence, data: { items: [kind === 'candle' ? candle(sequence) : trade(sequence)] } });
+    await act(async () => { send(1); send(3); send(4); });
+    expect(calls).toBe(1);
+    if (kind === 'candle') expect(screen.getByTestId('tradingview-chart')).toHaveAttribute('data-candle-count', '3');
+    else expect(screen.getAllByTestId('trade-price')).toHaveLength(3);
+    await waitFor(() => expect(calls).toBe(2), { timeout: 3500 });
+    await waitFor(() => {
+      if (kind === 'candle') expect(screen.getByTestId('tradingview-chart')).toHaveAttribute('data-candle-count', '4');
+      else expect(screen.getAllByTestId('trade-price')).toHaveLength(4);
+    });
+    act(() => send(5));
+    expect(calls).toBe(2);
+    view.unmount();
+  });
+  it.each(['candle', 'trade'] as const)('cancels %s recovery retries on selection change and unmount', async (kind) => {
+    const view = renderWithDeferredQuotes();
+    await waitFor(() => expect(ControlledQuoteSocket.latest).not.toBeNull());
+    const old = ControlledQuoteSocket.latest!; act(() => old.open());
+    const mockedFetch = vi.mocked(globalThis.fetch), fallback = mockedFetch.getMockImplementation()!;
+    let calls = 0;
+    mockedFetch.mockImplementation((input, init) => {
+      if (String(input).includes(kind === 'candle' ? '/candles?' : '/trades?')) {
+        calls++; return Promise.reject(new Error('failed recovery'));
+      }
+      return fallback(input, init);
+    });
+    const send = (sequence: number) => old.receive({ channel: `${kind}:${token.tokenAddress}:USD:USDG${kind === 'candle' ? ':1m' : ''}`,
+      epoch: 'cleanup', sequence, data: { items: [] } });
+    await act(async () => { send(1); send(3); });
+    expect(calls).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: '1s' }));
+    view.unmount();
+    const atCleanup = calls;
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1200)); });
+    expect(calls).toBe(atCleanup);
+  });
+  it.each(['candle', 'trade'] as const)('aborts in-flight %s recovery on selection changes and ignores late data', async (kind) => {
+    const view = renderWithDeferredQuotes();
+    await waitFor(() => expect(ControlledQuoteSocket.latest).not.toBeNull());
+    const old = ControlledQuoteSocket.latest!; act(() => old.open());
+    const mockedFetch = vi.mocked(globalThis.fetch), fallback = mockedFetch.getMockImplementation()!;
+    let resolveRecovery!: (value: Response) => void;
+    let recoverySignal: AbortSignal | undefined;
+    mockedFetch.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes(kind === 'candle' ? '/candles?' : '/trades?') && init?.signal) {
+        recoverySignal = init.signal as AbortSignal;
+        return new Promise((resolve) => { resolveRecovery = resolve; });
+      }
+      if (url.includes('/candles?') && url.includes('interval=1s')) return response({ chainId: 4663,
+        tokenAddress: token.tokenAddress, interval: '1s', items: [] });
+      return fallback(input, init);
+    });
+    const send = (sequence: number) => old.receive({ channel: `${kind}:${token.tokenAddress}:USD:USDG${kind === 'candle' ? ':1m' : ''}`,
+      epoch: 'late-cleanup', sequence, data: { items: [] } });
+    await act(async () => { send(1); send(3); });
+    expect(recoverySignal?.aborted).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '1s' }));
+    await waitFor(() => expect(recoverySignal?.aborted).toBe(true));
+    await act(async () => resolveRecovery(await (kind === 'candle'
+      ? response({ chainId: 4663, tokenAddress: token.tokenAddress, interval: '1m', items: [{ t: 99, o: '1', h: '1', l: '1', c: '1' }] })
+      : response({ items: [{ tradeId: 'late-old-selection', t: 99, side: 'BUY', priceUsd: '99999', baseAmount: '1',
+        quoteAmount: '1', quoteAsset: 'USD', trader: `0x${'a'.repeat(40)}`, txHash: `0x${'b'.repeat(64)}` }], nextCursor: null }))));
+    expect(screen.queryByText('$99,999')).toBeNull();
+    expect(screen.getByTestId('tradingview-chart')).toHaveAttribute('data-candle-count', '0');
+    view.unmount();
+  });
+  it('starts streaming when a cached STALE selection becomes READY, including revisit', async () => {
+    const view = renderWithDeferredQuotes();
+    const mockedFetch = vi.mocked(globalThis.fetch), fallback = mockedFetch.getMockImplementation()!;
+    await waitFor(() => expect(ControlledQuoteSocket.latest).not.toBeNull());
+    let stale = true;
+    mockedFetch.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes('/candles?') && url.includes('interval=1s')) return response({ chainId: 4663,
+        tokenAddress: token.tokenAddress, interval: '1s', syncStatus: stale ? 'STALE' : 'READY', items: [] });
+      return fallback(input, init);
+    });
+    fireEvent.click(screen.getByRole('button', { name: '1s' }));
+    await screen.findByRole('button', { name: '重试' });
+    const prior = ControlledQuoteSocket.latest;
+    stale = false;
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    await waitFor(() => expect(ControlledQuoteSocket.latest).not.toBe(prior));
+    fireEvent.click(screen.getByRole('button', { name: '1m' }));
+    await waitFor(() => expect(ControlledQuoteSocket.latest!.readyState).not.toBe(ControlledQuoteSocket.CLOSED));
+    view.unmount();
+  });
   afterEach(() => {
     cleanup();
+    setSessionToken(null);
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -215,6 +372,10 @@ describe('App', () => {
     resolveTokenDetail(await response(token));
     expect(screen.getByText('可用 0.42 ETH')).toBeInTheDocument();
     expect(screen.getByText('已登录')).toBeInTheDocument();
+    expect(screen.queryByText(/账户暂不可用/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开账户划转' })).toBeEnabled();
+    await waitFor(() => expect(document.querySelector('button.primary')).toBeEnabled());
+    expect(document.querySelector('button.primary')).toHaveAccessibleName('买入');
     expect(screen.getByText('3%')).toBeInTheDocument();
     expect(screen.getAllByText('PONS').length).toBeGreaterThan(0);
     await waitFor(() => expect(screen.getAllByText('UNISWAP V4').length).toBeGreaterThan(0));
@@ -248,10 +409,88 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '100%' })).not.toHaveClass('active');
   });
 
-  it('shows an explicit startup error', async () => {
-    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('mock provider unavailable'));
+  it.each(['config', 'markets'])('keeps a genuine %s bootstrap failure fatal after markets refresh', async (endpoint) => {
+    vi.stubGlobal('WebSocket', undefined);
+    let marketCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith('/config')) {
+        if (endpoint === 'config') return Promise.reject(new Error('mock provider unavailable'));
+        return response({ chainName: 'Robinhood Chain', defaultSlippageBps: 300 });
+      }
+      if (url.includes('/markets')) {
+        marketCalls += 1;
+        if (endpoint === 'markets' && marketCalls === 1) return Promise.reject(new Error('mock provider unavailable'));
+        return response({ items: [token], stale: false });
+      }
+      return new Promise<Response>(() => {});
+    });
     render(<App />);
     expect(await screen.findByText('启动失败：mock provider unavailable')).toBeInTheDocument();
+    await waitFor(() => expect(marketCalls).toBeGreaterThanOrEqual(2), { timeout: 2_500 });
+    expect(screen.getByText('启动失败：mock provider unavailable')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('搜索代币或粘贴合约地址')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['/uaapi/user/web3/get-nonce', '登录失败'],
+    ['/uaapi/user/web3/login', '登录失败'],
+    ['/uaapi/user/user/getDesensitizedUserInfo', '登录失败'],
+    ['/account/summary', '账户余额加载失败'],
+    ['/orders', '订单状态恢复失败'],
+  ])('keeps empty markets browsable in an explicit account error when %s fails', async (endpoint, message) => {
+    vi.stubGlobal('WebSocket', undefined);
+    let marketCalls = 0;
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith(endpoint)) return Promise.resolve(new Response(JSON.stringify({
+        rc: 1, mc: 'AZ_ACCOUNT_UNAVAILABLE', ma: ['account service unavailable'], result: null,
+      }), { status: 503, headers: { 'content-type': 'application/json' } }));
+      if (url.endsWith('/config')) return response({
+        chainId: 4663, chainName: 'Robinhood Chain', explorerBaseUrl: 'https://robinhoodchain.blockscout.com',
+        defaultSlippageBps: 300, marketRefreshMs: { hot: 14_400_000, new: 300_000 },
+        accountMode: 'AZ_ACCOUNT', settlementAssets: ['ETH', 'USDC', 'USDT'],
+      });
+      if (url.includes('/markets')) {
+        marketCalls += 1;
+        return response({ items: marketCalls === 1 ? [] : [token], stale: false });
+      }
+      if (url.endsWith('/uaapi/user/web3/get-nonce')) return response({ nonce: 'mock-nonce', message: 'AZ login message' });
+      if (url.endsWith('/uaapi/user/web3/login')) return response({ accessToken: 'mock-az-session-token', expiresAt: Date.now() + 3600000 });
+      if (url.endsWith('/uaapi/user/user/getDesensitizedUserInfo')) return response({ userId: 'mock-user', accountId: 'mock-account', loginStatus: 'LOGGED_IN' });
+      if (url.endsWith('/account/summary')) return response({ quoteBalances: [], positions: [] });
+      if (url.endsWith('/orders')) return response({ items: [], nextCursor: null });
+      if (url.endsWith(`/tokens/${token.tokenAddress}`)) return response(token);
+      if (url.includes('/trades?')) return response({ items: [], nextCursor: null });
+      if (url.includes('/candles')) return response({ tokenAddress: token.tokenAddress, interval: '1m', items: [] });
+      throw new Error(`Unexpected request ${url}`);
+    });
+
+    render(<App />);
+    const warning = await screen.findByRole('alert');
+    expect(warning).toHaveTextContent(`账户请求失败：${message}`);
+    expect(screen.getByText('没有匹配的代币')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('搜索代币或粘贴合约地址')).toBeEnabled();
+    expect(screen.getByRole('button', { name: '新币' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '打开账户划转' })).toBeDisabled();
+    expect(document.querySelector('button.primary')).toBeDisabled();
+    expect(screen.queryByText('登录中')).not.toBeInTheDocument();
+    expect(screen.queryByText('已登录')).not.toBeInTheDocument();
+    expect(screen.queryByText(/启动失败/)).not.toBeInTheDocument();
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '查看 CASHCAT' })).toBeInTheDocument(), { timeout: 2_500 });
+    expect(await screen.findByLabelText('CASHCAT K 线图')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '查看 CASHCAT' }));
+    expect(screen.getByRole('alert')).toHaveTextContent(message);
+    expect(screen.getByRole('button', { name: '打开账户划转' })).toBeDisabled();
+    expect(document.querySelector('button.primary')).toBeDisabled();
+    expect(fetch.mock.calls.some(([input, init]) => String(input).endsWith('/quotes')
+      || init?.method === 'POST' && /\/(orders|account\/transactions|fund\/balance\/transfer)$/.test(String(input)))).toBe(false);
+    if (endpoint.includes('/uaapi/')) {
+      expect(fetch.mock.calls.some(([input]) => String(input).endsWith('/account/summary') || String(input).endsWith('/orders'))).toBe(false);
+      const [, refreshInit] = fetch.mock.calls.filter(([input]) => String(input).includes('/markets'))[1];
+      expect(new Headers(refreshInit?.headers).has('authorization')).toBe(false);
+    }
   });
 
   it('retries an empty market snapshot while workers warm the database', async () => {
@@ -591,6 +830,7 @@ describe('App', () => {
       side: index % 2 === 0 ? 'BUY' : 'SELL',
       priceUsd: String(0.02 + index / 10_000),
       baseAmount: String(index + 1),
+      notionalUsd: String((index + 1) * (0.02 + index / 10_000)),
       quoteAmount: '0.1',
       quoteAsset: 'SPCX',
       trader: `0x${index.toString(16).padStart(40, '0')}`,
@@ -655,6 +895,58 @@ describe('App', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(token.tokenAddress));
     fireEvent.click(screen.getByRole('button', { name: `复制地址 ${storedTrades[0]!.trader}` }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(storedTrades[0]!.trader));
+  });
+
+  it('renders authoritative trade notionals, including a PONS trade and the 0.01 USD boundary', async () => {
+    renderWithDeferredQuotes();
+    await waitFor(() => expect(ControlledQuoteSocket.latest).not.toBeNull());
+    const socket = ControlledQuoteSocket.latest!;
+    act(() => socket.open());
+    await waitFor(() => expect(socket.sent.some((payload) =>
+      (JSON.parse(payload) as { channels: string[] }).channels.includes(`trade:${token.tokenAddress.toLowerCase()}:USD:USDG`))).toBe(true));
+
+    const shared = {
+      t: Math.floor(Date.now() / 1000), side: 'BUY', quoteAsset: 'SPCX',
+      trader: `0x${'a'.repeat(40)}`, txHash: `0x${'b'.repeat(64)}`,
+    };
+    act(() => socket.receive({
+      channel: `trade:${token.tokenAddress.toLowerCase()}:USD:USDG`, epoch: 'notional-test', sequence: 1,
+      data: { items: [
+        { ...shared, tradeId: 'boundary', baseAmount: '1', priceUsd: '0.02',
+          quoteAmount: '0.01', notionalUsd: '0.01' },
+        { ...shared, tradeId: 'pons', protocol: 'PONS', poolKey: 'pool_cashcat',
+          baseAmount: '100', priceUsd: '0.02', counterAmount: '0.005',
+          quoteAmount: '0.1', notionalUsd: '0.37' },
+      ] },
+    }));
+
+    expect(screen.getAllByTestId('trade-value').map((value) => value.textContent)).toEqual(['$0.37', '$0.01']);
+    const ponsRow = screen.getAllByTestId('trade-value')[0]!.closest('.trade-row');
+    expect(ponsRow).toHaveTextContent('0.1 SPCX');
+    expect(ponsRow).not.toHaveTextContent('0.005 SPCX');
+  });
+
+  it('marks missing and invalid trade notionals unavailable without deriving a value from price', async () => {
+    renderWithDeferredQuotes();
+    await waitFor(() => expect(ControlledQuoteSocket.latest).not.toBeNull());
+    const socket = ControlledQuoteSocket.latest!;
+    act(() => socket.open());
+    await waitFor(() => expect(socket.sent.some((payload) =>
+      (JSON.parse(payload) as { channels: string[] }).channels.includes(`trade:${token.tokenAddress.toLowerCase()}:USD:USDG`))).toBe(true));
+    const shared = {
+      t: Math.floor(Date.now() / 1000), side: 'BUY', quoteAsset: 'SPCX',
+      trader: `0x${'a'.repeat(40)}`, txHash: `0x${'b'.repeat(64)}`,
+      baseAmount: '100', priceUsd: '2', quoteAmount: '0.1',
+    };
+    act(() => socket.receive({
+      channel: `trade:${token.tokenAddress.toLowerCase()}:USD:USDG`, epoch: 'legacy-notional', sequence: 1,
+      data: { items: [
+        { ...shared, tradeId: 'missing' },
+        { ...shared, tradeId: 'invalid', notionalUsd: 'Infinity' },
+        { ...shared, tradeId: 'zero', notionalUsd: '0' },
+      ] },
+    }));
+    expect(screen.getAllByTestId('trade-value').map((value) => value.textContent)).toEqual(['$0', '—', '—']);
   });
 
   it('loads an initial REST quote while the market socket is still connecting', async () => {

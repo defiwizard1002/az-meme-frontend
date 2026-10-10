@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, azAuth, azFundApi, memeApi, setSessionToken, wsBaseUrl } from './api';
-import { CandleChart } from './CandleChart';
+import { CandleChart, type HistoryLoadResult } from './CandleChart';
 import { streamBatchItems, streamSequenceAction } from './stream-batches';
 import { pollOrderUntilTerminal } from './order-tracker';
 import { pollTransactionUntilTerminal } from './transaction-tracker';
@@ -73,6 +73,11 @@ function shortAddress(value: string): string {
 
 function CopyableAddress({ value, iconOnly = false }: { value: string; iconOnly?: boolean }) {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  useEffect(() => {
+    if (state === 'idle') return;
+    const timer = window.setTimeout(() => setState('idle'), 1_200);
+    return () => window.clearTimeout(timer);
+  }, [state]);
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(value);
@@ -80,7 +85,6 @@ function CopyableAddress({ value, iconOnly = false }: { value: string; iconOnly?
     } catch {
       setState('failed');
     }
-    window.setTimeout(() => setState('idle'), 1_200);
   };
   return (
     <button type="button" className="copy-address" onClick={() => void copy()} aria-label={`复制地址 ${value}`} title={value}>
@@ -194,8 +198,10 @@ function addressUrl(explorerBaseUrl: string, address: string): string | null {
 }
 
 function tradeValueUsd(trade: Trade): string {
-  const value = Number(trade.baseAmount) * Number(trade.priceUsd);
-  return Number.isFinite(value) ? money(value) : '$0';
+  const notional = trade.notionalUsd;
+  if (typeof notional !== 'string' || !/^(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(notional.trim())) return '—';
+  const value = Number(notional);
+  return Number.isFinite(value) ? money(value) : '—';
 }
 
 function normalizedDecimal(value: string): string {
@@ -230,7 +236,7 @@ function friendlyError(cause: unknown, fallback: string): string {
     MEME_INSUFFICIENT_MAIN_ACCOUNT_GAS: 'Gas 余额不足',
     MEME_UNSUPPORTED_POOL_TYPE: '当前池暂不支持交易',
   };
-  return messages[cause.code] ?? fallback;
+  return messages[cause.code] ?? `${fallback}：${cause.message}（HTTP ${cause.status}，${cause.code}）`;
 }
 
 export function chooseNewerCandle(previous: Candle | undefined, next: Candle): Candle {
@@ -248,17 +254,30 @@ export function mergeSnapshots(previous: CandleSnapshot | null, next: CandleSnap
   if (!previous
     || previous.tokenAddress.toLowerCase() !== next.tokenAddress.toLowerCase()
     || previous.marketKey !== next.marketKey
-    || previous.interval !== next.interval) return next;
+    || previous.interval !== next.interval) return next.gaps.length > 0 && next.availability === 'COMPLETE'
+      ? { ...next, availability: 'PARTIAL' }
+      : next;
   const byTime = new Map(previous.items.map((item) => [item.t, item]));
   for (const item of next.items) byTime.set(item.t, chooseNewerCandle(byTime.get(item.t), item));
   const limits = [previous.coverage, next.coverage];
   const from = limits.map((value) => value.from).filter((value): value is number => value !== null);
   const to = limits.map((value) => value.to).filter((value): value is number => value !== null);
+  // A complete page does not prove that gaps in other pages have been repaired.
+  const gaps = [...new Map([...previous.gaps, ...next.gaps]
+    .map((gap) => [`${gap.from}:${gap.to}:${gap.reason}`, gap])).values()]
+    .sort((a, b) => a.from - b.from || a.to - b.to || a.reason.localeCompare(b.reason));
+  const availability = previous.availability === 'COMPLETE' && next.availability === 'COMPLETE' && gaps.length === 0
+    ? 'COMPLETE'
+    : previous.availability === 'UNAVAILABLE_BEFORE_START' && next.availability === 'UNAVAILABLE_BEFORE_START' && byTime.size === 0
+      ? 'UNAVAILABLE_BEFORE_START'
+      : 'PARTIAL';
   return { ...next,
+    availability,
+    gaps,
     revision: BigInt(previous.revision) > BigInt(next.revision) ? previous.revision : next.revision,
     asOfBlock: Math.max(previous.asOfBlock ?? 0, next.asOfBlock ?? 0) || null,
     coverage: { from: from.length ? Math.min(...from) : null, to: to.length ? Math.max(...to) : null },
-    items: [...byTime.values()].sort((a, b) => a.t - b.t).slice(-2000) };
+    items: [...byTime.values()].sort((a, b) => a.t - b.t) };
 }
 
 function TokenMark({ token }: { token: Token }) {
@@ -283,10 +302,19 @@ export default function App() {
   const [activePreset, setActivePreset] = useState<string | null>('0.1');
   const [quoteState, setQuoteState] = useState<{ value: Quote; request: Parameters<typeof memeApi.createQuote>[0] } | null>(null);
   const [orderState, setOrderState] = useState<string | null>(null);
+  useEffect(() => {
+    const delay = ({ '交易成功': 3000, '交易失败，资金已释放': 1200, '交易失败': 1800 } as Record<string, number>)[orderState ?? ''];
+    if (delay === undefined) return;
+    const timer = window.setTimeout(() => setOrderState(null), delay);
+    return () => window.clearTimeout(timer);
+  }, [orderState]);
   const [loading, setLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(false);
   const [marketError, setMarketError] = useState<string | null>(null);
   const [marketRetry, setMarketRetry] = useState(0);
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [accountError, setAccountError] = useState<string | null>(null);
+  const [accountRetry, setAccountRetry] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [chainName, setChainName] = useState('Robinhood Chain');
   const [explorerBaseUrl, setExplorerBaseUrl] = useState('');
@@ -304,6 +332,7 @@ export default function App() {
   const [transferAsset, setTransferAsset] = useState<Asset>('ETH');
   const [transferAmount, setTransferAmount] = useState('0.1');
   const [transferState, setTransferState] = useState<string | null>(null);
+  const accountAvailable = sessionReady && account !== null;
   const candleCacheRef = useRef(new Map<string, CandleSnapshot>());
   const tradeCacheRef = useRef(new Map<string, TradeCacheEntry>());
   const tradesPausedRef = useRef(false);
@@ -315,6 +344,8 @@ export default function App() {
   const streamSocketRef = useRef<WebSocket | null>(null);
   const marketChannelsRef = useRef<string[]>([]);
   const selectionRequestRef = useRef(0);
+  const candleHistoryScopeRef = useRef<{ key: string; loading?: boolean; exhausted?: boolean } | null>(null);
+  const tradeHistoryScopeRef = useRef<{ key: string; loading?: boolean; exhausted?: boolean } | null>(null);
   const selectedTokenAddress = selected?.tokenAddress ?? null;
   const selectedTradeStatus = selected?.tradeStatus ?? null;
   const selectedMarketKey = selected ? 'USD:USDG' : null;
@@ -367,10 +398,8 @@ export default function App() {
       onUpdate: (latest) => {
         if (latest.status === 'SETTLED') {
           setOrderState('交易成功');
-          window.setTimeout(() => setOrderState(null), 3000);
         } else if (latest.status === 'FAILED_FINAL' && latest.fundStatus === 'RELEASED') {
           setOrderState('交易失败，资金已释放');
-          window.setTimeout(() => setOrderState(null), 1200);
         } else if (latest.status === 'MANUAL_REVIEW') {
           setOrderState('处理中，请联系客服');
         } else if (latest.status === 'SUBMISSION_UNKNOWN') {
@@ -411,15 +440,13 @@ export default function App() {
             if (value === executionId) mainAccountIdempotencyRef.current.delete(key);
           }
           void refreshMainAccount().catch((cause: unknown) => {
-            setError(friendlyError(cause, '余额刷新失败'));
+            setAccountError(friendlyError(cause, '余额刷新失败'));
           });
-          window.setTimeout(() => setOrderState(null), 3000);
         } else if (latest.status === 'FAILED') {
           setOrderState('交易失败');
           for (const [key, value] of mainAccountIdempotencyRef.current) {
             if (value === executionId) mainAccountIdempotencyRef.current.delete(key);
           }
-          window.setTimeout(() => setOrderState(null), 1800);
         } else if (latest.status === 'SUBMISSION_UNKNOWN') {
           setOrderState('结果待确认');
         } else {
@@ -496,7 +523,7 @@ export default function App() {
             });
         }
       })
-      .catch((cause: unknown) => active && setError(friendlyError(cause, '加载失败')))
+      .catch((cause: unknown) => active && setBootstrapError(friendlyError(cause, '加载失败')))
       .finally(() => active && setLoading(false));
     return () => { active = false; };
   }, []);
@@ -536,6 +563,8 @@ export default function App() {
       return;
     }
     let active = true;
+    const scope = { key: activeTradeKey };
+    tradeHistoryScopeRef.current = scope;
     const cached = tradeCacheRef.current.get(activeTradeKey);
     setTrades(cached?.items ?? []);
     setTradeNextCursor(cached?.nextCursor ?? null);
@@ -561,7 +590,10 @@ export default function App() {
         if (active) setError(friendlyError(cause, '成交加载失败'));
       })
       .finally(() => { if (active) setTradesLoading(false); });
-    return () => { active = false; };
+    return () => {
+      active = false;
+      if (tradeHistoryScopeRef.current === scope) tradeHistoryScopeRef.current = null;
+    };
   }, [activeTradeKey, selectedMarketKey, selectedTokenAddress]);
 
   useEffect(() => {
@@ -595,15 +627,16 @@ export default function App() {
   useEffect(() => {
     if (!accountMode) return;
     let active = true;
+    setSessionReady(false);
+    setAccountError(null);
     const login = accountMode === 'MAIN_ACCOUNT_POC' ? Promise.resolve() : azAuth.loginMock().then(() => undefined);
     void login
       .then(async () => {
         if (!active) return;
-        setSessionReady(true);
         await Promise.all([
           memeApi.getAccount()
             .then((summary) => { if (active) setAccount(summary); })
-            .catch((cause: unknown) => { if (active) setError(friendlyError(cause, '账户余额加载失败')); }),
+            .catch((cause: unknown) => { throw new Error(friendlyError(cause, '账户余额加载失败')); }),
           accountMode === 'MAIN_ACCOUNT_POC'
             ? memeApi.getAccountTransactions()
                 .then(({ items }) => {
@@ -617,7 +650,7 @@ export default function App() {
                     }
                   }
                 })
-                .catch((cause: unknown) => { if (active) setError(friendlyError(cause, '交易记录加载失败')); })
+                .catch((cause: unknown) => { throw new Error(friendlyError(cause, '交易记录加载失败')); })
             : Promise.resolve(),
           memeApi.getOrders()
           .then(({ items }) => {
@@ -631,23 +664,27 @@ export default function App() {
             }
           })
           .catch((cause: unknown) => {
-            if (active) setError(friendlyError(cause, '订单状态恢复失败'));
+            throw new Error(friendlyError(cause, '订单状态恢复失败'));
           }),
         ]);
+        if (active) { setSessionReady(true); setAccountError(null); }
       })
       .catch((cause: unknown) => {
-        setSessionToken(null);
-        if (active) setError(friendlyError(cause, '登录失败'));
+        if (active) {
+          setSessionToken(null);
+          setSessionReady(false);
+          setAccountError(friendlyError(cause, '登录失败'));
+        }
       });
     return () => { active = false; };
-  }, [accountMode, trackMainAccountTransaction, trackOrder]);
+  }, [accountMode, accountRetry, trackMainAccountTransaction, trackOrder]);
 
   useEffect(() => {
     if (!sessionReady || accountMode !== 'MAIN_ACCOUNT_POC') return;
     const timer = window.setInterval(() => {
       void memeApi.getAccountTransactions()
         .then(({ items }) => setAccountTransactions(items))
-        .catch((cause: unknown) => setError(friendlyError(cause, '交易记录刷新失败')));
+        .catch((cause: unknown) => setAccountError(friendlyError(cause, '交易记录刷新失败')));
     }, 5_000);
     return () => window.clearInterval(timer);
   }, [accountMode, sessionReady]);
@@ -656,6 +693,8 @@ export default function App() {
     if (!selectedTokenAddress || !selectedMarketKey) return;
     let active = true;
     const cacheKey = candleCacheKey(selectedTokenAddress, interval);
+    const scope = { key: cacheKey };
+    candleHistoryScopeRef.current = scope;
     const requestedMarketKey = selectedMarketKey;
     const cachedSnapshot = candleCacheRef.current.get(cacheKey) ?? null;
     const cached = cachedSnapshot?.marketKey === requestedMarketKey ? cachedSnapshot : null;
@@ -682,7 +721,10 @@ export default function App() {
         setChartLoading(false);
         setMarketError(friendlyError(cause, '行情暂时不可用'));
       });
-    return () => { active = false; };
+    return () => {
+      active = false;
+      if (candleHistoryScopeRef.current === scope) candleHistoryScopeRef.current = null;
+    };
   }, [selectedTokenAddress, selectedMarketKey, interval, marketRetry, setCachedSnapshot]);
 
   useEffect(() => {
@@ -715,7 +757,46 @@ export default function App() {
         if (!current || current.tokenAddress.toLowerCase() !== selectedTokenAddress.toLowerCase() || current.interval !== interval) return current;
         const byTime = new Map(current.items.map((item) => [item.t, item]));
         byTime.set(candle.t, chooseNewerCandle(byTime.get(candle.t), candle));
-        return { ...current, items: [...byTime.values()].sort((a, b) => a.t - b.t).slice(-2000) };
+        return { ...current, items: [...byTime.values()].sort((a, b) => a.t - b.t) };
+      });
+    };
+
+    const recoveryController = new AbortController();
+    const recovery = new Map<string, { dirty: boolean; generation: number; flight: boolean; attempt: number; timer?: number }>();
+    const recover = (channel: string, markDirty = true) => {
+      const state = recovery.get(channel) ?? { dirty: false, generation: 0, flight: false, attempt: 0 };
+      recovery.set(channel, state);
+      if (markDirty) { state.dirty = true; state.generation += 1; }
+      if (disposed || !state.dirty || state.flight || state.timer !== undefined) return;
+      state.flight = true;
+      const generation = state.generation;
+      const signal = AbortSignal.any([recoveryController.signal, AbortSignal.timeout(10_000)]);
+      const request = channel === candleChannel
+        ? memeApi.getCandles(selectedTokenAddress, interval, { signal }).then((fresh) => {
+          if (fresh.syncStatus === 'STALE') throw new Error('stale candle recovery snapshot');
+          if (!disposed) setCachedSnapshot((current) => mergeSnapshots(current, fresh));
+        })
+        : memeApi.getTrades(selectedTokenAddress, undefined, signal).then((page) => {
+          if (disposed) return;
+          const current = tradeCacheRef.current.get(currentTradeCacheKey);
+          const seen = new Set((current?.items ?? []).map((trade) => trade.tradeId));
+          const items = [...(current?.items ?? []), ...page.items.filter((trade) => !seen.has(trade.tradeId))]
+            .sort((left, right) => right.t - left.t).slice(0, 5000);
+          boundedMapSet(tradeCacheRef.current, currentTradeCacheKey, { items, nextCursor: page.nextCursor, initialized: true }, 64);
+          if (!tradesPausedRef.current) setTrades(items);
+        });
+      void request.then(() => {
+        if (disposed) return;
+        // A second gap during an in-flight read needs another read after it.
+        if (state.generation === generation) state.dirty = false;
+        state.attempt = 0;
+      }).catch(() => {
+        if (!disposed) setError(channel === candleChannel ? '行情更新中断，正在恢复' : '成交更新中断，正在恢复');
+      }).finally(() => {
+        state.flight = false;
+        if (disposed || !state.dirty) return;
+        const delay = Math.min(30_000, 1000 * 2 ** Math.min(state.attempt++, 5));
+        state.timer = window.setTimeout(() => { state.timer = undefined; recover(channel, false); }, delay);
       });
     };
 
@@ -727,30 +808,18 @@ export default function App() {
         socket = nextSocket;
         streamSocketRef.current = nextSocket;
         nextSocket.addEventListener('open', () => {
-          if (hasConnected) {
-            void memeApi.getCandles(selectedTokenAddress, interval)
-              .then((fresh) => { if (!disposed) setCachedSnapshot((current) => mergeSnapshots(current, fresh)); })
-              .catch(() => setError('行情更新中断，正在恢复'));
-            void memeApi.getTrades(selectedTokenAddress)
-              .then((page) => {
-                if (disposed) return;
-                const current = tradeCacheRef.current.get(currentTradeCacheKey);
-                const seen = new Set(page.items.map((trade) => trade.tradeId));
-                const items = [...page.items, ...(current?.items ?? []).filter((trade) => !seen.has(trade.tradeId))].slice(0, 5000);
-                boundedMapSet(tradeCacheRef.current, currentTradeCacheKey, { items, nextCursor: page.nextCursor, initialized: true }, 64);
-                if (!tradesPausedRef.current) setTrades(items);
-              })
-              .catch(() => setError('成交更新中断，正在恢复'));
-          }
+          if (disposed) { nextSocket.close(); return; }
+          if (hasConnected) { recover(candleChannel); recover(tradeChannel); }
           hasConnected = true;
           reconnectAttempt = 0;
           nextSocket.send(JSON.stringify({
             op: 'subscribe',
             channels,
-            ...(sessionReady && quoteRequestRef.current ? { quote: quoteRequestRef.current } : {}),
+            ...(accountAvailable && quoteRequestRef.current ? { quote: quoteRequestRef.current } : {}),
           }));
         });
         nextSocket.addEventListener('message', (event) => {
+          if (disposed) return;
           try {
             const message = JSON.parse(String(event.data)) as StreamMessage<Candle | CandleSnapshot | Trade | Quote | Token | HotMarketUpdate | StreamBatch<Candle> | StreamBatch<Trade>>;
             const previous = streamState.get(message.channel);
@@ -785,7 +854,7 @@ export default function App() {
             if (message.channel.startsWith('quote:')) {
               const liveQuote = message.data as Quote;
               const expected = quoteRequestRef.current;
-              if (expected && matchesQuoteRequest(liveQuote, expected)) {
+              if (accountAvailable && expected && matchesQuoteRequest(liveQuote, expected)) {
                 quoteVersionRef.current += 1;
                 setQuoteState({ value: liveQuote, request: expected });
               }
@@ -793,30 +862,11 @@ export default function App() {
             }
             if (message.channel === candleChannel) {
               const candles = streamBatchItems(message.data as Candle | StreamBatch<Candle>);
-              if (requiresResync) {
-                void memeApi.getCandles(selectedTokenAddress, interval)
-                  .then((fresh) => {
-                    if (!disposed) {
-                      setCachedSnapshot((current) => mergeSnapshots(current, fresh));
-                      candles.forEach(upsertCandle);
-                    }
-                  })
-                  .catch(() => setError('行情更新中断，正在恢复'));
-                return;
-              }
+              if (requiresResync) recover(candleChannel);
               candles.forEach(upsertCandle);
               return;
             }
             if (message.channel === tradeChannel) {
-              if (requiresResync) {
-                void memeApi.getTrades(selectedTokenAddress).then((page) => {
-                  if (!disposed) {
-                    boundedMapSet(tradeCacheRef.current, currentTradeCacheKey, { ...page, initialized: true }, 64);
-                    if (!tradesPausedRef.current) setTrades(page.items);
-                  }
-                }).catch(() => setError('成交更新中断，正在恢复'));
-                return;
-              }
               const batch = streamBatchItems(message.data as Trade | StreamBatch<Trade>);
               const current = tradeCacheRef.current.get(currentTradeCacheKey)
                 ?? { items: [], nextCursor: null, initialized: false };
@@ -825,6 +875,7 @@ export default function App() {
               const items = [...incoming, ...current.items.filter((trade) => !incomingIds.has(trade.tradeId))].slice(0, 5000);
               boundedMapSet(tradeCacheRef.current, currentTradeCacheKey, { ...current, items }, 64);
               if (!tradesPausedRef.current) setTrades(items);
+              if (requiresResync) recover(tradeChannel);
             }
           } catch {
             setError('实时行情暂时不可用，正在重连');
@@ -843,7 +894,7 @@ export default function App() {
             setSessionReady(false);
             setAccount(null);
             setQuoteState(null);
-            setError('登录已失效，请重新登录');
+            setAccountError('登录已失效，请重新登录');
             return;
           }
           setError('实时行情暂时不可用，历史行情仍可查看');
@@ -855,18 +906,20 @@ export default function App() {
     void connect();
     return () => {
       disposed = true;
+      recoveryController.abort();
+      for (const state of recovery.values()) if (state.timer !== undefined) window.clearTimeout(state.timer);
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
       if (streamSocketRef.current === socket) streamSocketRef.current = null;
       socket?.close();
     };
-  }, [sessionReady, selectedTokenAddress, activeSnapshot?.marketKey, interval, setCachedSnapshot]);
+  }, [accountAvailable, selectedTokenAddress, activeSnapshot?.marketKey, activeSnapshot?.syncStatus, interval, setCachedSnapshot]);
 
   useEffect(() => {
     const controller = new AbortController();
     const version = ++quoteVersionRef.current;
     setQuoteState(null);
     const socket = streamSocketRef.current;
-    if (sessionReady && quoteRequest) {
+    if (accountAvailable && quoteRequest) {
       void memeApi.createQuote(quoteRequest, controller.signal)
         .then((freshQuote) => {
           if (controller.signal.aborted || quoteRequestRef.current !== quoteRequest || quoteVersionRef.current !== version) return;
@@ -884,11 +937,11 @@ export default function App() {
       socket.send(JSON.stringify({
         op: 'subscribe',
         channels: marketChannelsRef.current,
-        ...(sessionReady && quoteRequest ? { quote: quoteRequest } : {}),
+        ...(accountAvailable && quoteRequest ? { quote: quoteRequest } : {}),
       }));
     }
     return () => controller.abort();
-  }, [quoteRequest, selectedTokenAddress, sessionReady]);
+  }, [quoteRequest, selectedTokenAddress, accountAvailable]);
 
   const selectedPosition = account?.positions.find((item) => item.tokenAddress.toLowerCase() === selected?.tokenAddress.toLowerCase());
   const currentBalance = side === 'BUY'
@@ -899,9 +952,12 @@ export default function App() {
     if (tradesPausedRef.current) return;
     if (element.scrollHeight - element.scrollTop - element.clientHeight > 40) return;
     if (!activeTradeKey || !selectedTokenAddress || !selectedMarketKey || !tradeNextCursor || tradesLoading) return;
+    const scope = tradeHistoryScopeRef.current;
+    if (!scope || scope.key !== activeTradeKey) return;
     setTradesLoading(true);
     void memeApi.getTrades(selectedTokenAddress, tradeNextCursor)
       .then((page) => {
+        if (tradeHistoryScopeRef.current !== scope) return;
         const current = tradeCacheRef.current.get(activeTradeKey)
           ?? { items: [], nextCursor: tradeNextCursor, initialized: true };
         const seen = new Set(current.items.map((trade) => trade.tradeId));
@@ -911,8 +967,10 @@ export default function App() {
         if (!tradesPausedRef.current) setTrades(items);
         setTradeNextCursor(entry.nextCursor);
       })
-      .catch((cause: unknown) => setError(friendlyError(cause, '更早成交加载失败')))
-      .finally(() => setTradesLoading(false));
+      .catch((cause: unknown) => {
+        if (tradeHistoryScopeRef.current === scope) setError(friendlyError(cause, '更早成交加载失败'));
+      })
+      .finally(() => { if (tradeHistoryScopeRef.current === scope) setTradesLoading(false); });
   }, [activeTradeKey, selectedMarketKey, selectedTokenAddress, tradeNextCursor, tradesLoading]);
   const toggleTradesPaused = useCallback(() => {
     const next = !tradesPausedRef.current;
@@ -982,19 +1040,36 @@ export default function App() {
     resetTradeDraft();
   }, [accountMode, asset, resetTradeDraft]);
 
-  const loadOlderCandles = useCallback(async (before: number): Promise<number> => {
-    if (!selected) return 0;
+  const loadOlderCandles = useCallback(async (before: number): Promise<HistoryLoadResult> => {
+    if (!selected) return { added: 0, exhausted: false };
+    const scope = candleHistoryScopeRef.current;
+    if (!scope || scope.key !== candleCacheKey(selected.tokenAddress, interval) || scope.loading) return { added: 0, exhausted: false };
+    if (scope.exhausted) return { added: 0, exhausted: true };
+    const earliest = candleCacheRef.current.get(scope.key)?.items[0]?.t;
+    if (!Number.isSafeInteger(before) || before < 0 || earliest === undefined || before >= earliest) return { added: 0, exhausted: false };
+    scope.loading = true;
     try {
       const result = await memeApi.getCandles(selected.tokenAddress, interval, { to: before, limit: candlePageSize });
-      setCachedSnapshot((current) => mergeSnapshots(current, result));
-      return result.items.length;
+      if (candleHistoryScopeRef.current !== scope) return { added: 0, exhausted: false };
+      if (result.tokenAddress.toLowerCase() !== selected.tokenAddress.toLowerCase() || result.interval !== interval
+        || result.items.some((item) => item.t > before)) throw new Error('更早行情响应超出请求范围');
+      const currentTimes = new Set(candleCacheRef.current.get(scope.key)?.items.map((item) => item.t));
+      const added = new Set(result.items.filter((item) => item.t < earliest && !currentTimes.has(item.t)).map((item) => item.t)).size;
+      // A completed bounded page with no earlier bars is exhausted for this scope.
+      scope.exhausted = added === 0 && result.syncStatus === 'READY';
+      setCachedSnapshot((current) => candleHistoryScopeRef.current === scope ? mergeSnapshots(current, result) : current);
+      return { added, exhausted: scope.exhausted };
     } catch (cause) {
-      setError(friendlyError(cause, '更早行情加载失败'));
-      return 0;
+      if (candleHistoryScopeRef.current === scope) setError(friendlyError(cause, '更早行情加载失败'));
+      if (candleHistoryScopeRef.current === scope) throw cause;
+      return { added: 0, exhausted: false };
+    } finally {
+      scope.loading = false;
     }
   }, [interval, selected, setCachedSnapshot]);
 
   const submitOrder = useCallback(async () => {
+    if (!accountAvailable) return;
     if (!quote) {
       setError('报价更新中，请稍后再试');
       return;
@@ -1053,10 +1128,10 @@ export default function App() {
       setOrderState(null);
       setError(friendlyError(cause, '下单失败'));
     }
-  }, [accountMode, asset, quote, selected, side, slippageBps, trackMainAccountTransaction, trackOrder]);
+  }, [accountAvailable, accountMode, asset, quote, selected, side, slippageBps, trackMainAccountTransaction, trackOrder]);
 
   const submitTransfer = useCallback(async () => {
-    if (!sessionReady) return;
+    if (!accountAvailable) return;
     if (!/^\d+(?:\.\d+)?$/.test(transferAmount) || Number(transferAmount) <= 0) {
       setError('请输入有效的划转金额');
       return;
@@ -1082,10 +1157,10 @@ export default function App() {
       setTransferState(null);
       setError(friendlyError(cause, '划转失败'));
     }
-  }, [sessionReady, transferAmount, transferAsset, transferDirection]);
+  }, [accountAvailable, transferAmount, transferAsset, transferDirection]);
 
   if (loading) return <main className="full-state">正在加载</main>;
-  if (error && tokens.length === 0) return <main className="full-state error-state">启动失败：{error}</main>;
+  if (bootstrapError) return <main className="full-state error-state">启动失败：{bootstrapError}</main>;
 
   const safety = selected ? securityLabels(selected) : [];
 
@@ -1101,11 +1176,12 @@ export default function App() {
           <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索代币或粘贴合约地址" />
         </label>
         {accountMode === 'MAIN_ACCOUNT_POC'
-          ? <div className="balances">{balanceLabel}</div>
-          : <button type="button" className="balances" aria-label="打开账户划转" disabled={!sessionReady} onClick={() => setTransferOpen(true)}>{balanceLabel}</button>}
-        <div className="mock-badge"><i aria-hidden="true" />{accountMode === 'MAIN_ACCOUNT_POC' ? '验证账户' : sessionReady ? '已登录' : '登录中'}</div>
+          ? <div className="balances">{accountError ? '账户不可用' : balanceLabel}</div>
+          : <button type="button" className="balances" aria-label="打开账户划转" disabled={!accountAvailable} onClick={() => setTransferOpen(true)}>{accountError ? '账户不可用' : balanceLabel}</button>}
+        <div className="mock-badge"><i aria-hidden="true" />{accountError ? '账户连接失败' : accountMode === 'MAIN_ACCOUNT_POC' ? '验证账户' : sessionReady ? '已登录' : '登录中'}</div>
       </header>
 
+      {accountError && <div className="notice" role="alert">账户请求失败：{accountError}<button type="button" onClick={() => setAccountRetry((n) => n + 1)}>重试账户连接</button></div>}
       {error && <div className="notice" role="alert">{error}<button type="button" onClick={() => setError(null)}>关闭</button></div>}
 
       <div className="workspace">
@@ -1262,8 +1338,8 @@ export default function App() {
               <div><dt>滑点上限</dt><dd>{(slippageBps / 100).toFixed(slippageBps % 100 === 0 ? 0 : 2)}%</dd></div>
               <div className="security-row"><dt>安全</dt><dd>{safety.map((item) => <span className={`security-${item.tone}`} key={item.text}>{item.text}</span>)}</dd></div>
             </dl>
-            <button type="button" className="primary" disabled={!sessionReady || !selected || !quoteRequest || !quote || Boolean(orderState) || (side === 'SELL' && Number(currentBalance) <= 0)} onClick={submitOrder}>
-              {!sessionReady ? '等待登录' : orderState ?? (side === 'BUY' ? '买入' : '卖出')}
+            <button type="button" className="primary" disabled={!accountAvailable || !selected || !quoteRequest || !quote || Boolean(orderState) || (side === 'SELL' && Number(currentBalance) <= 0)} onClick={submitOrder}>
+              {accountError ? '账户连接失败' : !sessionReady ? '等待登录' : orderState ?? (side === 'BUY' ? '买入' : '卖出')}
             </button>
           </div>
 
@@ -1313,7 +1389,7 @@ export default function App() {
           <label>方向<select aria-label="划转方向" value={transferDirection} onChange={(event) => { setTransferDirection(event.target.value as typeof transferDirection); setTransferState(null); }}><option value="SPOT_TO_MEME">Spot → Meme</option><option value="MEME_TO_SPOT">Meme → Spot</option></select></label>
           <label>资产<select aria-label="划转资产" value={transferAsset} onChange={(event) => { setTransferAsset(event.target.value as Asset); setTransferState(null); }}><option>ETH</option><option>USDC</option><option>USDT</option></select></label>
           <label>金额<input aria-label="划转金额" value={transferAmount} inputMode="decimal" onChange={(event) => { setTransferAmount(event.target.value); setTransferState(null); }} /></label>
-          <button type="button" className="primary" disabled={Boolean(transferState?.startsWith('划转中'))} onClick={submitTransfer}>{transferState ?? '确认划转'}</button>
+          <button type="button" className="primary" disabled={!accountAvailable || Boolean(transferState?.startsWith('划转中'))} onClick={submitTransfer}>{transferState ?? '确认划转'}</button>
         </section>
       </div>}
     </main>
