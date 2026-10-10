@@ -10,6 +10,7 @@ interface Envelope<T> {
 const apiBaseUrl = (import.meta.env.VITE_MEME_API_BASE_URL as string | undefined) ?? '';
 const azApiBaseUrl = (import.meta.env.VITE_AZ_API_BASE_URL as string | undefined) ?? '';
 let sessionToken: string | null = null;
+const requestTimeoutMs = 15_000;
 
 export class ApiError extends Error {
   constructor(readonly code: string, message: string, readonly status: number) {
@@ -22,7 +23,13 @@ export function setSessionToken(token: string | null): void {
 }
 
 async function readEnvelope<T>(response: Response, prefix: 'MEME' | 'AZ'): Promise<T> {
-  const text = await response.text();
+  let text: string;
+  try {
+    text = await response.text();
+  } catch {
+    throw new ApiError(`${prefix}_${response.ok ? 'INVALID_RESPONSE' : 'REQUEST_FAILED'}`,
+      `HTTP ${response.status}: 服务响应读取中断，请检查连接后重试`, response.status);
+  }
   let payload: Partial<Envelope<T>> | null = null;
   try {
     const parsed: unknown = JSON.parse(text);
@@ -42,24 +49,57 @@ async function readEnvelope<T>(response: Response, prefix: 'MEME' | 'AZ'): Promi
   return payload.result as T;
 }
 async function send<T>(base: string, prefix: 'MEME' | 'AZ', path: string, init?: RequestInit): Promise<T> {
+  init?.signal?.throwIfAborted();
   const headers = new Headers(init?.headers);
   if (init?.body) headers.set('content-type', 'application/json');
-  if (sessionToken) headers.set('authorization', `Bearer ${sessionToken}`);
-  return readEnvelope<T>(await fetch(`${base}${path}`, { ...init, headers, credentials: 'same-origin' }), prefix);
+  if (sessionToken && !headers.has('authorization')) headers.set('authorization', `Bearer ${sessionToken}`);
+  const controller = new AbortController();
+  const cancel = () => controller.abort(init?.signal?.reason);
+  let response: Response | undefined;
+  const timer = setTimeout(() => {
+    const mutation = !['GET', 'HEAD'].includes((init?.method ?? 'GET').toUpperCase());
+    controller.abort(new ApiError(`${prefix}_${response && !response.ok ? 'REQUEST_FAILED' : 'REQUEST_TIMEOUT'}`,
+      `${response ? `HTTP ${response.status}: ` : ''}请求超时${mutation
+        ? '，结果未确认，交易可能已广播；请先核对交易记录，勿重复提交' : '，请稍后重试'}`, response?.status ?? 0));
+  }, requestTimeoutMs);
+  let rejectAbort!: () => void;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectAbort = () => reject(controller.signal.reason);
+    controller.signal.addEventListener('abort', rejectAbort, { once: true });
+  });
+  init?.signal?.addEventListener('abort', cancel, { once: true });
+  try {
+    // Race the whole read: aborting fetch alone cannot bound an unresponsive body reader.
+    return await Promise.race([aborted, (async () => {
+      response = await fetch(`${base}${path}`, { ...init, headers, signal: controller.signal, credentials: 'same-origin' });
+      controller.signal.throwIfAborted();
+      return readEnvelope<T>(response, prefix);
+    })()]);
+  } catch (cause) {
+    if (controller.signal.aborted) throw controller.signal.reason;
+    if (cause instanceof ApiError) throw cause;
+    throw new ApiError(`${prefix}_REQUEST_FAILED`, '网络请求失败，请检查连接后重试', response?.status ?? 0);
+  } finally {
+    clearTimeout(timer);
+    init?.signal?.removeEventListener('abort', cancel);
+    controller.signal.removeEventListener('abort', rejectAbort);
+  }
 }
 function request<T>(path: string, init?: RequestInit): Promise<T> { return send(apiBaseUrl, 'MEME', path, init); }
 function requestAz<T>(path: string, init?: RequestInit): Promise<T> { return send(azApiBaseUrl, 'AZ', path, init); }
 
 export const azAuth = {
-  loginMock: async () => {
+  loginMock: async (signal?: AbortSignal) => {
     const sourceAddr = `0x${'7'.repeat(40)}`;
     const nonce = await requestAz<{ nonce: string; message: string }>('/az-auth/uaapi/user/web3/get-nonce', {
       method: 'POST',
+      signal,
       body: JSON.stringify({ sourceAddr, type: 'LOGIN', chainType: 'ETHEREUM' }),
     });
     if (!nonce.message) throw new Error('AZ nonce response is missing the sign message');
     const login = await requestAz<{ accessToken: string; expiresAt: number }>('/az-auth/uaapi/user/web3/login', {
       method: 'POST',
+      signal,
       body: JSON.stringify({
         signature: '0xmock-signature',
         sourceAddr,
@@ -68,8 +108,10 @@ export const azAuth = {
         loginType: 'WALLET',
       }),
     });
+    const user = await requestAz<{ userId: string; accountId: string; loginStatus: string }>('/az-auth/uaapi/user/user/getDesensitizedUserInfo',
+      { signal, headers: { authorization: `Bearer ${login.accessToken}` } });
+    signal?.throwIfAborted();
     setSessionToken(login.accessToken);
-    const user = await requestAz<{ userId: string; accountId: string; loginStatus: string }>('/az-auth/uaapi/user/user/getDesensitizedUserInfo');
     return { ...user, expiresAt: login.expiresAt };
   },
 };
@@ -104,8 +146,8 @@ export const memeApi = {
     if (cursor) query.set('cursor', cursor);
     return request<{ items: Trade[]; nextCursor: string | null }>(`/sapi/v1/meme/tokens/${tokenAddress}/trades?${query.toString()}`, { signal });
   },
-  getAccount: () => request<AccountSummary>('/sapi/v1/meme/account/summary'),
-  getAccountTransactions: () => request<{ items: AccountTransaction[] }>('/sapi/v1/meme/account/transactions?limit=50'),
+  getAccount: (signal?: AbortSignal) => request<AccountSummary>('/sapi/v1/meme/account/summary', { signal }),
+  getAccountTransactions: (signal?: AbortSignal) => request<{ items: AccountTransaction[] }>('/sapi/v1/meme/account/transactions?limit=50', { signal }),
   getAccountTransaction: (executionId: string) => request<AccountTransaction>(`/sapi/v1/meme/account/transactions/${executionId}`),
   executeMainAccountTrade: (input: {
     clientExecutionId: string;
@@ -122,7 +164,7 @@ export const memeApi = {
     request<Quote>('/sapi/v1/meme/quotes', { method: 'POST', body: JSON.stringify(input), signal }),
   createOrder: (input: { clientOrderId: string; quoteId: string; maxAmountIn: string; minAmountOut: string }) =>
     request<Order>('/sapi/v1/meme/orders', { method: 'POST', body: JSON.stringify(input) }),
-  getOrders: () => request<{ items: Order[]; nextCursor: string | null }>('/sapi/v1/meme/orders'),
+  getOrders: (signal?: AbortSignal) => request<{ items: Order[]; nextCursor: string | null }>('/sapi/v1/meme/orders', { signal }),
   getOrder: (orderId: string) => request<Order>(`/sapi/v1/meme/orders/${orderId}`),
   getWsTicket: () => request<{ ticket: string; expiresAt: number }>('/sapi/v1/meme/ws-ticket', { method: 'POST' }),
   planTrade: (input: { side: 'BUY' | 'SELL'; tokenAddress: string; settlementAsset?: 'USDG' | 'ETH' | 'USDC'; amountIn: string; slippageBps: number; simulate: boolean }) =>
