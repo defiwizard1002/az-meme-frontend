@@ -2,6 +2,22 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, azAuth, memeApi, setSessionToken } from './api';
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); setSessionToken(null); });
 describe('HTTP envelopes', () => {
+  it('keeps public market reads and recovery tickets free of stale account credentials', async () => {
+    const fetch = vi.fn(async (_input: string, _init: RequestInit) => new Response(JSON.stringify({ rc: 0, result: {} })));
+    vi.stubGlobal('fetch', fetch); setSessionToken('stale-account-session');
+    const controller = new AbortController();
+    await memeApi.getConfig(); await memeApi.getMarkets(); await memeApi.searchMarkets('ORBANCY');
+    await memeApi.getToken('token'); await memeApi.getCandles('token', '1s'); await memeApi.getTrades('token');
+    await memeApi.getWsTicket(controller.signal, true);
+    expect(fetch).toHaveBeenCalledTimes(7);
+    for (const [, init] of fetch.mock.calls) {
+      expect(new Headers(init.headers).has('authorization')).toBe(false);
+      expect(init.credentials).toBe('omit');
+    }
+    expect(fetch.mock.calls.some(([url]) => String(url).includes('/az-auth'))).toBe(false);
+    await memeApi.getAccount();
+    expect(new Headers(fetch.mock.calls.at(-1)![1].headers).get('authorization')).toBe('Bearer stale-account-session');
+  });
   it.each([[502, ''], [503, '<html>unavailable</html>'], [401, 'Unauthorized'], [502, '{"rc":1,']])('preserves HTTP %i for a non-JSON body', async (status, body) => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status: status as number })));
     await expect(memeApi.getAccount()).rejects.toMatchObject({ status, code: 'MEME_REQUEST_FAILED', message: expect.stringContaining(`HTTP ${status}`) });

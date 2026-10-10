@@ -48,11 +48,12 @@ async function readEnvelope<T>(response: Response, prefix: 'MEME' | 'AZ'): Promi
   }
   return payload.result as T;
 }
-async function send<T>(base: string, prefix: 'MEME' | 'AZ', path: string, init?: RequestInit): Promise<T> {
+async function send<T>(base: string, prefix: 'MEME' | 'AZ', path: string, init?: RequestInit, publicMarket = false): Promise<T> {
   init?.signal?.throwIfAborted();
   const headers = new Headers(init?.headers);
   if (init?.body) headers.set('content-type', 'application/json');
-  if (sessionToken && !headers.has('authorization')) headers.set('authorization', `Bearer ${sessionToken}`);
+  if (publicMarket) headers.delete('authorization');
+  else if (sessionToken && !headers.has('authorization')) headers.set('authorization', `Bearer ${sessionToken}`);
   const controller = new AbortController();
   const cancel = () => controller.abort(init?.signal?.reason);
   let response: Response | undefined;
@@ -71,7 +72,7 @@ async function send<T>(base: string, prefix: 'MEME' | 'AZ', path: string, init?:
   try {
     // Race the whole read: aborting fetch alone cannot bound an unresponsive body reader.
     return await Promise.race([aborted, (async () => {
-      response = await fetch(`${base}${path}`, { ...init, headers, signal: controller.signal, credentials: 'same-origin' });
+      response = await fetch(`${base}${path}`, { ...init, headers, signal: controller.signal, credentials: publicMarket ? 'omit' : 'same-origin' });
       controller.signal.throwIfAborted();
       return readEnvelope<T>(response, prefix);
     })()]);
@@ -86,6 +87,7 @@ async function send<T>(base: string, prefix: 'MEME' | 'AZ', path: string, init?:
   }
 }
 function request<T>(path: string, init?: RequestInit): Promise<T> { return send(apiBaseUrl, 'MEME', path, init); }
+function requestPublicMarket<T>(path: string, init?: RequestInit): Promise<T> { return send(apiBaseUrl, 'MEME', path, init, true); }
 function requestAz<T>(path: string, init?: RequestInit): Promise<T> { return send(azApiBaseUrl, 'AZ', path, init); }
 
 export const azAuth = {
@@ -122,7 +124,7 @@ export const azFundApi = {
 };
 
 export const memeApi = {
-  getConfig: () => request<{
+  getConfig: () => requestPublicMarket<{
     chainId: number;
     chainName: string;
     explorerBaseUrl: string;
@@ -132,19 +134,19 @@ export const memeApi = {
     mainAccountAddress: string | null;
     settlementAssets: Asset[];
   }>('/sapi/v1/meme/config'),
-  getMarkets: (tab: 'hot' | 'new' = 'hot') => request<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?tab=${tab}&limit=50`),
-  searchMarkets: (query: string) => request<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?query=${encodeURIComponent(query)}&limit=50`),
-  getToken: (tokenAddress: string) => request<Token>(`/sapi/v1/meme/tokens/${tokenAddress}`),
+  getMarkets: (tab: 'hot' | 'new' = 'hot') => requestPublicMarket<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?tab=${tab}&limit=50`),
+  searchMarkets: (query: string) => requestPublicMarket<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?query=${encodeURIComponent(query)}&limit=50`),
+  getToken: (tokenAddress: string) => requestPublicMarket<Token>(`/sapi/v1/meme/tokens/${tokenAddress}`),
   getCandles: (tokenAddress: string, interval: Interval, options?: { from?: number; to?: number; limit?: number; signal?: AbortSignal }) => {
     const query = new URLSearchParams({ interval, limit: String(options?.limit ?? 300) });
     if (options?.from !== undefined) query.set('from', String(options.from));
     if (options?.to !== undefined) query.set('to', String(options.to));
-    return request<CandleSnapshot>(`/sapi/v1/meme/tokens/${tokenAddress}/candles?${query.toString()}`, { signal: options?.signal });
+    return requestPublicMarket<CandleSnapshot>(`/sapi/v1/meme/tokens/${tokenAddress}/candles?${query.toString()}`, { signal: options?.signal });
   },
   getTrades: (tokenAddress: string, cursor?: string, signal?: AbortSignal) => {
     const query = new URLSearchParams({ limit: '100' });
     if (cursor) query.set('cursor', cursor);
-    return request<{ items: Trade[]; nextCursor: string | null }>(`/sapi/v1/meme/tokens/${tokenAddress}/trades?${query.toString()}`, { signal });
+    return requestPublicMarket<{ items: Trade[]; nextCursor: string | null }>(`/sapi/v1/meme/tokens/${tokenAddress}/trades?${query.toString()}`, { signal });
   },
   getAccount: (signal?: AbortSignal) => request<AccountSummary>('/sapi/v1/meme/account/summary', { signal }),
   getAccountTransactions: (signal?: AbortSignal) => request<{ items: AccountTransaction[] }>('/sapi/v1/meme/account/transactions?limit=50', { signal }),
@@ -166,7 +168,8 @@ export const memeApi = {
     request<Order>('/sapi/v1/meme/orders', { method: 'POST', body: JSON.stringify(input) }),
   getOrders: (signal?: AbortSignal) => request<{ items: Order[]; nextCursor: string | null }>('/sapi/v1/meme/orders', { signal }),
   getOrder: (orderId: string) => request<Order>(`/sapi/v1/meme/orders/${orderId}`),
-  getWsTicket: () => request<{ ticket: string; expiresAt: number }>('/sapi/v1/meme/ws-ticket', { method: 'POST' }),
+  getWsTicket: (signal?: AbortSignal, publicMarket = false) => (publicMarket ? requestPublicMarket : request)<{ ticket: string; expiresAt: number }>(
+    '/sapi/v1/meme/ws-ticket', { method: 'POST', signal }),
   planTrade: (input: { side: 'BUY' | 'SELL'; tokenAddress: string; settlementAsset?: 'USDG' | 'ETH' | 'USDC'; amountIn: string; slippageBps: number; simulate: boolean }) =>
     request<TradePlan>('/sapi/v1/meme/transactions/plan', { method: 'POST', body: JSON.stringify(input) }),
 };
