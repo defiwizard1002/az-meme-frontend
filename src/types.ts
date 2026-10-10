@@ -58,6 +58,9 @@ export interface CandleSnapshot {
 }
 
 export interface Trade {
+  /** Historical stream updates merge without indicating new live activity. */
+  history?: boolean;
+  correction?: boolean;
   /** Available on chain Trade projections; older providers may omit these facts. */
   protocol?: string;
   poolKey?: string;

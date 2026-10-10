@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import App from './App';
+import App, { mergeTrades } from './App';
 import type { HistoryLoadResult } from './CandleChart';
 import { ApiError, azAuth, memeApi, setSessionToken } from './api';
 import type { Candle, CandleSnapshot, Token, Trade } from './types';
@@ -46,6 +46,43 @@ function deferred<T>() {
   const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
   return { promise, resolve, reject };
 }
+
+describe('bounded trade merge', () => {
+  it('sorts by actual time before the 5000 cap so older history cannot evict newer trades', () => {
+    const current = Array.from({ length: 5000 }, (_, index) => trade(`live-${index}`, index + 1, '11'));
+    const history = Array.from({ length: 100 }, (_, index) => ({ ...trade(`old-${index}`, -index, '22'), history: true }));
+    const items = mergeTrades(current, history);
+    expect(items).toHaveLength(5000);
+    expect(items.map((item) => item.tradeId)).toEqual([...current].reverse().map((item) => item.tradeId));
+  });
+
+  it('replaces a known ID and reorders its corrected time before applying the cap', () => {
+    const current = Array.from({ length: 5000 }, (_, index) => trade(`live-${index}`, index + 1, '11'));
+    const revised = { ...trade('live-0', 6000, '22'), correction: true };
+    const newest = trade('newest', 7000, '33');
+    const items = mergeTrades(current, [revised, trade('old', 0, '44'), newest]);
+    expect(items).toHaveLength(5000);
+    expect(items.slice(0, 3)).toEqual([newest, revised, current[4999]]);
+    expect(items.at(-1)).toBe(current[2]);
+    expect(new Set(items.map((item) => item.tradeId)).size).toBe(5000);
+  });
+
+  it('uses object identity to protect a later replacement even when its values did not change', () => {
+    const before = trade('known', 100, '11');
+    const later = { ...before };
+    const baseline = new Map([[before.tradeId, before]]);
+    const fresh = trade('known', 100, '22');
+    expect(mergeTrades([before], [fresh], baseline)).toEqual([fresh]);
+    expect(mergeTrades([later], [fresh], baseline)[0]).toBe(later);
+  });
+
+  it('dedupes a GET response by ID with the last update while preserving rows absent from the page', () => {
+    const retained = trade('retained', 110, '33');
+    const last = trade('known', 100, '22');
+    const items = mergeTrades([retained], [trade('known', 90, '11'), last], new Map([[retained.tradeId, retained]]));
+    expect(items).toEqual([retained, last]);
+  });
+});
 
 class ControlledSocket {
   static readonly OPEN = 1;
@@ -118,6 +155,39 @@ describe('urgent live trade and account origin regressions through App', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it.each([
+    { race: false, paused: false }, { race: true, paused: false },
+    { race: false, paused: true }, { race: true, paused: true },
+  ])('trade request baseline: pagination refreshes known IDs, protects later WS changes and honors pause (%j)', async ({ race, paused }) => {
+    setup('MAIN_ACCOUNT_POC', true); vi.useFakeTimers();
+    const gate = deferred<Awaited<ReturnType<typeof memeApi.getTrades>>>();
+    vi.mocked(memeApi.getTrades).mockImplementation((_address, cursor) => cursor ? gate.promise
+      : Promise.resolve({ items: [trade('a-new', 100, '11'), trade('unchanged', 90, '12')], nextCursor: 'a-cursor' }));
+    await act(async () => { render(<App />); });
+    const socket = ControlledSocket.instances.at(-1)!; act(() => socket.open());
+    push(socket, [{ ...trade('a-new', 100, '17'), history: true }]);
+    scrollTrades();
+    expect(memeApi.getTrades).toHaveBeenLastCalledWith(tokenA.tokenAddress, 'a-cursor');
+    if (paused) fireEvent.click(screen.getByRole('button', { name: '暂停' }));
+    if (race) push(socket, [
+      { ...trade('a-new', 100, '44'), history: true, correction: true }, trade('stream-new', 110, '55'),
+    ], 2);
+    await act(async () => gate.resolve({ items: [
+      trade('old', 50, '33'), trade('stream-new', 110, '77'), trade('a-new', 100, '22'), trade('unchanged', 90, '66'),
+    ], nextCursor: 'next-history' }));
+    if (paused) {
+      expect(screen.getAllByTestId('trade-price').map((item) => item.textContent)).toEqual(['$17', '$12']);
+      fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    }
+    expect(screen.getAllByTestId('trade-price').map((item) => item.textContent)).toEqual(race
+      ? ['$55', '$44', '$66', '$33'] : ['$77', '$22', '$66', '$33']);
+    expect(document.querySelectorAll('.trade-flash')).toHaveLength(race && !paused ? 1 : 0);
+    expect(row(race ? '44' : '22')).not.toHaveClass('trade-flash');
+    expect(row('66')).not.toHaveClass('trade-flash');
+    scrollTrades();
+    expect(memeApi.getTrades).toHaveBeenLastCalledWith(tokenA.tokenAddress, 'next-history');
+  });
+
   it('respects reduced motion for newly pushed rows', async () => {
     vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })));
     const socket = await mountLive();
@@ -150,15 +220,18 @@ describe('urgent live trade and account origin regressions through App', () => {
     expect(azAuth.loginMock).not.toHaveBeenCalled();
   });
 
-  it('stops reconnecting when an AZ upstream failure is returned by the WS ticket request', async () => {
+  it('bounds public ticket retries independently of an AZ upstream failure', async () => {
     setup('AZ_ACCOUNT', true);
     vi.mocked(memeApi.getWsTicket).mockRejectedValue(new ApiError('AZ_REQUEST_FAILED', 'auth upstream absent', 502));
     vi.useFakeTimers();
     await act(async () => { render(<App />); });
-    expect(screen.getByRole('alert')).toHaveTextContent('AZ 登录上游不可用');
+    expect(screen.getAllByRole('alert').some((node) => node.textContent?.includes('AZ 登录上游不可用'))).toBe(true);
     const attempts = vi.mocked(memeApi.getWsTicket).mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
-    expect(memeApi.getWsTicket).toHaveBeenCalledTimes(attempts);
+    expect(vi.mocked(memeApi.getWsTicket).mock.calls.length).toBeGreaterThan(attempts);
+    expect(vi.mocked(memeApi.getWsTicket).mock.calls.length).toBeLessThan(10);
+    expect(azAuth.loginMock).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(memeApi.getWsTicket).mock.calls.at(-1)).toEqual([expect.any(AbortSignal), true]);
   });
 
   it('shows actionable AZ login upstream failure and the authorized private Tailscale origin without retry loops', async () => {
@@ -172,6 +245,7 @@ describe('urgent live trade and account origin regressions through App', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('HTTP 502');
     expect(screen.getByRole('alert')).toHaveTextContent('AZ_REQUEST_FAILED');
     expect(screen.getByRole('link', { name: /Tailscale.*私网/ })).toHaveAttribute('href', 'https://dopemac-mini.tailc44fad.ts.net:4173/');
+    act(() => ControlledSocket.instances.at(-1)!.open());
     const attempts = vi.mocked(memeApi.getWsTicket).mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
     expect(azAuth.loginMock).toHaveBeenCalledTimes(1);
@@ -353,7 +427,7 @@ describe('account bootstrap and selection-scoped pagination', () => {
     await screen.findByLabelText('AAA K 线图');
     let loading!: Promise<HistoryLoadResult>;
     act(() => { loading = chart.current!.onLoadBefore(99); });
-    expect(memeApi.getCandles).toHaveBeenLastCalledWith(tokenA.tokenAddress, '1m', { to: 99, limit: 300 });
+    expect(memeApi.getCandles).toHaveBeenLastCalledWith(tokenA.tokenAddress, '1m', { to: 99, limit: 300, signal: expect.any(AbortSignal) });
     if (change === 'interval change') {
       fireEvent.click(screen.getByRole('button', { name: '15m' }));
       await waitFor(() => expect(memeApi.getCandles).toHaveBeenLastCalledWith(tokenA.tokenAddress, '15m', { signal: expect.any(AbortSignal) }));
@@ -458,7 +532,7 @@ describe('bounded older candle pages', () => {
     render(<App />); await screen.findByLabelText('AAA K 线图');
     await act(async () => expect(await chart.current!.onLoadBefore(100)).toEqual({ added: 0, exhausted: false }));
     await act(async () => expect(await chart.current!.onLoadBefore(99)).toEqual({ added: 1, exhausted: false }));
-    expect(memeApi.getCandles).toHaveBeenLastCalledWith(tokenA.tokenAddress, '1m', { to: 99, limit: 300 });
+    expect(memeApi.getCandles).toHaveBeenLastCalledWith(tokenA.tokenAddress, '1m', { to: 99, limit: 300, signal: expect.any(AbortSignal) });
     expect(chart.current!.candles.map((item) => item.t)).toEqual([50, 100]);
     await act(async () => expect(await chart.current!.onLoadBefore(49)).toEqual({ added: 0, exhausted: true }));
     const calls = vi.mocked(memeApi.getCandles).mock.calls.length;
@@ -603,7 +677,8 @@ describe('hotfix: bounded account bootstrap and empty demand', () => {
       expect(screen.queryByText(/同步|未就绪|回填|追赶|刷新|失败|历史 K 线部分缺失/)).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
     }
-    expect(memeApi.getCandles).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(memeApi.getCandles).mock.calls.length).toBeGreaterThan(4);
+    expect(vi.mocked(memeApi.getCandles).mock.calls.length).toBeLessThanOrEqual(9);
     expect(vi.mocked(memeApi.getCandles).mock.calls.every(([, interval]) => interval === '1s')).toBe(true);
   });
 
@@ -623,7 +698,7 @@ describe('hotfix: bounded account bootstrap and empty demand', () => {
     expect(memeApi.getCandles).toHaveBeenCalledTimes(2);
   });
 
-  it.each(['BACKFILLING', 'READY'] as const)('bounds automatic refetch of empty %s/PARTIAL with no gap details', async (syncStatus) => {
+  it.each(['BACKFILLING', 'READY'] as const)('caps the retry cadence of empty %s/PARTIAL and respects terminal READY', async (syncStatus) => {
     setup('MAIN_ACCOUNT_POC');
     vi.useFakeTimers();
     vi.mocked(memeApi.getCandles).mockResolvedValue({ ...snapshot(tokenA, '1m', []), syncStatus, availability: 'PARTIAL' });
@@ -631,11 +706,11 @@ describe('hotfix: bounded account bootstrap and empty demand', () => {
     if (syncStatus === 'BACKFILLING') expect(screen.queryByRole('status')).not.toBeInTheDocument();
     else expect(screen.getByRole('status')).toHaveTextContent('未完整');
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
-    expect(memeApi.getCandles).toHaveBeenCalledTimes(5);
-    expect(screen.getByRole('button', { name: '重试' })).toBeEnabled();
-    expect(screen.getByText(/已停止自动刷新/)).toBeVisible();
+    const reads = vi.mocked(memeApi.getCandles).mock.calls.length;
+    expect(reads).toBe(syncStatus === 'READY' ? 1 : 6);
+    expect(screen.queryByText(/已停止自动刷新/)).not.toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
-    expect(memeApi.getCandles).toHaveBeenCalledTimes(5);
+    expect(memeApi.getCandles).toHaveBeenCalledTimes(syncStatus === 'READY' ? reads : reads + 2);
   });
 
   it.each(['STALE', 'FAILED'] as const)('shows %s as a failure with reason and retry with empty or committed candles', async (syncStatus) => {
@@ -653,7 +728,7 @@ describe('hotfix: bounded account bootstrap and empty demand', () => {
     expect(screen.getByRole('button', { name: '重试' })).toBeEnabled();
   });
 
-  it('clears only the exhausted empty-history warning when the first expected WS candle arrives', async () => {
+  it('keeps pending demand alive when the first expected WS candle arrives without inventing completion', async () => {
     setup('MAIN_ACCOUNT_POC', true);
     vi.useFakeTimers();
     vi.mocked(memeApi.getCandles).mockResolvedValue({ ...snapshot(tokenA, '1m', []),
@@ -663,9 +738,9 @@ describe('hotfix: bounded account bootstrap and empty demand', () => {
     act(() => socket.open());
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
     const warning = '历史 K 线仍未就绪，已停止自动刷新，请重试';
-    expect(memeApi.getCandles).toHaveBeenCalledTimes(5);
+    expect(memeApi.getCandles).toHaveBeenCalledTimes(6);
     expect(chart.current!.candles).toEqual([]);
-    expect(screen.getByText(warning)).toBeVisible();
+    expect(screen.queryByText(warning)).not.toBeInTheDocument();
     act(() => {
       socket.receive({ channel: `candle:${tokenB.tokenAddress}:USD:USDG:1m`, epoch: 'live', sequence: 1,
         data: candle(100, '22') });
@@ -673,14 +748,14 @@ describe('hotfix: bounded account bootstrap and empty demand', () => {
         data: { items: [] } });
     });
     expect(chart.current!.candles).toEqual([]);
-    expect(screen.getByText(warning)).toBeVisible();
+    expect(screen.queryByText(warning)).not.toBeInTheDocument();
     act(() => socket.receive({ channel: `candle:${tokenA.tokenAddress}:USD:USDG:1m`, epoch: 'live', sequence: 2,
       data: candle(100, '11') }));
     expect(chart.current!.candles).toEqual([candle(100, '11')]);
     expect(screen.queryByText(warning)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
-    expect(memeApi.getCandles).toHaveBeenCalledTimes(5);
+    expect(memeApi.getCandles).toHaveBeenCalledTimes(10);
   });
 
   it('keeps a real network exception during metadata refresh after a valid WS candle arrives', async () => {

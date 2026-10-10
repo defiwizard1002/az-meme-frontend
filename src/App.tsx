@@ -179,6 +179,20 @@ interface TradeCacheEntry {
   initialized: boolean;
 }
 
+export function mergeTrades(current: Trade[], incoming: Trade[], baseline?: ReadonlyMap<string, Trade>): Trade[] {
+  const existing = new Map(current.map((trade) => [trade.tradeId, trade]));
+  const byId = new Map<string, Trade>();
+  // Trade has no revision. A GET may refresh only identities unchanged since its request began.
+  // Reverse arrival remains the tie order; repeated IDs use the last item in the batch.
+  for (const trade of [...incoming].reverse()) {
+    if (!byId.has(trade.tradeId) && (!baseline || existing.get(trade.tradeId) === baseline.get(trade.tradeId))) {
+      byId.set(trade.tradeId, trade);
+    }
+  }
+  for (const trade of current) if (!byId.has(trade.tradeId)) byId.set(trade.tradeId, trade);
+  return [...byId.values()].sort((left, right) => right.t - left.t).slice(0, 5000);
+}
+
 function candleCacheKey(tokenAddress: string, interval: Interval): string {
   return `${tokenAddress.toLowerCase()}:${interval}`;
 }
@@ -330,7 +344,9 @@ export default function App() {
   const [accountError, setAccountError] = useState<string | null>(null);
   const [accountOriginIssue, setAccountOriginIssue] = useState(false);
   const [accountRetry, setAccountRetry] = useState(0);
-  const [error, setError] = useState<string | null>(null);
+  const [errorState, setErrorState] = useState<{ message: string; owner?: object } | null>(null);
+  const error = errorState?.message ?? null;
+  const setError = useCallback((message: string | null) => setErrorState(message === null ? null : { message }), []);
   const [chainName, setChainName] = useState('Robinhood Chain');
   const [explorerBaseUrl, setExplorerBaseUrl] = useState('');
   const [slippageBps, setSlippageBps] = useState(300);
@@ -359,7 +375,8 @@ export default function App() {
   const streamSocketRef = useRef<WebSocket | null>(null);
   const marketChannelsRef = useRef<string[]>([]);
   const selectionRequestRef = useRef(0);
-  const candleHistoryScopeRef = useRef<{ key: string; loading?: boolean; exhausted?: boolean } | null>(null);
+  const candleHistoryScopeRef = useRef<{ key: string; controller: AbortController; loading?: boolean; exhausted?: boolean;
+    readHead?: (signal?: AbortSignal) => Promise<CandleSnapshot>; refresh?: () => void; updateHeadStatus?: (status: CandleSnapshot['syncStatus']) => void } | null>(null);
   const tradeHistoryScopeRef = useRef<{ key: string; loading?: boolean; exhausted?: boolean } | null>(null);
   const selectedTokenAddress = selected?.tokenAddress ?? null;
   const selectedTradeStatus = selected?.tradeStatus ?? null;
@@ -374,6 +391,7 @@ export default function App() {
   const activeTradeKey = selected && selectedMarketKey
     ? tradeCacheKey(selected.tokenAddress, selectedMarketKey)
     : null;
+  const marketStreamAvailable = !!activeSnapshot && activeSnapshot.syncStatus !== 'STALE' && activeSnapshot.syncStatus !== 'FAILED';
   const hasTrades = trades.length > 0;
   const privateAccountHref = accountOriginIssue ? privateAccountUrl() : null;
 
@@ -593,18 +611,19 @@ export default function App() {
     }
     let active = true;
     const scope = { key: activeTradeKey };
+    const controller = new AbortController();
     tradeHistoryScopeRef.current = scope;
     const cached = tradeCacheRef.current.get(activeTradeKey);
+    const baseline = new Map((cached?.items ?? []).map((trade) => [trade.tradeId, trade]));
     setTrades(cached?.items ?? []);
     setTradeNextCursor(cached?.nextCursor ?? null);
     setTradesLoading(true);
-    void memeApi.getTrades(selectedTokenAddress)
+    void memeApi.getTrades(selectedTokenAddress, undefined, controller.signal)
       .then((page) => {
         if (!active) return;
         const current = tradeCacheRef.current.get(activeTradeKey);
         const existing = current?.items ?? [];
-        const seen = new Set(page.items.map((trade) => trade.tradeId));
-        const items = [...page.items, ...existing.filter((trade) => !seen.has(trade.tradeId))].slice(0, 5000);
+        const items = mergeTrades(existing, page.items, baseline);
         const nextCursor = current?.initialized && existing.length >= 100
           ? current.nextCursor
           : page.nextCursor;
@@ -622,6 +641,7 @@ export default function App() {
     return () => {
       active = false;
       if (tradeHistoryScopeRef.current === scope) tradeHistoryScopeRef.current = null;
+      controller.abort();
     };
   }, [activeTradeKey, selectedMarketKey, selectedTokenAddress]);
 
@@ -736,9 +756,28 @@ export default function App() {
     const controller = new AbortController();
     let refreshTimer: number | undefined;
     let attempts = 0;
+    let refreshing = false;
+    let pending = true;
+    let lastResume = Number.NEGATIVE_INFINITY;
     const cacheKey = candleCacheKey(selectedTokenAddress, interval);
-    const scope = { key: cacheKey };
+    const scope: NonNullable<typeof candleHistoryScopeRef.current> = { key: cacheKey, controller };
     candleHistoryScopeRef.current = scope;
+    // Only selection cleanup owns the shared GET; a recovery waiter can cancel independently.
+    let headFlight: Promise<CandleSnapshot> | undefined;
+    scope.readHead = (signal) => {
+      if (!headFlight) {
+        headFlight = memeApi.getCandles(selectedTokenAddress, interval, { signal: controller.signal })
+          .finally(() => { headFlight = undefined; });
+      }
+      const flight = headFlight;
+      if (!signal) return flight;
+      if (signal.aborted) return Promise.reject(signal.reason);
+      return new Promise((resolve, reject) => {
+        const abort = () => reject(signal.reason);
+        signal.addEventListener('abort', abort, { once: true });
+        void flight.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+      });
+    };
     const requestedMarketKey = selectedMarketKey;
     const cachedSnapshot = candleCacheRef.current.get(cacheKey) ?? null;
     const cached = cachedSnapshot?.marketKey === requestedMarketKey ? cachedSnapshot : null;
@@ -748,10 +787,15 @@ export default function App() {
     setOrderState(null);
 
     const refresh = () => {
+      if (!active || refreshing || document.visibilityState === 'hidden') return;
+      if (refreshTimer !== undefined) { window.clearTimeout(refreshTimer); refreshTimer = undefined; }
+      refreshing = true;
       attempts += 1;
-      void memeApi.getCandles(selectedTokenAddress, interval, { signal: controller.signal })
+      void scope.readHead!()
       .then((result) => {
         if (!active) return;
+        if (result.tokenAddress.toLowerCase() !== selectedTokenAddress.toLowerCase() || result.interval !== interval
+          || result.marketKey !== requestedMarketKey) throw new Error('行情响应与当前代币或周期不匹配');
         const previous = candleCacheRef.current.get(cacheKey) ?? null;
         // An empty pending snapshot has no history/gaps to retain after demand completes.
         const merged = mergeSnapshots(previous?.items.length || previous?.gaps.length ? previous : null, result);
@@ -759,47 +803,71 @@ export default function App() {
         setChartLoading(false);
         if (result.syncStatus === 'STALE' || result.syncStatus === 'FAILED') {
           setMarketError('数据同步失败，后端未提供详细原因，请重试');
-        } else if (result.syncStatus === 'BACKFILLING' || result.syncStatus === 'CATCHING_UP'
-          || (result.items.length === 0 && result.availability === 'PARTIAL' && result.gaps.length === 0)) {
-          if (attempts < 5) refreshTimer = window.setTimeout(refresh, 2_000 * 2 ** (attempts - 1));
-          else if (merged.items.length === 0) setMarketError('历史 K 线仍未就绪，已停止自动刷新，请重试');
         } else {
           setMarketError(null);
         }
+        scope.updateHeadStatus?.(result.syncStatus);
       })
       .catch((cause: unknown) => {
         if (!active) return;
         setChartLoading(false);
         setMarketError(friendlyError(cause, '行情暂时不可用'));
-      });
+        pending = false;
+      }).finally(() => { refreshing = false; });
     };
+    scope.refresh = refresh;
+    scope.updateHeadStatus = (status) => {
+      pending = status === 'BACKFILLING' || status === 'CATCHING_UP';
+      if (refreshTimer !== undefined) { window.clearTimeout(refreshTimer); refreshTimer = undefined; }
+      if (active && pending && document.visibilityState !== 'hidden') {
+        refreshTimer = window.setTimeout(refresh, Math.min(30_000, 2_000 * 2 ** Math.min(Math.max(0, attempts - 1), 4)));
+      }
+    };
+    const resume = () => {
+      if (document.visibilityState === 'hidden') {
+        if (refreshTimer !== undefined) { window.clearTimeout(refreshTimer); refreshTimer = undefined; }
+      } else if (pending && Date.now() - lastResume >= 2_000) {
+        lastResume = Date.now();
+        refresh();
+      }
+    };
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('focus', resume);
+    window.addEventListener('pageshow', resume);
     refresh();
     return () => {
       active = false;
       controller.abort();
       if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+      document.removeEventListener('visibilitychange', resume);
+      window.removeEventListener('focus', resume);
+      window.removeEventListener('pageshow', resume);
       if (candleHistoryScopeRef.current === scope) candleHistoryScopeRef.current = null;
     };
   }, [selectedTokenAddress, selectedMarketKey, interval, marketRetry, setCachedSnapshot]);
 
   useEffect(() => {
-    if (!selectedTokenAddress || !activeSnapshot || activeSnapshot.syncStatus === 'STALE' || activeSnapshot.syncStatus === 'FAILED'
-      || accountOriginIssue || typeof WebSocket === 'undefined') return;
+    if (!selectedTokenAddress || !selectedMarketKey || !marketStreamAvailable || typeof WebSocket === 'undefined') return;
     let socket: WebSocket | null = null;
     let disposed = false;
     let reconnectTimer: number | undefined;
     let reconnectAttempt = 0;
     let hasConnected = false;
+    let connecting = false;
+    let openTimer: number | undefined;
+    let lastActivity = Date.now();
+    let lastResume = Number.NEGATIVE_INFINITY;
     const streamState = new Map<string, { epoch: string; sequence: number }>();
-    const candleChannel = `candle:${selectedTokenAddress.toLowerCase()}:${activeSnapshot.marketKey}:${interval}`;
-    const tradeChannel = `trade:${selectedTokenAddress.toLowerCase()}:${activeSnapshot.marketKey}`;
-    const currentTradeCacheKey = tradeCacheKey(selectedTokenAddress, activeSnapshot.marketKey);
+    const candleChannel = `candle:${selectedTokenAddress.toLowerCase()}:${selectedMarketKey}:${interval}`;
+    const tradeChannel = `trade:${selectedTokenAddress.toLowerCase()}:${selectedMarketKey}`;
+    const currentTradeCacheKey = tradeCacheKey(selectedTokenAddress, selectedMarketKey);
     const marketChannel = `market:${selectedTokenAddress.toLowerCase()}`;
     const liveMarketChannel = 'markets:live';
     const channels = [candleChannel, tradeChannel, marketChannel, liveMarketChannel];
+    const isHidden = () => document.visibilityState === 'hidden';
     marketChannelsRef.current = channels;
     const scheduleReconnect = () => {
-      if (disposed || reconnectTimer !== undefined) return;
+      if (disposed || document.visibilityState === 'hidden' || reconnectTimer !== undefined) return;
       const delay = Math.min(30_000, 1_000 * 2 ** reconnectAttempt);
       reconnectAttempt += 1;
       reconnectTimer = window.setTimeout(() => {
@@ -815,58 +883,76 @@ export default function App() {
         byTime.set(candle.t, chooseNewerCandle(byTime.get(candle.t), candle));
         return { ...current, items: [...byTime.values()].sort((a, b) => a.t - b.t) };
       });
-      setMarketError((current) => current === '历史 K 线仍未就绪，已停止自动刷新，请重试' ? null : current);
     };
 
     const recoveryController = new AbortController();
-    const recovery = new Map<string, { dirty: boolean; generation: number; flight: boolean; attempt: number; timer?: number }>();
+    const recovery = new Map<string, { dirty: boolean; generation: number; flight: boolean; attempt: number; timer?: number; deadline?: number }>();
     const recover = (channel: string, markDirty = true) => {
       const state = recovery.get(channel) ?? { dirty: false, generation: 0, flight: false, attempt: 0 };
       recovery.set(channel, state);
       if (markDirty) { state.dirty = true; state.generation += 1; }
-      if (disposed || !state.dirty || state.flight || state.timer !== undefined) return;
+      if (disposed || document.visibilityState === 'hidden' || !state.dirty || state.flight || state.timer !== undefined) return;
       state.flight = true;
       const generation = state.generation;
-      const signal = AbortSignal.any([recoveryController.signal, AbortSignal.timeout(10_000)]);
+      const deadline = new AbortController();
+      state.deadline = window.setTimeout(() => deadline.abort(new Error('Market recovery timed out')), 10_000);
+      const signal = AbortSignal.any([recoveryController.signal, deadline.signal]);
+      const tradeBaseline = channel === tradeChannel
+        ? new Map((tradeCacheRef.current.get(currentTradeCacheKey)?.items ?? []).map((trade) => [trade.tradeId, trade]))
+        : undefined;
       const request = channel === candleChannel
-        ? memeApi.getCandles(selectedTokenAddress, interval, { signal }).then((fresh) => {
-          if (fresh.syncStatus === 'STALE') throw new Error('stale candle recovery snapshot');
-          if (!disposed) setCachedSnapshot((current) => mergeSnapshots(current, fresh));
+        ? candleHistoryScopeRef.current!.readHead!(signal).then((fresh) => {
+          if (fresh.tokenAddress.toLowerCase() !== selectedTokenAddress.toLowerCase() || fresh.interval !== interval
+            || fresh.marketKey !== selectedMarketKey) throw new Error('行情恢复响应与当前代币或周期不匹配');
+          if (fresh.syncStatus === 'STALE' || fresh.syncStatus === 'FAILED') throw new Error('failed candle recovery snapshot');
+          if (!disposed) {
+            setCachedSnapshot((current) => mergeSnapshots(current, fresh));
+            candleHistoryScopeRef.current?.updateHeadStatus?.(fresh.syncStatus);
+          }
         })
         : memeApi.getTrades(selectedTokenAddress, undefined, signal).then((page) => {
           if (disposed) return;
           const current = tradeCacheRef.current.get(currentTradeCacheKey);
-          const seen = new Set((current?.items ?? []).map((trade) => trade.tradeId));
-          const items = [...(current?.items ?? []), ...page.items.filter((trade) => !seen.has(trade.tradeId))]
-            .sort((left, right) => right.t - left.t).slice(0, 5000);
-          boundedMapSet(tradeCacheRef.current, currentTradeCacheKey, { items, nextCursor: page.nextCursor, initialized: true }, 64);
-          if (!tradesPausedRef.current) setTrades(items);
+          const items = mergeTrades(current?.items ?? [], page.items, tradeBaseline);
+          const nextCursor = current?.initialized && page.items.length < 100 ? current.nextCursor : page.nextCursor;
+          boundedMapSet(tradeCacheRef.current, currentTradeCacheKey, { items, nextCursor, initialized: true }, 64);
+          if (!tradesPausedRef.current) { setTrades(items); setTradeNextCursor(nextCursor); }
         });
       void request.then(() => {
         if (disposed) return;
         // A second gap during an in-flight read needs another read after it.
         if (state.generation === generation) state.dirty = false;
         state.attempt = 0;
-      }).catch(() => {
-        if (!disposed) setError(channel === candleChannel ? '行情更新中断，正在恢复' : '成交更新中断，正在恢复');
+        setErrorState((current) => current?.owner === state ? null : current);
+      }).catch((cause: unknown) => {
+        if (!disposed) setErrorState({ owner: state, message: friendlyError(cause, channel === candleChannel ? '行情更新中断，正在恢复' : '成交更新中断，正在恢复') });
       }).finally(() => {
+        window.clearTimeout(state.deadline);
+        state.deadline = undefined;
         state.flight = false;
-        if (disposed || !state.dirty) return;
+        if (disposed || document.visibilityState === 'hidden' || !state.dirty) return;
         const delay = Math.min(30_000, 1000 * 2 ** Math.min(state.attempt++, 5));
         state.timer = window.setTimeout(() => { state.timer = undefined; recover(channel, false); }, delay);
       });
     };
 
     const connect = async () => {
+      if (disposed || connecting || document.visibilityState === 'hidden' || socket && socket.readyState < 2) return;
+      connecting = true;
       try {
-        const { ticket } = await memeApi.getWsTicket();
-        if (disposed) return;
+        // Failed account bootstrap must still be able to acquire a public market ticket.
+        const { ticket } = await memeApi.getWsTicket(recoveryController.signal, !accountAvailable);
+        if (disposed || isHidden()) return;
         const nextSocket = new WebSocket(`${wsBaseUrl}?ticket=${encodeURIComponent(ticket)}`);
         socket = nextSocket;
         streamSocketRef.current = nextSocket;
+        openTimer = window.setTimeout(() => { if (nextSocket.readyState !== WebSocket.OPEN) nextSocket.close(); }, 10_000);
         nextSocket.addEventListener('open', () => {
-          if (disposed) { nextSocket.close(); return; }
-          if (hasConnected) { recover(candleChannel); recover(tradeChannel); }
+          if (disposed || socket !== nextSocket || document.visibilityState === 'hidden') { nextSocket.close(); return; }
+          window.clearTimeout(openTimer);
+          openTimer = undefined;
+          lastActivity = Date.now();
+          if (hasConnected && Date.now() - lastResume >= 2_000) { recover(candleChannel); recover(tradeChannel); }
           hasConnected = true;
           reconnectAttempt = 0;
           nextSocket.send(JSON.stringify({
@@ -876,7 +962,8 @@ export default function App() {
           }));
         });
         nextSocket.addEventListener('message', (event) => {
-          if (disposed) return;
+          if (disposed || socket !== nextSocket) return;
+          lastActivity = Date.now();
           try {
             const message = JSON.parse(String(event.data)) as StreamMessage<Candle | CandleSnapshot | Trade | Quote | Token | HotMarketUpdate | StreamBatch<Candle> | StreamBatch<Trade>>;
             const previous = streamState.get(message.channel);
@@ -922,13 +1009,13 @@ export default function App() {
               const current = tradeCacheRef.current.get(currentTradeCacheKey)
                 ?? { items: [], nextCursor: null, initialized: false };
               const incoming = [...batch].reverse();
-              const incomingIds = new Set(incoming.map((trade) => trade.tradeId));
-              const items = [...incoming, ...current.items.filter((trade) => !incomingIds.has(trade.tradeId))].slice(0, 5000);
+              const items = mergeTrades(current.items, batch);
               boundedMapSet(tradeCacheRef.current, currentTradeCacheKey, { ...current, items }, 64);
               if (!tradesPausedRef.current) {
                 setTrades(items);
                 const seen = new Set(current.items.map((trade) => trade.tradeId));
-                const fresh = incoming.filter((trade) => !seen.has(trade.tradeId));
+                const fresh = incoming.filter((trade) => !seen.has(trade.tradeId)
+                  && trade.history !== true && trade.correction !== true);
                 if (!requiresResync && fresh.length && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
                   const until = Date.now() + 700;
                   setTradeFlashes((currentFlash) => {
@@ -947,12 +1034,16 @@ export default function App() {
         });
         nextSocket.addEventListener('error', () => nextSocket.close());
         nextSocket.addEventListener('close', () => {
+          if (socket !== nextSocket) return;
+          window.clearTimeout(openTimer);
+          openTimer = undefined;
+          socket = null;
           if (streamSocketRef.current === nextSocket) streamSocketRef.current = null;
           scheduleReconnect();
         });
       } catch (cause) {
         if (!disposed) {
-          if (accountMode === 'AZ_ACCOUNT' && isAzLoginUpstreamFailure(cause)) {
+          if (accountAvailable && accountMode === 'AZ_ACCOUNT' && isAzLoginUpstreamFailure(cause)) {
             setSessionToken(null);
             setSessionReady(false);
             setAccount(null);
@@ -960,7 +1051,7 @@ export default function App() {
             setAccountOriginIssue(true);
             return;
           }
-          if (cause instanceof ApiError && (cause.status === 401 || cause.code === 'MEME_UNAUTHORIZED')) {
+          if (accountAvailable && cause instanceof ApiError && (cause.status === 401 || cause.code === 'MEME_UNAUTHORIZED')) {
             setSessionToken(null);
             setSessionReady(false);
             setAccount(null);
@@ -971,19 +1062,62 @@ export default function App() {
           setError('实时行情暂时不可用，历史行情仍可查看');
           scheduleReconnect();
         }
+      } finally {
+        connecting = false;
       }
     };
+
+    const resume = () => {
+      if (disposed) return;
+      if (document.visibilityState === 'hidden') {
+        if (reconnectTimer !== undefined) { window.clearTimeout(reconnectTimer); reconnectTimer = undefined; }
+        for (const state of recovery.values()) {
+          if (state.timer !== undefined) { window.clearTimeout(state.timer); state.timer = undefined; }
+        }
+        return;
+      }
+      if (Date.now() - lastResume < 2_000) return;
+      lastResume = Date.now();
+      if (reconnectTimer !== undefined) { window.clearTimeout(reconnectTimer); reconnectTimer = undefined; }
+      // A quiet OPEN socket may have silently died while the browser was suspended.
+      if (socket && Date.now() - lastActivity >= 30_000) {
+        const retired = socket;
+        socket = null;
+        if (streamSocketRef.current === retired) streamSocketRef.current = null;
+        window.clearTimeout(openTimer);
+        openTimer = undefined;
+        retired.close();
+      }
+      if (reconnectTimer !== undefined) { window.clearTimeout(reconnectTimer); reconnectTimer = undefined; }
+      void connect();
+      const cached = candleCacheRef.current.get(candleCacheKey(selectedTokenAddress, interval));
+      if (cached?.syncStatus === 'BACKFILLING' || cached?.syncStatus === 'CATCHING_UP') candleHistoryScopeRef.current?.refresh?.();
+      else recover(candleChannel, !recovery.get(candleChannel)?.flight);
+      recover(tradeChannel, !recovery.get(tradeChannel)?.flight);
+      if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ op: 'subscribe', channels,
+        ...(accountAvailable && quoteRequestRef.current ? { quote: quoteRequestRef.current } : {}) }));
+    };
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('focus', resume);
+    window.addEventListener('pageshow', resume);
 
     void connect();
     return () => {
       disposed = true;
       recoveryController.abort();
-      for (const state of recovery.values()) if (state.timer !== undefined) window.clearTimeout(state.timer);
+      document.removeEventListener('visibilitychange', resume);
+      window.removeEventListener('focus', resume);
+      window.removeEventListener('pageshow', resume);
+      for (const state of recovery.values()) {
+        if (state.timer !== undefined) window.clearTimeout(state.timer);
+        if (state.deadline !== undefined) window.clearTimeout(state.deadline);
+      }
+      window.clearTimeout(openTimer);
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
       if (streamSocketRef.current === socket) streamSocketRef.current = null;
       socket?.close();
     };
-  }, [accountAvailable, accountMode, accountOriginIssue, selectedTokenAddress, activeSnapshot?.marketKey, activeSnapshot?.syncStatus, interval, setCachedSnapshot]);
+  }, [accountAvailable, accountMode, selectedTokenAddress, selectedMarketKey, marketStreamAvailable, interval, setCachedSnapshot]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1025,14 +1159,14 @@ export default function App() {
     if (!activeTradeKey || !selectedTokenAddress || !selectedMarketKey || !tradeNextCursor || tradesLoading) return;
     const scope = tradeHistoryScopeRef.current;
     if (!scope || scope.key !== activeTradeKey) return;
+    const baseline = new Map((tradeCacheRef.current.get(activeTradeKey)?.items ?? []).map((trade) => [trade.tradeId, trade]));
     setTradesLoading(true);
     void memeApi.getTrades(selectedTokenAddress, tradeNextCursor)
       .then((page) => {
         if (tradeHistoryScopeRef.current !== scope) return;
         const current = tradeCacheRef.current.get(activeTradeKey)
           ?? { items: [], nextCursor: tradeNextCursor, initialized: true };
-        const seen = new Set(current.items.map((trade) => trade.tradeId));
-        const items = [...current.items, ...page.items.filter((trade) => !seen.has(trade.tradeId))].slice(0, 5000);
+        const items = mergeTrades(current.items, page.items, baseline);
         const entry = { items, nextCursor: items.length >= 5000 ? null : page.nextCursor, initialized: true };
         boundedMapSet(tradeCacheRef.current, activeTradeKey, entry, 64);
         if (!tradesPausedRef.current) setTrades(items);
@@ -1120,14 +1254,15 @@ export default function App() {
     if (!Number.isSafeInteger(before) || before < 0 || earliest === undefined || before >= earliest) return { added: 0, exhausted: false };
     scope.loading = true;
     try {
-      const result = await memeApi.getCandles(selected.tokenAddress, interval, { to: before, limit: candlePageSize });
+      const result = await memeApi.getCandles(selected.tokenAddress, interval, { to: before, limit: candlePageSize, signal: scope.controller.signal });
       if (candleHistoryScopeRef.current !== scope) return { added: 0, exhausted: false };
-      if (result.tokenAddress.toLowerCase() !== selected.tokenAddress.toLowerCase() || result.interval !== interval
+      if (result.tokenAddress.toLowerCase() !== selected.tokenAddress.toLowerCase() || result.interval !== interval || result.marketKey !== selectedMarketKey
         || result.items.some((item) => item.t > before)) throw new Error('更早行情响应超出请求范围');
       const currentTimes = new Set(candleCacheRef.current.get(scope.key)?.items.map((item) => item.t));
       const added = new Set(result.items.filter((item) => item.t < earliest && !currentTimes.has(item.t)).map((item) => item.t)).size;
       // A completed bounded page with no earlier bars is exhausted for this scope.
-      scope.exhausted = added === 0 && result.syncStatus === 'READY';
+      scope.exhausted = (added === 0 && result.syncStatus === 'READY') || result.syncStatus === 'STALE' || result.syncStatus === 'FAILED';
+      if (result.syncStatus === 'STALE' || result.syncStatus === 'FAILED') setMarketError('数据同步失败，后端未提供详细原因，请重试');
       setCachedSnapshot((current) => candleHistoryScopeRef.current === scope ? mergeSnapshots(current, result) : current);
       return { added, exhausted: scope.exhausted };
     } catch (cause) {
@@ -1137,7 +1272,7 @@ export default function App() {
     } finally {
       scope.loading = false;
     }
-  }, [interval, selected, setCachedSnapshot]);
+  }, [interval, selected, selectedMarketKey, setCachedSnapshot]);
 
   const submitOrder = useCallback(async () => {
     if (!accountAvailable) return;
@@ -1320,7 +1455,7 @@ export default function App() {
               <span className={Number(selected.change24h) >= 0 ? 'positive' : 'negative'}>{formatPercent(selected.change24h)} / 24h</span>
             </div>
             {activeSnapshot
-              ? <CandleChart key={`${selected.tokenAddress.toLowerCase()}:${activeSnapshot.marketKey}:${interval}`} candles={activeSnapshot.items} symbol={selected.symbol} refreshing={chartLoading} onLoadBefore={loadOlderCandles} />
+              ? <CandleChart key={`${selected.tokenAddress.toLowerCase()}:${activeSnapshot.marketKey}:${interval}`} candles={activeSnapshot.items} symbol={selected.symbol} refreshing={chartLoading} historyRetry={marketRetry} onLoadBefore={loadOlderCandles} />
               : <div className="chart-state">{marketError ? '行情加载失败' : '正在加载行情'}</div>}
             {marketError && <div className="market-retry"><span>{marketError}</span><button type="button" onClick={() => setMarketRetry((value) => value + 1)}>重试</button></div>}
             {activeSnapshot && activeSnapshot.syncStatus !== 'BACKFILLING' && activeSnapshot.syncStatus !== 'CATCHING_UP'
