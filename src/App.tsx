@@ -187,6 +187,18 @@ function tradeCacheKey(tokenAddress: string, marketKey: string): string {
   return `${tokenAddress.toLowerCase()}:${marketKey}`;
 }
 
+function isAzLoginUpstreamFailure(cause: unknown): cause is ApiError {
+  return cause instanceof ApiError && cause.code === 'AZ_REQUEST_FAILED' && cause.status >= 500;
+}
+
+function privateAccountUrl(): string | null {
+  // Only this user-approved deployment has a known private account entry point.
+  const origin = new URL(window.location.origin);
+  if (origin.protocol !== 'https:' || origin.hostname !== 'dopemac-mini.tailc44fad.ts.net' || origin.port !== '10000') return null;
+  origin.port = '4173';
+  return origin.href;
+}
+
 function transactionUrl(explorerBaseUrl: string, txHash: string): string | null {
   if (!explorerBaseUrl || !/^0x[a-fA-F0-9]{64}$/.test(txHash)) return null;
   return `${explorerBaseUrl.replace(/\/+$/, '')}/tx/${txHash}`;
@@ -224,6 +236,7 @@ function upsertAccountTransaction(items: AccountTransaction[], next: AccountTran
 }
 
 function friendlyError(cause: unknown, fallback: string): string {
+  if (cause instanceof SyntaxError) return `${fallback}：服务响应无效，请重试`;
   if (!(cause instanceof ApiError)) return cause instanceof Error ? cause.message : fallback;
   const messages: Record<string, string> = {
     MEME_UNAUTHORIZED: '登录已失效，请重新登录',
@@ -294,6 +307,7 @@ export default function App() {
   const [tradeNextCursor, setTradeNextCursor] = useState<string | null>(null);
   const [tradesLoading, setTradesLoading] = useState(false);
   const [tradesPaused, setTradesPaused] = useState(false);
+  const [tradeFlashes, setTradeFlashes] = useState<{ key: string; deadlines: Map<string, number> } | null>(null);
   const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
   const [interval, setIntervalValue] = useState<Interval>('1m');
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
@@ -314,6 +328,7 @@ export default function App() {
   const [marketRetry, setMarketRetry] = useState(0);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [accountError, setAccountError] = useState<string | null>(null);
+  const [accountOriginIssue, setAccountOriginIssue] = useState(false);
   const [accountRetry, setAccountRetry] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [chainName, setChainName] = useState('Robinhood Chain');
@@ -332,7 +347,7 @@ export default function App() {
   const [transferAsset, setTransferAsset] = useState<Asset>('ETH');
   const [transferAmount, setTransferAmount] = useState('0.1');
   const [transferState, setTransferState] = useState<string | null>(null);
-  const accountAvailable = sessionReady && account !== null;
+  const accountAvailable = sessionReady && account !== null && !accountError;
   const candleCacheRef = useRef(new Map<string, CandleSnapshot>());
   const tradeCacheRef = useRef(new Map<string, TradeCacheEntry>());
   const tradesPausedRef = useRef(false);
@@ -360,6 +375,20 @@ export default function App() {
     ? tradeCacheKey(selected.tokenAddress, selectedMarketKey)
     : null;
   const hasTrades = trades.length > 0;
+  const privateAccountHref = accountOriginIssue ? privateAccountUrl() : null;
+
+  useEffect(() => { setTradeFlashes(null); }, [activeTradeKey, tradesPaused]);
+  useEffect(() => {
+    if (!tradeFlashes || tradeFlashes.key !== activeTradeKey || !tradeFlashes.deadlines.size) return;
+    const timer = window.setTimeout(() => {
+      setTradeFlashes((current) => {
+        if (current !== tradeFlashes) return current;
+        const deadlines = new Map([...current.deadlines].filter(([, until]) => until > Date.now()));
+        return deadlines.size ? { ...current, deadlines } : null;
+      });
+    }, Math.max(0, Math.min(...tradeFlashes.deadlines.values()) - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [activeTradeKey, tradeFlashes]);
 
   const setCachedSnapshot = useCallback((update: CandleSnapshot | null | ((current: CandleSnapshot | null) => CandleSnapshot | null)) => {
     setSnapshot((current) => {
@@ -627,71 +656,86 @@ export default function App() {
   useEffect(() => {
     if (!accountMode) return;
     let active = true;
+    const controller = new AbortController();
+    const fail = (cause: unknown) => {
+      if (!active) return;
+      active = false;
+      window.clearTimeout(timer);
+      controller.abort();
+      setSessionToken(null);
+      setAccount(null);
+      setSessionReady(false);
+      setAccountError(friendlyError(cause, accountMode === 'MAIN_ACCOUNT_POC' ? '主账户连接失败' : '登录失败'));
+      setAccountOriginIssue(accountMode === 'AZ_ACCOUNT' && isAzLoginUpstreamFailure(cause));
+    };
+    const timer = window.setTimeout(() => fail(new ApiError('MEME_ACCOUNT_TIMEOUT', '账户连接超时，请重试', 0)), 20_000);
+    setSessionToken(null);
     setSessionReady(false);
+    setAccount(null);
+    setAccountTransactions([]);
     setAccountError(null);
-    const login = accountMode === 'MAIN_ACCOUNT_POC' ? Promise.resolve() : azAuth.loginMock().then(() => undefined);
+    setAccountOriginIssue(false);
+    const login = accountMode === 'MAIN_ACCOUNT_POC' ? Promise.resolve() : azAuth.loginMock(controller.signal).then(() => undefined);
     void login
       .then(async () => {
         if (!active) return;
-        await Promise.all([
-          memeApi.getAccount()
-            .then((summary) => { if (active) setAccount(summary); })
+        const [summary, transactions, orders] = await Promise.all([
+          memeApi.getAccount(controller.signal)
             .catch((cause: unknown) => { throw new Error(friendlyError(cause, '账户余额加载失败')); }),
           accountMode === 'MAIN_ACCOUNT_POC'
-            ? memeApi.getAccountTransactions()
-                .then(({ items }) => {
-                  if (!active) return;
-                  setAccountTransactions(items);
-                  for (const transaction of items) {
-                    if (transaction.status === 'PENDING') {
-                      void trackMainAccountTransaction(transaction.executionId).catch((cause: unknown) => {
-                        if (active) setError(friendlyError(cause, '交易状态同步失败'));
-                      });
-                    }
-                  }
-                })
+            ? memeApi.getAccountTransactions(controller.signal)
                 .catch((cause: unknown) => { throw new Error(friendlyError(cause, '交易记录加载失败')); })
-            : Promise.resolve(),
-          memeApi.getOrders()
-          .then(({ items }) => {
-            if (!active) return;
-            const pending = items.filter((order) => order.status !== 'SETTLED'
-              && !(order.status === 'FAILED_FINAL' && order.fundStatus === 'RELEASED'));
-            for (const order of pending) {
-              void trackOrder(order.orderId).catch((cause: unknown) => {
-                if (active) setError(friendlyError(cause, '订单状态恢复失败'));
-              });
-            }
-          })
-          .catch((cause: unknown) => {
-            throw new Error(friendlyError(cause, '订单状态恢复失败'));
-          }),
+            : Promise.resolve({ items: [] }),
+          memeApi.getOrders(controller.signal)
+            .catch((cause: unknown) => { throw new Error(friendlyError(cause, '订单状态恢复失败')); }),
         ]);
-        if (active) { setSessionReady(true); setAccountError(null); }
-      })
-      .catch((cause: unknown) => {
-        if (active) {
-          setSessionToken(null);
-          setSessionReady(false);
-          setAccountError(friendlyError(cause, '登录失败'));
+        if (!active) return;
+        window.clearTimeout(timer);
+        setAccount(summary);
+        setAccountTransactions(transactions.items);
+        setSessionReady(true);
+        setAccountError(null);
+        for (const transaction of transactions.items) {
+          if (transaction.status === 'PENDING') {
+            void trackMainAccountTransaction(transaction.executionId).catch((cause: unknown) => {
+              if (active) setError(friendlyError(cause, '交易状态同步失败'));
+            });
+          }
         }
-      });
-    return () => { active = false; };
+        for (const order of orders.items) {
+          if (order.status !== 'SETTLED' && !(order.status === 'FAILED_FINAL' && order.fundStatus === 'RELEASED')) {
+            void trackOrder(order.orderId).catch((cause: unknown) => {
+              if (active) setError(friendlyError(cause, '订单状态恢复失败'));
+            });
+          }
+        }
+      }).catch(fail);
+    return () => { active = false; window.clearTimeout(timer); controller.abort(); };
   }, [accountMode, accountRetry, trackMainAccountTransaction, trackOrder]);
 
   useEffect(() => {
     if (!sessionReady || accountMode !== 'MAIN_ACCOUNT_POC') return;
+    const controller = new AbortController();
+    let refreshing = false;
     const timer = window.setInterval(() => {
-      void memeApi.getAccountTransactions()
-        .then(({ items }) => setAccountTransactions(items))
-        .catch((cause: unknown) => setAccountError(friendlyError(cause, '交易记录刷新失败')));
+      if (refreshing) return;
+      refreshing = true;
+      void memeApi.getAccountTransactions(controller.signal)
+        .then(({ items }) => { if (!controller.signal.aborted) setAccountTransactions(items); })
+        .catch((cause: unknown) => {
+          if (!controller.signal.aborted) { setSessionReady(false); setAccountError(friendlyError(cause, '交易记录刷新失败')); }
+        })
+        .finally(() => { refreshing = false; });
     }, 5_000);
-    return () => window.clearInterval(timer);
-  }, [accountMode, sessionReady]);
+    return () => { window.clearInterval(timer); controller.abort(); };
+  }, [accountMode, sessionReady, accountRetry]);
 
   useEffect(() => {
     if (!selectedTokenAddress || !selectedMarketKey) return;
     let active = true;
+    const controller = new AbortController();
+    let refreshTimer: number | undefined;
+    let attempts = 0;
     const cacheKey = candleCacheKey(selectedTokenAddress, interval);
     const scope = { key: cacheKey };
     candleHistoryScopeRef.current = scope;
@@ -703,17 +747,24 @@ export default function App() {
     setSnapshot(cached);
     setOrderState(null);
 
-    void memeApi.getCandles(selectedTokenAddress, interval)
+    const refresh = () => {
+      attempts += 1;
+      void memeApi.getCandles(selectedTokenAddress, interval, { signal: controller.signal })
       .then((result) => {
         if (!active) return;
-        const merged = mergeSnapshots(candleCacheRef.current.get(cacheKey) ?? null, result);
+        const previous = candleCacheRef.current.get(cacheKey) ?? null;
+        // An empty pending snapshot has no history/gaps to retain after demand completes.
+        const merged = mergeSnapshots(previous?.items.length || previous?.gaps.length ? previous : null, result);
         setCachedSnapshot(merged);
-        if (result.syncStatus === 'READY') {
-          setChartLoading(false);
+        setChartLoading(false);
+        if (result.syncStatus === 'STALE' || result.syncStatus === 'FAILED') {
+          setMarketError('数据同步失败，后端未提供详细原因，请重试');
+        } else if (result.syncStatus === 'BACKFILLING' || result.syncStatus === 'CATCHING_UP'
+          || (result.items.length === 0 && result.availability === 'PARTIAL' && result.gaps.length === 0)) {
+          if (attempts < 5) refreshTimer = window.setTimeout(refresh, 2_000 * 2 ** (attempts - 1));
+          else if (merged.items.length === 0) setMarketError('历史 K 线仍未就绪，已停止自动刷新，请重试');
+        } else {
           setMarketError(null);
-        } else if (result.syncStatus === 'STALE') {
-          setChartLoading(false);
-          setMarketError(merged.items.length > 0 ? null : '行情暂时不可用');
         }
       })
       .catch((cause: unknown) => {
@@ -721,14 +772,19 @@ export default function App() {
         setChartLoading(false);
         setMarketError(friendlyError(cause, '行情暂时不可用'));
       });
+    };
+    refresh();
     return () => {
       active = false;
+      controller.abort();
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
       if (candleHistoryScopeRef.current === scope) candleHistoryScopeRef.current = null;
     };
   }, [selectedTokenAddress, selectedMarketKey, interval, marketRetry, setCachedSnapshot]);
 
   useEffect(() => {
-    if (!selectedTokenAddress || !activeSnapshot || activeSnapshot.syncStatus === 'STALE' || typeof WebSocket === 'undefined') return;
+    if (!selectedTokenAddress || !activeSnapshot || activeSnapshot.syncStatus === 'STALE' || activeSnapshot.syncStatus === 'FAILED'
+      || accountOriginIssue || typeof WebSocket === 'undefined') return;
     let socket: WebSocket | null = null;
     let disposed = false;
     let reconnectTimer: number | undefined;
@@ -759,6 +815,7 @@ export default function App() {
         byTime.set(candle.t, chooseNewerCandle(byTime.get(candle.t), candle));
         return { ...current, items: [...byTime.values()].sort((a, b) => a.t - b.t) };
       });
+      setMarketError((current) => current === '历史 K 线仍未就绪，已停止自动刷新，请重试' ? null : current);
     };
 
     const recoveryController = new AbortController();
@@ -842,12 +899,6 @@ export default function App() {
             }
             if (message.channel === marketChannel) {
               const refreshedToken = message.data as Token;
-              const tokenPrefix = `${selectedTokenAddress.toLowerCase()}:`;
-              for (const key of candleCacheRef.current.keys()) {
-                if (key.startsWith(tokenPrefix)) candleCacheRef.current.delete(key);
-              }
-              tradeMarketKeyRef.current.delete(selectedTokenAddress.toLowerCase());
-              setSnapshot(null);
               setSelected(refreshedToken);
               return;
             }
@@ -874,7 +925,19 @@ export default function App() {
               const incomingIds = new Set(incoming.map((trade) => trade.tradeId));
               const items = [...incoming, ...current.items.filter((trade) => !incomingIds.has(trade.tradeId))].slice(0, 5000);
               boundedMapSet(tradeCacheRef.current, currentTradeCacheKey, { ...current, items }, 64);
-              if (!tradesPausedRef.current) setTrades(items);
+              if (!tradesPausedRef.current) {
+                setTrades(items);
+                const seen = new Set(current.items.map((trade) => trade.tradeId));
+                const fresh = incoming.filter((trade) => !seen.has(trade.tradeId));
+                if (!requiresResync && fresh.length && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+                  const until = Date.now() + 700;
+                  setTradeFlashes((currentFlash) => {
+                    const deadlines = new Map(currentFlash?.key === currentTradeCacheKey ? currentFlash.deadlines : []);
+                    for (const trade of fresh) deadlines.set(trade.tradeId, until);
+                    return { key: currentTradeCacheKey, deadlines };
+                  });
+                }
+              }
               if (requiresResync) recover(tradeChannel);
             }
           } catch {
@@ -889,6 +952,14 @@ export default function App() {
         });
       } catch (cause) {
         if (!disposed) {
+          if (accountMode === 'AZ_ACCOUNT' && isAzLoginUpstreamFailure(cause)) {
+            setSessionToken(null);
+            setSessionReady(false);
+            setAccount(null);
+            setAccountError(friendlyError(cause, '登录失败'));
+            setAccountOriginIssue(true);
+            return;
+          }
           if (cause instanceof ApiError && (cause.status === 401 || cause.code === 'MEME_UNAUTHORIZED')) {
             setSessionToken(null);
             setSessionReady(false);
@@ -912,7 +983,7 @@ export default function App() {
       if (streamSocketRef.current === socket) streamSocketRef.current = null;
       socket?.close();
     };
-  }, [accountAvailable, selectedTokenAddress, activeSnapshot?.marketKey, activeSnapshot?.syncStatus, interval, setCachedSnapshot]);
+  }, [accountAvailable, accountMode, accountOriginIssue, selectedTokenAddress, activeSnapshot?.marketKey, activeSnapshot?.syncStatus, interval, setCachedSnapshot]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1126,7 +1197,7 @@ export default function App() {
       });
     } catch (cause) {
       setOrderState(null);
-      setError(friendlyError(cause, '下单失败'));
+      setError(friendlyError(cause, '下单请求未完成'));
     }
   }, [accountAvailable, accountMode, asset, quote, selected, side, slippageBps, trackMainAccountTransaction, trackOrder]);
 
@@ -1178,10 +1249,14 @@ export default function App() {
         {accountMode === 'MAIN_ACCOUNT_POC'
           ? <div className="balances">{accountError ? '账户不可用' : balanceLabel}</div>
           : <button type="button" className="balances" aria-label="打开账户划转" disabled={!accountAvailable} onClick={() => setTransferOpen(true)}>{accountError ? '账户不可用' : balanceLabel}</button>}
-        <div className="mock-badge"><i aria-hidden="true" />{accountError ? '账户连接失败' : accountMode === 'MAIN_ACCOUNT_POC' ? '验证账户' : sessionReady ? '已登录' : '登录中'}</div>
+        <div className="mock-badge" data-state={accountError ? 'failed' : accountAvailable ? 'connected' : 'pending'}><i aria-hidden="true" />{accountError ? '账户连接失败' : accountMode === 'MAIN_ACCOUNT_POC' ? sessionReady ? '主账户已连接' : '主账户连接中' : sessionReady ? '已登录' : '登录中'}</div>
       </header>
 
-      {accountError && <div className="notice" role="alert">账户请求失败：{accountError}<button type="button" onClick={() => setAccountRetry((n) => n + 1)}>重试账户连接</button></div>}
+      {accountError && <div className="notice" role="alert">账户请求失败：{accountError}
+        {accountOriginIssue && <span>当前入口 {window.location.origin} 使用 AZ_ACCOUNT，AZ 登录上游不可用，请检查此入口的认证服务配置。
+          {privateAccountHref && <a href={privateAccountHref} target="_blank" rel="noreferrer">打开主账户入口（Tailscale / 私网）</a>}
+        </span>}
+        <button type="button" onClick={() => setAccountRetry((n) => n + 1)}>重试账户连接</button></div>}
       {error && <div className="notice" role="alert">{error}<button type="button" onClick={() => setError(null)}>关闭</button></div>}
 
       <div className="workspace">
@@ -1244,12 +1319,16 @@ export default function App() {
               </div>
               <span className={Number(selected.change24h) >= 0 ? 'positive' : 'negative'}>{formatPercent(selected.change24h)} / 24h</span>
             </div>
-            {activeSnapshot && (activeSnapshot.syncStatus !== 'STALE' || activeSnapshot.items.length > 0)
-              ? <CandleChart key={`${selected.tokenAddress}:${activeSnapshot.marketKey}:${interval}`} candles={activeSnapshot.items} symbol={selected.symbol} refreshing={chartLoading} onLoadBefore={loadOlderCandles} />
-              : <div className="chart-state">{marketError
-                  ? <div className="market-retry"><span>{marketError}</span><button type="button" onClick={() => setMarketRetry((value) => value + 1)}>重试</button></div>
-                  : '正在加载行情'}</div>}
-            {activeSnapshot?.availability === 'PARTIAL' && <div className="chart-availability" role="status">历史 K 线部分缺失：{activeSnapshot.gaps.map((gap) => `${gap.reason === 'EVENT_EXPIRED' ? '成交已过保留期' : '早于扫描起点'} ${new Date(gap.from * 1000).toLocaleString()}–${new Date(gap.to * 1000).toLocaleString()}`).join('；')}</div>}
+            {activeSnapshot
+              ? <CandleChart key={`${selected.tokenAddress.toLowerCase()}:${activeSnapshot.marketKey}:${interval}`} candles={activeSnapshot.items} symbol={selected.symbol} refreshing={chartLoading} onLoadBefore={loadOlderCandles} />
+              : <div className="chart-state">{marketError ? '行情加载失败' : '正在加载行情'}</div>}
+            {marketError && <div className="market-retry"><span>{marketError}</span><button type="button" onClick={() => setMarketRetry((value) => value + 1)}>重试</button></div>}
+            {activeSnapshot && activeSnapshot.syncStatus !== 'BACKFILLING' && activeSnapshot.syncStatus !== 'CATCHING_UP'
+              && (activeSnapshot.syncStatus !== 'READY' || activeSnapshot.availability === 'PARTIAL') && <div className="chart-availability" role="status">
+              {activeSnapshot.syncStatus === 'STALE' || activeSnapshot.syncStatus === 'FAILED'
+                ? '数据同步失败，后端未提供详细原因'
+                : `历史 K 线部分缺失：${activeSnapshot.gaps.length ? activeSnapshot.gaps.map((gap) => `${gap.reason === 'EVENT_EXPIRED' ? '成交已过保留期' : '早于扫描起点'} ${new Date(gap.from * 1000).toLocaleString()}–${new Date(gap.to * 1000).toLocaleString()}`).join('；') : '请求区间未完整覆盖，后端未提供缺口明细'}`}
+            </div>}
             {activeSnapshot?.availability === 'UNAVAILABLE_BEFORE_START' && <div className="chart-availability" role="status">请求区间早于扫描起点，暂无可用 K 线</div>}
             <section className="trade-tape" aria-label="实时成交">
               <header>
@@ -1268,7 +1347,7 @@ export default function App() {
                   const txUrl = transactionUrl(explorerBaseUrl, trade.txHash);
                   const traderUrl = addressUrl(explorerBaseUrl, trade.trader);
                   return (
-                    <div className="trade-row" key={trade.tradeId}>
+                    <div className={tradeFlashes?.key === activeTradeKey && tradeFlashes.deadlines.has(trade.tradeId) ? 'trade-row trade-flash' : 'trade-row'} key={`${activeTradeKey}:${trade.tradeId}`}>
                       <span className={trade.side === 'BUY' ? 'positive' : 'negative'}>{trade.side === 'BUY' ? '买' : '卖'} {compact(trade.baseAmount)} {selected.symbol}</span>
                       <span data-testid="trade-price">{money(trade.priceUsd)}</span>
                       <span>{compact(trade.quoteAmount)} {trade.quoteAsset}</span>
@@ -1339,7 +1418,7 @@ export default function App() {
               <div className="security-row"><dt>安全</dt><dd>{safety.map((item) => <span className={`security-${item.tone}`} key={item.text}>{item.text}</span>)}</dd></div>
             </dl>
             <button type="button" className="primary" disabled={!accountAvailable || !selected || !quoteRequest || !quote || Boolean(orderState) || (side === 'SELL' && Number(currentBalance) <= 0)} onClick={submitOrder}>
-              {accountError ? '账户连接失败' : !sessionReady ? '等待登录' : orderState ?? (side === 'BUY' ? '买入' : '卖出')}
+              {accountError ? '账户连接失败' : !sessionReady ? accountMode === 'MAIN_ACCOUNT_POC' ? '等待主账户' : '等待登录' : orderState ?? (side === 'BUY' ? '买入' : '卖出')}
             </button>
           </div>
 

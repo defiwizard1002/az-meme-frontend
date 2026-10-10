@@ -66,7 +66,9 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .balances:hover { color: var(--text); }
 .balances:disabled { cursor: wait; opacity: .55; }
 .mock-badge { display: flex; align-items: center; gap: 6px; color: var(--muted); font: 10px ui-monospace, monospace; white-space: nowrap; }
-.mock-badge i { width: 6px; height: 6px; border-radius: 50%; background: var(--positive); box-shadow: 0 0 0 3px rgb(70 219 142 / 10%); }
+.mock-badge i { width: 6px; height: 6px; border-radius: 50%; background: #b47719; }
+.mock-badge[data-state="connected"] i { background: var(--positive); box-shadow: 0 0 0 3px rgb(70 219 142 / 10%); }
+.mock-badge[data-state="failed"] i { background: var(--negative); box-shadow: 0 0 0 3px rgb(255 77 121 / 10%); }
 
 .notice { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid #71314b; background: #271019; color: #ff93af; font-size: 12px; }
 .notice button { border: 0; background: transparent; cursor: pointer; text-decoration: underline; }
@@ -159,6 +161,8 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .trade-head, .trade-row { display: grid; grid-template-columns: 1.3fr .72fr .8fr .72fr .9fr .8fr .55fr; gap: 10px; align-items: center; }
 .trade-head { height: 28px; padding: 0 14px; color: var(--subtle); font-size: 9px; }
 .trade-row { height: 29px; padding: 0 14px; border-top: 1px solid #15131b; color: #a7a2ae; font: 10px ui-monospace, monospace; }
+.trade-flash { animation: trade-arrival 700ms ease-out; }
+@keyframes trade-arrival { from { background: rgb(70 219 142 / 20%); } to { background: transparent; } }
 .trade-rows { min-height: 420px; max-height: 440px; overflow-y: auto; overscroll-behavior: contain; }
 .trade-row span:not(:first-child), .trade-head span:not(:first-child) { text-align: right; }
 .trade-tx { color: #8fded8; text-decoration: none; white-space: nowrap; }
@@ -292,6 +296,7 @@ button:active:not(:disabled) { transform: translateY(1px); }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .trade-flash { animation: none; }
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
 .chart-availability {

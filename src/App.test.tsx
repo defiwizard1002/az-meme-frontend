@@ -258,7 +258,7 @@ describe('App', () => {
     let recoverySignal: AbortSignal | undefined;
     mockedFetch.mockImplementation((input, init) => {
       const url = String(input);
-      if (url.includes(kind === 'candle' ? '/candles?' : '/trades?') && init?.signal) {
+      if (url.includes(kind === 'candle' ? '/candles?' : '/trades?') && init?.signal && !url.includes('interval=1s')) {
         recoverySignal = init.signal as AbortSignal;
         return new Promise((resolve) => { resolveRecovery = resolve; });
       }
@@ -426,9 +426,9 @@ describe('App', () => {
       return new Promise<Response>(() => {});
     });
     render(<App />);
-    expect(await screen.findByText('启动失败：mock provider unavailable')).toBeInTheDocument();
+    expect(await screen.findByText(/启动失败：.*网络请求失败/)).toBeInTheDocument();
     await waitFor(() => expect(marketCalls).toBeGreaterThanOrEqual(2), { timeout: 2_500 });
-    expect(screen.getByText('启动失败：mock provider unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/启动失败：.*网络请求失败/)).toBeInTheDocument();
     expect(screen.queryByPlaceholderText('搜索代币或粘贴合约地址')).not.toBeInTheDocument();
   });
 
@@ -597,7 +597,7 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByText('10 USDG / 0.01 ETH')).toBeInTheDocument();
-    expect(screen.getByText('验证账户')).toBeInTheDocument();
+    expect(screen.getByText('主账户已连接')).toBeInTheDocument();
     const paymentAsset = screen.getByLabelText('支付资产') as HTMLSelectElement;
     expect(paymentAsset).toHaveValue('USDG');
     expect(Array.from(paymentAsset.options, (option) => option.value)).toEqual(['USDG', 'ETH']);

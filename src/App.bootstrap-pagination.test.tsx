@@ -64,6 +64,135 @@ class ControlledSocket {
   close() { if (this.readyState === 3) return; this.readyState = 3; this.emit('close', new Event('close')); }
 }
 
+describe('urgent live trade and account origin regressions through App', () => {
+  afterEach(() => { cleanup(); setSessionToken(null); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  const row = (price: string) => screen.getAllByTestId('trade-price').find((node) => node.textContent === `$${price}`)!.closest('.trade-row')!;
+  async function mountLive() {
+    setup('MAIN_ACCOUNT_POC', true);
+    vi.useFakeTimers();
+    await act(async () => { render(<App />); });
+    const socket = ControlledSocket.instances.at(-1)!;
+    act(() => socket.open());
+    return socket;
+  }
+  function push(socket: ControlledSocket, items: Trade[], sequence = 1, token = tokenA) {
+    act(() => socket.receive({ channel: `trade:${token.tokenAddress}:USD:USDG`, epoch: 'live', sequence, data: { items } }));
+  }
+
+  it('flashes only new live trade IDs, expires briefly and does not flash REST pages or replay', async () => {
+    const socket = await mountLive();
+    expect(row('11')).not.toHaveClass('trade-flash');
+    scrollTrades();
+    await act(async () => {});
+    expect(document.querySelectorAll('.trade-flash')).toHaveLength(0);
+    push(socket, [trade('a-new', 100, '11'), trade('live-new', 101, '33')]);
+    expect(row('11')).not.toHaveClass('trade-flash');
+    expect(row('33')).toHaveClass('trade-flash');
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    expect(row('33')).not.toHaveClass('trade-flash');
+    push(socket, [trade('live-new', 101, '33')], 2);
+    expect(row('33')).not.toHaveClass('trade-flash');
+    push(socket, [trade('live-new', 101, '33')], 2);
+    expect(row('33')).not.toHaveClass('trade-flash');
+  });
+
+  it('honors pause, scopes flash to the selected token and clears timers on unmount', async () => {
+    const socket = await mountLive();
+    fireEvent.click(screen.getByRole('button', { name: '暂停' }));
+    push(socket, [trade('paused', 101, '33')]);
+    expect(screen.queryByText('$33')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    expect(row('33')).not.toHaveClass('trade-flash');
+    push(socket, [trade('active', 102, '44')], 2);
+    expect(row('44')).toHaveClass('trade-flash');
+    fireEvent.click(screen.getByRole('button', { name: '查看 BBB' }));
+    await act(async () => {});
+    expect(document.querySelectorAll('.trade-flash')).toHaveLength(0);
+    push(socket, [trade('stale-a', 103, '99')], 3);
+    expect(screen.queryByText('$99')).not.toBeInTheDocument();
+    const nextSocket = ControlledSocket.instances.at(-1)!;
+    act(() => nextSocket.open());
+    push(nextSocket, [trade('active', 201, '55')], 1, tokenB);
+    expect(row('55')).toHaveClass('trade-flash');
+    cleanup();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('respects reduced motion for newly pushed rows', async () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })));
+    const socket = await mountLive();
+    push(socket, [trade('live-new', 101, '33')]);
+    expect(row('33')).not.toHaveClass('trade-flash');
+  });
+
+  it('keeps the chart mounted for market metadata updates within the same token identity', async () => {
+    const socket = await mountLive();
+    vi.mocked(memeApi.getCandles).mockImplementation(async (address, interval) => snapshot(
+      address.toLowerCase() === tokenA.tokenAddress ? tokenA : tokenB, interval));
+    const canvas = screen.getByLabelText('AAA K 线图');
+    act(() => socket.receive({ channel: `market:${tokenA.tokenAddress}`, epoch: 'live', sequence: 1,
+      data: { ...tokenA, tokenAddress: tokenA.tokenAddress.toUpperCase(), priceUsd: '12', holders: 12 } }));
+    await act(async () => {});
+    expect(screen.getByLabelText('AAA K 线图')).toBe(canvas);
+    expect(chart.current!.candles).toEqual([candle(100, '11')]);
+    fireEvent.click(screen.getByRole('button', { name: '1s' }));
+    await act(async () => {});
+    expect(screen.getByLabelText('AAA K 线图')).not.toBe(canvas);
+  });
+
+  it('shows the private MAIN_ACCOUNT_POC summary as connected without AZ login', async () => {
+    setup('MAIN_ACCOUNT_POC');
+    vi.stubGlobal('location', new URL('https://dopemac-mini.tailc44fad.ts.net:4173/'));
+    await act(async () => { render(<App />); });
+    expect(document.querySelector('.mock-badge')).toHaveAttribute('data-state', 'connected');
+    expect(document.querySelector('.mock-badge')).toHaveTextContent('主账户已连接');
+    expect(document.querySelector('.balances')).toHaveTextContent('10 USDG');
+    expect(azAuth.loginMock).not.toHaveBeenCalled();
+  });
+
+  it('stops reconnecting when an AZ upstream failure is returned by the WS ticket request', async () => {
+    setup('AZ_ACCOUNT', true);
+    vi.mocked(memeApi.getWsTicket).mockRejectedValue(new ApiError('AZ_REQUEST_FAILED', 'auth upstream absent', 502));
+    vi.useFakeTimers();
+    await act(async () => { render(<App />); });
+    expect(screen.getByRole('alert')).toHaveTextContent('AZ 登录上游不可用');
+    const attempts = vi.mocked(memeApi.getWsTicket).mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(memeApi.getWsTicket).toHaveBeenCalledTimes(attempts);
+  });
+
+  it('shows actionable AZ login upstream failure and the authorized private Tailscale origin without retry loops', async () => {
+    setup('AZ_ACCOUNT', true);
+    vi.stubGlobal('location', new URL('https://dopemac-mini.tailc44fad.ts.net:10000/'));
+    vi.mocked(azAuth.loginMock).mockRejectedValue(new ApiError('AZ_REQUEST_FAILED', 'HTTP 502: 请求失败', 502));
+    vi.useFakeTimers();
+    await act(async () => { render(<App />); });
+    expect(document.querySelector('.mock-badge')).toHaveAttribute('data-state', 'failed');
+    expect(screen.getByRole('alert')).toHaveTextContent(/AZ_ACCOUNT.*AZ 登录上游/);
+    expect(screen.getByRole('alert')).toHaveTextContent('HTTP 502');
+    expect(screen.getByRole('alert')).toHaveTextContent('AZ_REQUEST_FAILED');
+    expect(screen.getByRole('link', { name: /Tailscale.*私网/ })).toHaveAttribute('href', 'https://dopemac-mini.tailc44fad.ts.net:4173/');
+    const attempts = vi.mocked(memeApi.getWsTicket).mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(azAuth.loginMock).toHaveBeenCalledTimes(1);
+    expect(memeApi.getWsTicket).toHaveBeenCalledTimes(attempts);
+    expect(memeApi.getAccount).not.toHaveBeenCalled();
+    expect(document.querySelector('button.primary')).toBeDisabled();
+  });
+
+  it.each(['AZ_ACCOUNT', 'MAIN_ACCOUNT_POC'] as const)('preserves unrelated %s errors and never offers another host a private signer link', async (mode) => {
+    setup(mode);
+    vi.stubGlobal('location', new URL('https://unrelated.example:10000/'));
+    vi.mocked(memeApi.getAccount).mockRejectedValue(new ApiError('MEME_PROVIDER_ERROR', 'actual failure', 503));
+    await act(async () => { render(<App />); });
+    expect(screen.getByRole('alert')).toHaveTextContent('actual failure');
+    expect(screen.getByRole('alert')).toHaveTextContent('MEME_PROVIDER_ERROR');
+    expect(document.querySelector('.mock-badge')).toHaveAttribute('data-state', 'failed');
+    expect(screen.queryByRole('link', { name: /Tailscale/ })).not.toBeInTheDocument();
+    expect(azAuth.loginMock).toHaveBeenCalledTimes(mode === 'AZ_ACCOUNT' ? 1 : 0);
+  });
+});
+
 function setup(mode: 'AZ_ACCOUNT' | 'MAIN_ACCOUNT_POC', withSocket = false) {
   chart.current = null;
   ControlledSocket.instances = [];
@@ -227,7 +356,7 @@ describe('account bootstrap and selection-scoped pagination', () => {
     expect(memeApi.getCandles).toHaveBeenLastCalledWith(tokenA.tokenAddress, '1m', { to: 99, limit: 300 });
     if (change === 'interval change') {
       fireEvent.click(screen.getByRole('button', { name: '15m' }));
-      await waitFor(() => expect(memeApi.getCandles).toHaveBeenLastCalledWith(tokenA.tokenAddress, '15m'));
+      await waitFor(() => expect(memeApi.getCandles).toHaveBeenLastCalledWith(tokenA.tokenAddress, '15m', { signal: expect.any(AbortSignal) }));
       await screen.findByLabelText('AAA K 线图');
     } else {
       await select(tokenB);
@@ -375,4 +504,215 @@ it('cancels a settled-order status timer when the account component unmounts', a
   unmount();
   expect(clear).toHaveBeenCalledWith(id);
   cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+});
+
+describe('hotfix: bounded account bootstrap and empty demand', () => {
+  afterEach(() => { cleanup(); setSessionToken(null); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  async function mount() { await act(async () => { render(<App />); }); }
+
+  it.each(['AZ_ACCOUNT', 'MAIN_ACCOUNT_POC'] as const)('bounds the entire %s attempt and permits a fresh retry', async (mode) => {
+    setup(mode);
+    vi.useFakeTimers();
+    vi.mocked(memeApi.getAccount).mockImplementationOnce(() => new Promise(() => {}));
+    await mount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(screen.getByRole('alert')).toHaveTextContent('账户连接超时');
+    expect(vi.mocked(memeApi.getAccount).mock.calls[0]?.[0]?.aborted).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '重试账户连接' }));
+    await act(async () => {});
+    expect(document.querySelector('.mock-badge')).toHaveTextContent(mode === 'AZ_ACCOUNT' ? '已登录' : '主账户已连接');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it.each(['fetch', 'body'] as const)('settles real MAIN_ACCOUNT_POC %s timeout without mock login', async (stage) => {
+    setup('MAIN_ACCOUNT_POC');
+    vi.mocked(memeApi.getAccount).mockRestore();
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => stage === 'fetch' ? new Promise(() => {})
+      : Promise.resolve({ status: 200, ok: true, text: () => new Promise(() => {}) })));
+    await mount();
+    expect(document.querySelector('.mock-badge')).toHaveTextContent('主账户连接中');
+    expect(document.querySelector('button.primary')).toHaveTextContent('等待主账户');
+    expect(azAuth.loginMock).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(screen.getByRole('alert')).toHaveTextContent('超时');
+    expect(screen.getByRole('button', { name: '重试账户连接' })).toBeEnabled();
+    expect(document.querySelector('.balances')).toHaveTextContent('账户不可用');
+    expect(document.querySelector('button.primary')).toBeDisabled();
+  });
+
+  it.each(['success', 'failure'] as const)('aborts an old attempt and ignores its late %s after retry succeeds', async (outcome) => {
+    setup('MAIN_ACCOUNT_POC');
+    const old = deferred<typeof summary>();
+    vi.mocked(memeApi.getAccount).mockReturnValueOnce(old.promise);
+    vi.mocked(memeApi.getOrders).mockRejectedValueOnce(new ApiError('PROXY_DOWN', 'proxy unavailable', 502));
+    await mount();
+    const signal = vi.mocked(memeApi.getAccount).mock.calls[0]?.[0];
+    expect(screen.getByRole('alert')).toHaveTextContent('HTTP 502');
+    fireEvent.click(screen.getByRole('button', { name: '重试账户连接' }));
+    await act(async () => {});
+    expect(signal?.aborted).toBe(true);
+    expect(document.querySelector('.balances')).toHaveTextContent('10 ETH');
+    await act(async () => {
+      if (outcome === 'success') old.resolve({ ...summary, quoteBalances: [{ asset: 'ETH', available: '999', frozen: '0' }] });
+      else old.reject(new SyntaxError('Unexpected end of JSON input'));
+    });
+    expect(document.querySelector('.balances')).toHaveTextContent('10 ETH');
+    expect(document.querySelector('.balances')).not.toHaveTextContent('999');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(azAuth.loginMock).not.toHaveBeenCalled();
+  });
+
+  it('cancels account requests on unmount without late follow-up requests', async () => {
+    setup('AZ_ACCOUNT');
+    const login = deferred<typeof auth>();
+    vi.mocked(azAuth.loginMock).mockReturnValue(login.promise);
+    const view = render(<App />);
+    await act(async () => {});
+    const signal = vi.mocked(azAuth.loginMock).mock.calls[0]?.[0];
+    view.unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => login.resolve(auth));
+    expect(memeApi.getAccount).not.toHaveBeenCalled();
+  });
+
+  it('renders a human-readable parse failure without exposing SyntaxError', async () => {
+    setup('AZ_ACCOUNT');
+    vi.mocked(azAuth.loginMock).mockRejectedValue(new SyntaxError('Unexpected end of JSON input'));
+    await mount();
+    expect(screen.getByRole('alert')).not.toHaveTextContent('Unexpected end');
+    expect(screen.getByRole('alert')).toHaveTextContent('响应');
+  });
+
+  it.each(['CATCHING_UP', 'BACKFILLING'] as const)('keeps %s metadata internal beyond the entire refresh retry budget with committed candles', async (syncStatus) => {
+    setup('MAIN_ACCOUNT_POC');
+    vi.useFakeTimers();
+    const items = Array.from({ length: 320 }, (_, index) => candle(100 + index, '11'));
+    const committed = { ...snapshot(tokenA, '1s', items), syncStatus, availability: 'PARTIAL' as const };
+    vi.mocked(memeApi.getCandles).mockImplementation(async (_address, interval) => ({ ...committed, interval }));
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: '1s' }));
+    await act(async () => {});
+    vi.mocked(memeApi.getCandles).mockClear();
+    const canvas = screen.getByLabelText('AAA K 线图');
+    for (const elapsed of [0, 2_000, 4_000, 8_000, 16_000, 60_000, 60_000]) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(elapsed); });
+      expect(screen.getByLabelText('AAA K 线图')).toBe(canvas);
+      expect(chart.current!.candles).toEqual(items);
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+      expect(screen.queryByText(/同步|未就绪|回填|追赶|刷新|失败|历史 K 线部分缺失/)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
+    }
+    expect(memeApi.getCandles).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(memeApi.getCandles).mock.calls.every(([, interval]) => interval === '1s')).toBe(true);
+  });
+
+  it('refetches empty BACKFILLING/PARTIAL demand and clears pending metadata when complete', async () => {
+    setup('MAIN_ACCOUNT_POC');
+    vi.useFakeTimers();
+    vi.mocked(memeApi.getCandles).mockResolvedValueOnce({ ...snapshot(tokenA, '1m', []),
+      syncStatus: 'BACKFILLING', availability: 'PARTIAL', gaps: [] });
+    await mount();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByText('暂无成交 K 线')).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+    expect(memeApi.getCandles).toHaveBeenCalledTimes(2);
+    expect(chart.current!.candles).toEqual([candle(100, '11')]);
+    expect(screen.queryByText(/历史 K 线部分缺失/)).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(memeApi.getCandles).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['BACKFILLING', 'READY'] as const)('bounds automatic refetch of empty %s/PARTIAL with no gap details', async (syncStatus) => {
+    setup('MAIN_ACCOUNT_POC');
+    vi.useFakeTimers();
+    vi.mocked(memeApi.getCandles).mockResolvedValue({ ...snapshot(tokenA, '1m', []), syncStatus, availability: 'PARTIAL' });
+    await mount();
+    if (syncStatus === 'BACKFILLING') expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    else expect(screen.getByRole('status')).toHaveTextContent('未完整');
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(memeApi.getCandles).toHaveBeenCalledTimes(5);
+    expect(screen.getByRole('button', { name: '重试' })).toBeEnabled();
+    expect(screen.getByText(/已停止自动刷新/)).toBeVisible();
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(memeApi.getCandles).toHaveBeenCalledTimes(5);
+  });
+
+  it.each(['STALE', 'FAILED'] as const)('shows %s as a failure with reason and retry with empty or committed candles', async (syncStatus) => {
+    setup('MAIN_ACCOUNT_POC');
+    vi.mocked(memeApi.getCandles).mockResolvedValueOnce({ ...snapshot(tokenA, '1m', []), syncStatus, availability: 'PARTIAL' })
+      .mockResolvedValue({ ...snapshot(tokenA), syncStatus, availability: 'PARTIAL' });
+    await mount();
+    expect(screen.getByRole('status')).toHaveTextContent('数据同步失败');
+    expect(screen.getByRole('status')).toHaveTextContent('未提供详细原因');
+    expect(screen.getByRole('button', { name: '重试' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    await act(async () => {});
+    expect(chart.current!.candles).toEqual([candle(100, '11')]);
+    expect(screen.getByRole('status')).toHaveTextContent('数据同步失败');
+    expect(screen.getByRole('button', { name: '重试' })).toBeEnabled();
+  });
+
+  it('clears only the exhausted empty-history warning when the first expected WS candle arrives', async () => {
+    setup('MAIN_ACCOUNT_POC', true);
+    vi.useFakeTimers();
+    vi.mocked(memeApi.getCandles).mockResolvedValue({ ...snapshot(tokenA, '1m', []),
+      syncStatus: 'CATCHING_UP', availability: 'PARTIAL' });
+    await mount();
+    const socket = ControlledSocket.instances.at(-1)!;
+    act(() => socket.open());
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    const warning = '历史 K 线仍未就绪，已停止自动刷新，请重试';
+    expect(memeApi.getCandles).toHaveBeenCalledTimes(5);
+    expect(chart.current!.candles).toEqual([]);
+    expect(screen.getByText(warning)).toBeVisible();
+    act(() => {
+      socket.receive({ channel: `candle:${tokenB.tokenAddress}:USD:USDG:1m`, epoch: 'live', sequence: 1,
+        data: candle(100, '22') });
+      socket.receive({ channel: `candle:${tokenA.tokenAddress}:USD:USDG:1m`, epoch: 'live', sequence: 1,
+        data: { items: [] } });
+    });
+    expect(chart.current!.candles).toEqual([]);
+    expect(screen.getByText(warning)).toBeVisible();
+    act(() => socket.receive({ channel: `candle:${tokenA.tokenAddress}:USD:USDG:1m`, epoch: 'live', sequence: 2,
+      data: candle(100, '11') }));
+    expect(chart.current!.candles).toEqual([candle(100, '11')]);
+    expect(screen.queryByText(warning)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+    expect(memeApi.getCandles).toHaveBeenCalledTimes(5);
+  });
+
+  it('keeps a real network exception during metadata refresh after a valid WS candle arrives', async () => {
+    setup('MAIN_ACCOUNT_POC', true);
+    vi.useFakeTimers();
+    vi.mocked(memeApi.getCandles).mockResolvedValueOnce({ ...snapshot(tokenA), syncStatus: 'CATCHING_UP' })
+      .mockRejectedValue(new ApiError('MEME_PROVIDER_ERROR', 'actual candle network failure', 503));
+    await mount();
+    const socket = ControlledSocket.instances.at(-1)!;
+    act(() => socket.open());
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+    expect(chart.current!.candles).toEqual([candle(100, '11')]);
+    const error = screen.getByText(/actual candle network failure/).textContent;
+    act(() => socket.receive({ channel: `candle:${tokenA.tokenAddress}:USD:USDG:1m`, epoch: 'live', sequence: 1,
+      data: candle(101, '12') }));
+    expect(chart.current!.candles).toEqual([candle(100, '11'), candle(101, '12')]);
+    expect(screen.getByText(/actual candle network failure/)).toHaveTextContent(error!);
+    expect(screen.getByRole('button', { name: '重试' })).toBeEnabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+    expect(memeApi.getCandles).toHaveBeenCalledTimes(2);
+  });
+
+  it('aborts pending candle refresh on unmount', async () => {
+    setup('MAIN_ACCOUNT_POC');
+    vi.useFakeTimers();
+    vi.mocked(memeApi.getCandles).mockResolvedValue({ ...snapshot(tokenA, '1m', []), syncStatus: 'BACKFILLING', availability: 'PARTIAL' });
+    const view = render(<App />);
+    await act(async () => {});
+    const signal = vi.mocked(memeApi.getCandles).mock.calls[0]?.[2]?.signal;
+    view.unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(memeApi.getCandles).toHaveBeenCalledTimes(1);
+  });
 });
