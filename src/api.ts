@@ -7,9 +7,8 @@ interface Envelope<T> {
   result: T;
 }
 
-const apiBaseUrl = import.meta.env.VITE_MEME_API_BASE_URL as string | undefined;
-const azApiBaseUrl = import.meta.env.VITE_AZ_API_BASE_URL as string | undefined;
-if (!apiBaseUrl || !azApiBaseUrl) throw new Error('VITE_MEME_API_BASE_URL and VITE_AZ_API_BASE_URL are required');
+const apiBaseUrl = (import.meta.env.VITE_MEME_API_BASE_URL as string | undefined) ?? '';
+const azApiBaseUrl = (import.meta.env.VITE_AZ_API_BASE_URL as string | undefined) ?? '';
 let sessionToken: string | null = null;
 
 export class ApiError extends Error {
@@ -22,32 +21,34 @@ export function setSessionToken(token: string | null): void {
   sessionToken = token;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function readEnvelope<T>(response: Response, prefix: 'MEME' | 'AZ'): Promise<T> {
+  const text = await response.text();
+  let payload: Partial<Envelope<T>> | null = null;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) payload = parsed;
+  } catch (cause) {
+    if (response.ok) throw new ApiError(`${prefix}_INVALID_RESPONSE`, `HTTP ${response.status}: 服务响应无效，请稍后重试`, response.status);
+    // Non-JSON proxy failures must retain their original HTTP status below.
+    if (!(cause instanceof SyntaxError)) throw cause;
+  }
+  if (!response.ok || payload && typeof payload.rc === 'number' && payload.rc !== 0) {
+    throw new ApiError(typeof payload?.mc === 'string' ? payload.mc : `${prefix}_REQUEST_FAILED`,
+      Array.isArray(payload?.ma) && typeof payload.ma[0] === 'string' ? payload.ma[0] : `HTTP ${response.status}: 请求失败`, response.status);
+  }
+  if (!payload || payload.rc !== 0 || !Object.hasOwn(payload, 'result')) {
+    throw new ApiError(`${prefix}_INVALID_RESPONSE`, `HTTP ${response.status}: 服务响应格式无效`, response.status);
+  }
+  return payload.result as T;
+}
+async function send<T>(base: string, prefix: 'MEME' | 'AZ', path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body) headers.set('content-type', 'application/json');
   if (sessionToken) headers.set('authorization', `Bearer ${sessionToken}`);
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    ...init,
-    headers,
-  });
-  const payload = await response.json() as Envelope<T>;
-  if (!response.ok || payload.rc !== 0) {
-    throw new ApiError(payload.mc ?? 'MEME_REQUEST_FAILED', payload.ma?.[0] ?? '请求失败', response.status);
-  }
-  return payload.result;
+  return readEnvelope<T>(await fetch(`${base}${path}`, { ...init, headers, credentials: 'same-origin' }), prefix);
 }
-
-async function requestAz<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers = new Headers(init?.headers);
-  if (init?.body) headers.set('content-type', 'application/json');
-  if (sessionToken) headers.set('authorization', `Bearer ${sessionToken}`);
-  const response = await fetch(`${azApiBaseUrl}${path}`, { ...init, headers });
-  const payload = await response.json() as Envelope<T>;
-  if (!response.ok || payload.rc !== 0) {
-    throw new ApiError(payload.mc ?? 'AZ_REQUEST_FAILED', payload.ma?.[0] ?? '请求失败', response.status);
-  }
-  return payload.result;
-}
+function request<T>(path: string, init?: RequestInit): Promise<T> { return send(apiBaseUrl, 'MEME', path, init); }
+function requestAz<T>(path: string, init?: RequestInit): Promise<T> { return send(azApiBaseUrl, 'AZ', path, init); }
 
 export const azAuth = {
   loginMock: async () => {
@@ -92,16 +93,16 @@ export const memeApi = {
   getMarkets: (tab: 'hot' | 'new' = 'hot') => request<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?tab=${tab}&limit=50`),
   searchMarkets: (query: string) => request<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?query=${encodeURIComponent(query)}&limit=50`),
   getToken: (tokenAddress: string) => request<Token>(`/sapi/v1/meme/tokens/${tokenAddress}`),
-  getCandles: (tokenAddress: string, interval: Interval, options?: { from?: number; to?: number; limit?: number }) => {
+  getCandles: (tokenAddress: string, interval: Interval, options?: { from?: number; to?: number; limit?: number; signal?: AbortSignal }) => {
     const query = new URLSearchParams({ interval, limit: String(options?.limit ?? 300) });
     if (options?.from !== undefined) query.set('from', String(options.from));
     if (options?.to !== undefined) query.set('to', String(options.to));
-    return request<CandleSnapshot>(`/sapi/v1/meme/tokens/${tokenAddress}/candles?${query.toString()}`);
+    return request<CandleSnapshot>(`/sapi/v1/meme/tokens/${tokenAddress}/candles?${query.toString()}`, { signal: options?.signal });
   },
-  getTrades: (tokenAddress: string, cursor?: string) => {
+  getTrades: (tokenAddress: string, cursor?: string, signal?: AbortSignal) => {
     const query = new URLSearchParams({ limit: '100' });
     if (cursor) query.set('cursor', cursor);
-    return request<{ items: Trade[]; nextCursor: string | null }>(`/sapi/v1/meme/tokens/${tokenAddress}/trades?${query.toString()}`);
+    return request<{ items: Trade[]; nextCursor: string | null }>(`/sapi/v1/meme/tokens/${tokenAddress}/trades?${query.toString()}`, { signal });
   },
   getAccount: () => request<AccountSummary>('/sapi/v1/meme/account/summary'),
   getAccountTransactions: () => request<{ items: AccountTransaction[] }>('/sapi/v1/meme/account/transactions?limit=50'),
@@ -128,5 +129,5 @@ export const memeApi = {
     request<TradePlan>('/sapi/v1/meme/transactions/plan', { method: 'POST', body: JSON.stringify(input) }),
 };
 
-export const wsBaseUrl = import.meta.env.VITE_MEME_WS_URL as string | undefined;
-if (!wsBaseUrl) throw new Error('VITE_MEME_WS_URL is required');
+export const wsBaseUrl = (import.meta.env.VITE_MEME_WS_URL as string | undefined)
+  || `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/sapi/v1/meme/stream`;
