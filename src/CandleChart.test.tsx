@@ -144,17 +144,17 @@ describe('visible-range left history', () => {
         getVisibleLogicalRange: () => ({ from: 0, to: 2 }), setVisibleLogicalRange: chartMocks.setVisibleRange }),
     });
   });
-  it('only requests after interaction at the left edge; bounds, coalesces and exhausts requests', async () => {
+  it('automatically fills a sparse view; coalesces and exhausts requests', async () => {
     const { act, fireEvent } = await import('@testing-library/react');
     let finish!: (result: { added: number; exhausted: boolean }) => void;
     const load = vi.fn(() => new Promise<{ added: number; exhausted: boolean }>((resolve) => { finish = resolve; }));
     render(<CandleChart symbol="A" candles={candles} onLoadBefore={load} />);
     const range = chartMocks.subscribeVisibleRange.mock.calls[0]![0];
     act(() => range({ from: 0, to: 10 }));
-    expect(load).not.toHaveBeenCalled();
+    expect(load).toHaveBeenCalledExactlyOnceWith(99);
     fireEvent.wheel(screen.getByTestId('tradingview-chart'));
     act(() => range({ from: 8, to: 10 }));
-    expect(load).not.toHaveBeenCalled();
+    expect(load).toHaveBeenCalledTimes(1);
     act(() => { range({ from: 0, to: 10 }); range({ from: -1, to: 10 }); });
     expect(load).toHaveBeenCalledExactlyOnceWith(99);
     await act(async () => finish({ added: 0, exhausted: true }));

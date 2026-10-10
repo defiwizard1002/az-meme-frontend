@@ -19,6 +19,7 @@ interface Props {
   candles: Candle[];
   symbol: string;
   refreshing?: boolean;
+  historyRetry?: number;
   onLoadBefore?: (before: number) => Promise<HistoryLoadResult>;
 }
 
@@ -29,6 +30,8 @@ export interface HistoryLoadResult {
 
 // lightweight-charts 5.2.1 applies this absolute bound to every series value.
 const CHART_VALUE_BOUND = Number.MAX_SAFE_INTEGER / 100;
+const MINIMUM_VIEW_BARS = 30;
+const HISTORY_PAGES_PER_BURST = 4;
 
 interface ChartData {
   candles: CandlestickData<UTCTimestamp>[];
@@ -98,7 +101,7 @@ function pricePrecision(candles: ChartData['candles']): { precision: number; min
   return { precision: 8, minMove: 0.00000001 };
 }
 
-export function CandleChart({ candles, symbol, refreshing = false, onLoadBefore }: Props) {
+export function CandleChart({ candles, symbol, refreshing = false, historyRetry = 0, onLoadBefore }: Props) {
   const data = useMemo(() => buildChartData(candles), [candles]);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -116,6 +119,7 @@ export function CandleChart({ candles, symbol, refreshing = false, onLoadBefore 
   const requestedBeforeRef = useRef<number | null>(null);
   const retryableBeforeRef = useRef<number | null>(null);
   const retryAfterRef = useRef(0);
+  const checkHistoryRef = useRef<((restart?: boolean) => void) | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => { candlesRef.current = candles; }, [candles]);
@@ -195,39 +199,78 @@ export function CandleChart({ candles, symbol, refreshing = false, onLoadBefore 
     chart.subscribeCrosshairMove?.(handleCrosshair);
 
     let active = true;
+    let historyTimer: number | undefined;
+    let pages = 0;
+    let pendingAttempt = 0;
+    const needsHistory = (range: { from: number; to: number } | null) => candlesRef.current.length > 0
+      && (candlesRef.current.length < MINIMUM_VIEW_BARS || interactedRef.current && range !== null && range.from < 8);
+    const scheduleHistory = (delay = 250) => {
+      if (!active || historyTimer !== undefined || document.visibilityState === 'hidden' || !loadBeforeRef.current
+        || !needsHistory(chart.timeScale().getVisibleLogicalRange())) return;
+      const burstFull = pages >= HISTORY_PAGES_PER_BURST;
+      historyTimer = window.setTimeout(() => {
+        historyTimer = undefined;
+        if (burstFull) pages = 0;
+        if (retryableBeforeRef.current !== null && Date.now() >= retryAfterRef.current) {
+          retryableBeforeRef.current = null;
+          requestedBeforeRef.current = null;
+        }
+        handleVisibleRange(chart.timeScale().getVisibleLogicalRange());
+      }, burstFull ? Math.max(delay, 30_000) : delay);
+    };
     const handleVisibleRange = (range: { from: number; to: number } | null) => {
-      if (!range || range.from >= 8 || !interactedRef.current || loadingBeforeRef.current || !loadBeforeRef.current) return;
+      if (document.visibilityState === 'hidden' || !needsHistory(range) || loadingBeforeRef.current || !loadBeforeRef.current) return;
+      if (pages >= HISTORY_PAGES_PER_BURST) { scheduleHistory(); return; }
       const before = (candlesRef.current[0]?.t ?? 0) - 1;
       if (before <= 0 || requestedBeforeRef.current === before) return;
       requestedBeforeRef.current = before;
       loadingBeforeRef.current = true;
+      pages += 1;
       setHistoryLoading(true);
       void loadBeforeRef.current(before)
         .then(({ added, exhausted }) => {
           if (!active) return;
           if (added === 0 && !exhausted) {
             retryableBeforeRef.current = before;
-            retryAfterRef.current = Date.now() + 1_000;
+            retryAfterRef.current = Date.now() + Math.min(30_000, 1_000 * 2 ** Math.min(pendingAttempt++, 5));
+          } else {
+            pendingAttempt = 0;
+            retryableBeforeRef.current = null;
           }
         })
         .catch(() => {
           if (!active) return;
           retryableBeforeRef.current = before;
-          retryAfterRef.current = Date.now() + 1_000;
+          retryAfterRef.current = Date.now() + Math.min(30_000, 1_000 * 2 ** Math.min(pendingAttempt++, 5));
         })
         .finally(() => {
           if (!active) return;
           loadingBeforeRef.current = false;
           setHistoryLoading(false);
+          // Follow genuine retained pages; never fill gaps with synthetic seconds.
+          if (retryableBeforeRef.current !== null) scheduleHistory(Math.max(250, retryAfterRef.current - Date.now()));
+          else if (requestedBeforeRef.current !== (candlesRef.current[0]?.t ?? 0) - 1) scheduleHistory();
         });
+    };
+    checkHistoryRef.current = (restart = false) => {
+      if (restart) { pages = 0; pendingAttempt = 0; window.clearTimeout(historyTimer); historyTimer = undefined; }
+      scheduleHistory();
     };
     const markInteraction = () => {
       interactedRef.current = true;
+      pages = 0;
       if (retryableBeforeRef.current === null || loadingBeforeRef.current || Date.now() < retryAfterRef.current) return;
       retryableBeforeRef.current = null;
       requestedBeforeRef.current = null;
       handleVisibleRange(chart.timeScale().getVisibleLogicalRange());
     };
+    const resumeHistory = () => {
+      if (document.visibilityState === 'hidden') {
+        window.clearTimeout(historyTimer);
+        historyTimer = undefined;
+      } else scheduleHistory(Math.max(250, retryAfterRef.current - Date.now()));
+    };
+    document.addEventListener('visibilitychange', resumeHistory);
     container.addEventListener('pointerdown', markInteraction);
     container.addEventListener('wheel', markInteraction, { passive: true });
     chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRange);
@@ -241,6 +284,9 @@ export function CandleChart({ candles, symbol, refreshing = false, onLoadBefore 
 
     return () => {
       active = false;
+      window.clearTimeout(historyTimer);
+      checkHistoryRef.current = null;
+      document.removeEventListener('visibilitychange', resumeHistory);
       resizeObserver.disconnect();
       container.removeEventListener('pointerdown', markInteraction);
       container.removeEventListener('wheel', markInteraction);
@@ -256,6 +302,13 @@ export function CandleChart({ candles, symbol, refreshing = false, onLoadBefore 
       crosshairRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    requestedBeforeRef.current = null;
+    retryableBeforeRef.current = null;
+    retryAfterRef.current = 0;
+    checkHistoryRef.current?.(true);
+  }, [historyRetry]);
 
   useEffect(() => {
     const candleSeries = candleSeriesRef.current;
@@ -326,6 +379,7 @@ export function CandleChart({ candles, symbol, refreshing = false, onLoadBefore 
     if (restorePrice) priceScale.setVisibleRange(restorePrice);
     if (restoreCrosshair) chart.setCrosshairPosition?.(restoreCrosshair.price, restoreCrosshair.time, candleSeries);
     previousDataRef.current = data;
+    checkHistoryRef.current?.();
   }, [data]);
 
   return (
