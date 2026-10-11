@@ -674,8 +674,8 @@ describe('hotfix: bounded account bootstrap and empty demand', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(elapsed); });
       expect(screen.getByLabelText('AAA K 线图')).toBe(canvas);
       expect(chart.current!.candles).toEqual(items);
-      expect(screen.queryByRole('status')).not.toBeInTheDocument();
-      expect(screen.queryByText(/同步|未就绪|回填|追赶|刷新|失败|历史 K 线部分缺失/)).not.toBeInTheDocument();
+      expect(screen.getByRole('status',{name:'行情状态'})).toHaveTextContent('正在同步历史行情');
+      expect(document.body).not.toHaveTextContent(/BACKFILLING|CATCHING_UP|历史 K 线部分缺失/);
       expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
     }
     expect(vi.mocked(memeApi.getCandles).mock.calls.length).toBeGreaterThan(4);
@@ -689,7 +689,7 @@ describe('hotfix: bounded account bootstrap and empty demand', () => {
     vi.mocked(memeApi.getCandles).mockResolvedValueOnce({ ...snapshot(tokenA, '1m', []),
       syncStatus: 'BACKFILLING', availability: 'PARTIAL', gaps: [] });
     await mount();
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.getByRole('status',{name:'行情状态'})).toHaveTextContent('正在同步历史行情');
     expect(screen.queryByText('暂无成交 K 线')).not.toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
     expect(memeApi.getCandles).toHaveBeenCalledTimes(2);
@@ -704,8 +704,7 @@ describe('hotfix: bounded account bootstrap and empty demand', () => {
     vi.useFakeTimers();
     vi.mocked(memeApi.getCandles).mockResolvedValue({ ...snapshot(tokenA, '1m', []), syncStatus, availability: 'PARTIAL' });
     await mount();
-    if (syncStatus === 'BACKFILLING') expect(screen.queryByRole('status')).not.toBeInTheDocument();
-    else expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.getByRole('status',{name:'行情状态'})).toHaveTextContent(syncStatus==='BACKFILLING'?'正在同步历史行情':'暂无可用行情');
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
     const reads = vi.mocked(memeApi.getCandles).mock.calls.length;
     expect(reads).toBe(syncStatus === 'READY' ? 1 : 6);

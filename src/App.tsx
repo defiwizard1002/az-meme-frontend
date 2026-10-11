@@ -291,6 +291,9 @@ export function mergeSnapshots(previous: CandleSnapshot | null, next: CandleSnap
       : next;
   const byTime = new Map(previous.items.map((item) => [item.t, item]));
   for (const item of next.items) byTime.set(item.t, chooseNewerCandle(byTime.get(item.t), item));
+  const retracted=new Map<number,string>();
+  for(const r of [...(previous.retractions??[]),...(next.retractions??[])])if(!retracted.has(r.t)||BigInt(r.revision)>BigInt(retracted.get(r.t)!))retracted.set(r.t,r.revision);
+  for(const [t,revision] of retracted){const bar=byTime.get(t);if(bar&&BigInt(bar.revision)>BigInt(revision))retracted.delete(t);else byTime.delete(t);}
   const limits = [previous.coverage, next.coverage];
   const from = limits.map((value) => value.from).filter((value): value is number => value !== null);
   const to = limits.map((value) => value.to).filter((value): value is number => value !== null);
@@ -304,6 +307,7 @@ export function mergeSnapshots(previous: CandleSnapshot | null, next: CandleSnap
       ? 'UNAVAILABLE_BEFORE_START'
       : 'PARTIAL';
   return { ...next,
+    ...(retracted.size?{retractions:[...retracted].map(([t,revision])=>({t,revision}))}:{retractions:[]}),
     availability,
     gaps,
     revision: BigInt(previous.revision) > BigInt(next.revision) ? previous.revision : next.revision,
@@ -809,7 +813,7 @@ export default function App() {
           || result.marketKey !== requestedMarketKey) throw new Error('行情响应与当前代币或周期不匹配');
         const previous = candleCacheRef.current.get(cacheKey) ?? null;
         // An empty pending snapshot has no history/gaps to retain after demand completes.
-        const merged = mergeSnapshots(previous?.items.length || previous?.gaps.length ? previous : null, result);
+        const merged = mergeSnapshots(previous?.items.length || previous?.gaps.length || previous?.retractions?.length ? previous : null, result);
         setCachedSnapshot(merged);
         setChartLoading(false);
         if (result.syncStatus === 'STALE' || result.syncStatus === 'FAILED') {
@@ -890,9 +894,7 @@ export default function App() {
     const upsertCandle = (candle: Candle) => {
       setCachedSnapshot((current) => {
         if (!current || current.tokenAddress.toLowerCase() !== selectedTokenAddress.toLowerCase() || current.interval !== interval) return current;
-        const byTime = new Map(current.items.map((item) => [item.t, item]));
-        byTime.set(candle.t, chooseNewerCandle(byTime.get(candle.t), candle));
-        return { ...current, items: [...byTime.values()].sort((a, b) => a.t - b.t) };
+        return mergeSnapshots(current,{...current,items:candle.retracted?[]:[candle],retractions:candle.retracted?[{t:candle.t,revision:candle.revision}]:[]});
       });
     };
 
@@ -1490,10 +1492,15 @@ export default function App() {
               </div>
               <span className={Number(selected.change24h) >= 0 ? 'positive' : 'negative'}>{formatPercent(selected.change24h)} / 24h</span>
             </div>
-            <CandleChart key={`${selected.tokenAddress.toLowerCase()}:${selectedMarketKey}:${interval}`} candles={activeSnapshot?.items ?? []} symbol={selected.symbol} refreshing={chartLoading || (!activeSnapshot && !marketError)} historyRetry={marketRetry} onLoadBefore={loadOlderCandles} />
+            <CandleChart key={`${selected.tokenAddress.toLowerCase()}:${selectedMarketKey}:${interval}`} candles={activeSnapshot?.items ?? []} symbol={selected.symbol} refreshing={chartLoading || (!activeSnapshot && !marketError) || Boolean(activeSnapshot && activeSnapshot.items.length === 0 && ['BACKFILLING', 'CATCHING_UP'].includes(activeSnapshot.syncStatus))} historyRetry={marketRetry} onLoadBefore={loadOlderCandles} />
             {(marketError || historyError) && <div className="market-retry" role="alert"><span>{marketError ?? historyError?.message}</span><button type="button" onClick={() => setMarketRetry((value) => value + 1)}>重试</button></div>}
-            {activeSnapshot && ['STALE', 'FAILED'].includes(activeSnapshot.syncStatus)
-              && <div className="chart-availability" role="status">行情暂时不可用，请稍后重试</div>}
+            {activeSnapshot && !marketError && <div className="chart-availability" role="status" aria-label="行情状态">
+              {['STALE', 'FAILED'].includes(activeSnapshot.syncStatus) ? '行情暂时不可用，请稍后重试'
+                : ['BACKFILLING', 'CATCHING_UP'].includes(activeSnapshot.syncStatus) ? '正在同步历史行情'
+                : activeSnapshot.items.length === 0 ? '暂无可用行情' : null}
+              {activeSnapshot.items.length > 0 ? ` 最后可用行情：${new Date(activeSnapshot.items.at(-1)!.t * 1000).toISOString().replace('T', ' ').replace('.000Z', ' UTC')}`
+                : trades.length > 0 ? ` 最新成交：${new Date(trades[0]!.t * 1000).toISOString().replace('T', ' ').replace('.000Z', ' UTC')}` : null}
+            </div>}
             <section className="trade-tape" aria-label="实时成交">
               <header>
                 <strong>实时成交</strong>
@@ -1578,7 +1585,6 @@ export default function App() {
             <dl className="quote-details">
               <div><dt>预计得到</dt><dd>{quote ? `≈ ${readableAmount(quote.expectedAmountOut)} ${side === 'BUY' ? selected?.symbol : asset}` : '等待报价'}</dd></div>
               <div><dt>最低得到</dt><dd>{quote ? `${readableAmount(quote.minAmountOut)} ${side === 'BUY' ? selected?.symbol : asset}` : '等待报价'}</dd></div>
-              <div><dt>路由</dt><dd>{quote?.routeAssets ? quote.routeAssets.map((a) => a.symbol.startsWith('0x') ? `${a.address.slice(0,6)}…${a.address.slice(-4)}` : a.symbol).join(' → ') : selected ? poolLabel(selected.pool.poolType) : '未选择'}</dd></div>
               {quote?.residualAssets?.map((a) => <div key={a.address}><dt>预计保留 {a.symbol}</dt><dd>{readableAmount(a.decimals ? `${a.expectedAmountAtomic.padStart(a.decimals+1,'0').slice(0,-a.decimals)}.${a.expectedAmountAtomic.padStart(a.decimals+1,'0').slice(-a.decimals)}` : a.expectedAmountAtomic)} {a.symbol}</dd></div>)}
               <div><dt>滑点设置</dt><dd><select aria-label="滑点设置" value={slippageBps} onChange={(event) => {
                 setSlippageBps(Number(event.target.value)); resetTradeDraft();

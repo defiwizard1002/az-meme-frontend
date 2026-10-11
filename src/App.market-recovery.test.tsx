@@ -98,6 +98,17 @@ describe('public market resume and sparse retained history through actual App an
   });
   afterEach(() => { cleanup(); setSessionToken(null); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+  it('product recovery removes a corrected singleton from the mounted chart and refuses stale live resurrection',async()=>{
+    await mount();const socket=open(),channel=`candle:${token.tokenAddress}:USD:USDG:1m`;
+    act(()=>socket.receive({channel,epoch:'live',sequence:1,data:{items:[{...candle(1000),revision:'2',retracted:true,history:true,correction:true}]}}));
+    expect(screen.getByTestId('tradingview-chart')).toHaveAttribute('data-candle-count','0');
+    act(()=>socket.receive({channel,epoch:'live',sequence:2,data:{items:[candle(1000)]}}));
+    expect(screen.getByTestId('tradingview-chart')).toHaveAttribute('data-candle-count','0');
+    expect(document.querySelectorAll('.trade-flash')).toHaveLength(0);
+    act(()=>socket.receive({channel,epoch:'live',sequence:3,data:{items:[{...candle(1000),revision:'3'}]}}));
+    expect(screen.getByTestId('tradingview-chart')).toHaveAttribute('data-candle-count','1');
+  });
+
   it.each([{ history: true }, { correction: true }, { history: true, correction: true }])(
     'historical pricing repair: merges flagged trades without flashing (%j)', async (flags) => {
       await mount(); const socket = open();

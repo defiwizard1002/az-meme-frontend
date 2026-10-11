@@ -13,6 +13,14 @@ const snapshot = (items: Candle[], revision = '1'): CandleSnapshot => ({
 });
 
 describe('USD candle snapshot and live batch revision handling', () => {
+  it('product recovery keeps retractions across stale REST/WS pages without resurrecting old bars', () => {
+    const old = snapshot([candle(1, '10'), candle(2, '10')]);
+    const removed = { ...snapshot([], '11'), retractions: [{t:1,revision:'11'}] };
+    const merged = mergeSnapshots(old, removed);
+    expect(merged.items.map(c=>c.t)).toEqual([2]);
+    expect(mergeSnapshots(merged, old).items.map(c=>c.t)).toEqual([2]);
+    expect(mergeSnapshots(merged, snapshot([candle(1,'12')])).items.map(c=>c.t)).toEqual([1,2]);
+  });
   it('upserts a live revision immediately and refuses duplicate or older revisions', () => {
     expect(chooseNewerCandle(candle(1, '18446744073709551600'), candle(1, '18446744073709551601')).revision)
       .toBe('18446744073709551601');

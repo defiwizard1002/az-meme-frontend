@@ -31,6 +31,7 @@ export interface Token {
   };
 }
 export interface Candle {
+  retracted?: true;
   t: number;
   o: string;
   h: string;
@@ -56,6 +57,7 @@ export interface CandleSnapshot {
   asOfBlock: number | null;
   source: 'CHAIN';
   items: Candle[];
+  retractions?: Array<{t:number;revision:string}>;
 }
 
 export interface Trade {

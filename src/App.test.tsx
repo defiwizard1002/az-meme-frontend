@@ -157,7 +157,8 @@ describe('App', () => {
         { symbol: 'BRIDGE', address: `0x${'8'.repeat(40)}`, decimals: 18 }, { symbol: token.symbol, address: token.tokenAddress, decimals: 18 }],
       routePools: [{ poolKey: 'pool-alpha', poolType: 'UNISWAP_V3', liquidityUsd: '10' }, { poolKey: 'pool-beta', poolType: 'UNISWAP_V2', liquidityUsd: '20' }],
     })); });
-    await waitFor(() => expect(document.querySelector('.quote-details')).toHaveTextContent('WETH → BRIDGE → CASHCAT'));
+    await waitFor(() => expect(document.querySelector('.quote-details')).toHaveTextContent('最低得到'));
+    expect(document.querySelector('.quote-details')).not.toHaveTextContent(/BRIDGE|→|路由/);
     expect(document.querySelector('.quote-details')).not.toHaveTextContent('pool-alpha');
     expect(document.querySelector('.quote-details')).not.toHaveTextContent('pool-beta');
     expect(document.querySelector('.quote-details')).toHaveTextContent('最低得到');
