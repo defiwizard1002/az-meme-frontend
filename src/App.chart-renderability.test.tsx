@@ -56,14 +56,13 @@ function renderMarket(items: Candle[], partial: boolean) {
 describe('App candle renderability', () => {
   afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); chart.setData.mockClear(); });
 
-  it('shows the excluded count separately from the historical-partial notice', async () => {
+  it('keeps renderability feedback while hiding historical coverage internals', async () => {
     renderMarket([huge, { ...huge, t: 160, o: '1', h: '2', l: '0.5', c: '1.5' }], true);
 
     const excluded = await screen.findByText('部分 K 线点无法渲染，已排除 1 个');
-    const partial = screen.getByText(/历史 K 线部分缺失/);
+    const partial = screen.queryByText(/历史 K 线部分缺失/);
     expect(excluded).toBeVisible();
-    expect(partial).toBeVisible();
-    expect(excluded).not.toBe(partial);
+    expect(partial).not.toBeInTheDocument();
     expect(screen.getByTestId('tradingview-chart')).toHaveAttribute('data-candle-count', '1');
   });
 

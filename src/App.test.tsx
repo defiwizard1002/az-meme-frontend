@@ -146,7 +146,7 @@ function displayedQuote(): string | null {
 }
 
 describe('App', () => {
-  it('displays the actual quote assets and per-hop pools for selected WETH and submits that quote', async () => {
+  it('displays actual quote assets with hidden pool internals and submits that quote', async () => {
     const { quotes } = renderWithDeferredQuotes({ settlementAssets: ['USDG', 'ETH', 'WETH'] });
     await screen.findByRole('button', { name: '查看 CASHCAT' });
     fireEvent.change(screen.getByLabelText('支付资产'), { target: { value: 'WETH' } });
@@ -158,8 +158,8 @@ describe('App', () => {
       routePools: [{ poolKey: 'pool-alpha', poolType: 'UNISWAP_V3', liquidityUsd: '10' }, { poolKey: 'pool-beta', poolType: 'UNISWAP_V2', liquidityUsd: '20' }],
     })); });
     await waitFor(() => expect(document.querySelector('.quote-details')).toHaveTextContent('WETH → BRIDGE → CASHCAT'));
-    expect(document.querySelector('.quote-details')).toHaveTextContent('pool-alpha');
-    expect(document.querySelector('.quote-details')).toHaveTextContent('pool-beta');
+    expect(document.querySelector('.quote-details')).not.toHaveTextContent('pool-alpha');
+    expect(document.querySelector('.quote-details')).not.toHaveTextContent('pool-beta');
     expect(document.querySelector('.quote-details')).toHaveTextContent('最低得到');
     const fetch = vi.mocked(globalThis.fetch);
     const fallback = fetch.getMockImplementation()!;
@@ -989,7 +989,7 @@ describe('App', () => {
     const target = await screen.findByRole('button', { name: '查看 SECOND' });
     fireEvent.click(target);
 
-    expect(await screen.findByText('SECOND / ETH')).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector('.token-title strong')).toHaveTextContent(/^SECOND$/));
     expect(screen.queryByText('代币详情加载失败')).not.toBeInTheDocument();
   });
 

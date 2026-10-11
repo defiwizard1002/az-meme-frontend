@@ -407,10 +407,10 @@ describe('account bootstrap and selection-scoped pagination', () => {
       : { ...snapshot(tokenA, interval), availability: 'PARTIAL', gaps: [gap] });
     render(<App />);
     await screen.findByLabelText('AAA K 线图');
-    expect(screen.getByRole('status')).toHaveTextContent('历史 K 线部分缺失');
+    expect(screen.queryByText(/历史 K 线部分缺失/)).not.toBeInTheDocument();
     await act(async () => { expect(await chart.current!.onLoadBefore(99)).toEqual({ added: 1, exhausted: false }); });
     expect(chart.current!.candles.map((item) => item.t)).toEqual([50, 100]);
-    expect(screen.getByRole('status')).toHaveTextContent('成交已过保留期');
+    expect(screen.queryByText(/成交已过保留期/)).not.toBeInTheDocument();
   });
 
   it.each([
@@ -705,7 +705,7 @@ describe('hotfix: bounded account bootstrap and empty demand', () => {
     vi.mocked(memeApi.getCandles).mockResolvedValue({ ...snapshot(tokenA, '1m', []), syncStatus, availability: 'PARTIAL' });
     await mount();
     if (syncStatus === 'BACKFILLING') expect(screen.queryByRole('status')).not.toBeInTheDocument();
-    else expect(screen.getByRole('status')).toHaveTextContent('未完整');
+    else expect(screen.queryByRole('status')).not.toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
     const reads = vi.mocked(memeApi.getCandles).mock.calls.length;
     expect(reads).toBe(syncStatus === 'READY' ? 1 : 6);
@@ -714,18 +714,18 @@ describe('hotfix: bounded account bootstrap and empty demand', () => {
     expect(memeApi.getCandles).toHaveBeenCalledTimes(syncStatus === 'READY' ? reads : reads + 2);
   });
 
-  it.each(['STALE', 'FAILED'] as const)('shows %s as a failure with reason and retry with empty or committed candles', async (syncStatus) => {
+  it.each(['STALE', 'FAILED'] as const)('shows %s as an actionable failure and retry with empty or committed candles', async (syncStatus) => {
     setup('MAIN_ACCOUNT_POC');
     vi.mocked(memeApi.getCandles).mockResolvedValueOnce({ ...snapshot(tokenA, '1m', []), syncStatus, availability: 'PARTIAL' })
       .mockResolvedValue({ ...snapshot(tokenA), syncStatus, availability: 'PARTIAL' });
     await mount();
-    expect(screen.getByRole('status')).toHaveTextContent('数据同步失败');
-    expect(screen.getByRole('status')).toHaveTextContent('未提供详细原因');
+    expect(screen.getByRole('status')).toHaveTextContent('行情暂时不可用');
+    expect(screen.getByRole('status')).toHaveTextContent('请稍后重试');
     expect(screen.getByRole('button', { name: '重试' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     await act(async () => {});
     expect(chart.current!.candles).toEqual([candle(100, '11')]);
-    expect(screen.getByRole('status')).toHaveTextContent('数据同步失败');
+    expect(screen.getByRole('status')).toHaveTextContent('行情暂时不可用');
     expect(screen.getByRole('button', { name: '重试' })).toBeEnabled();
   });
 
