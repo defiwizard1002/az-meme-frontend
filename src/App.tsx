@@ -157,12 +157,6 @@ export function relativeAge(timestamp: number, nowSeconds = Math.floor(Date.now(
   return `${Math.floor(elapsed / 86400)}d`;
 }
 
-function quoteLabel(token: Token): string {
-  if (token.quoteAssetKey === 'NATIVE') return 'ETH';
-  if (token.quoteAssetKey === 'OTHER') return token.pool.quoteTokenSymbol ?? 'OTHER';
-  return token.quoteAssetKey;
-}
-
 interface StreamMessage<T> {
   channel: string;
   epoch: string;
@@ -1478,7 +1472,7 @@ export default function App() {
               <div className="token-identity">
                 <TokenMark token={selected} />
                 <div>
-                  <div className="token-title"><strong>{selected.symbol} / {quoteLabel(selected)}</strong><span className={selected.stage === 'GRADUATED' ? 'badge graduated' : 'badge curve'}>{stageLabel(selected)}</span><span className="badge launchpad">{selected.launchpad}</span><span className="badge pool" title={`来源池 ${selected.pool.poolKey}`}>来源池：{poolLabel(selected.pool.poolType)}</span>{quote && <span className="badge executable">当前资产可报价</span>}</div>
+                  <div className="token-title"><strong>{selected.symbol}</strong><span className={selected.stage === 'GRADUATED' ? 'badge graduated' : 'badge curve'}>{stageLabel(selected)}</span><span className="badge launchpad">{selected.launchpad}</span><span className="badge pool">{poolLabel(selected.pool.poolType)}</span>{quote && <span className="badge executable">当前资产可报价</span>}</div>
                   <small>{selected.name} / <CopyableAddress value={selected.tokenAddress} /></small>
                 </div>
               </div>
@@ -1498,13 +1492,8 @@ export default function App() {
             </div>
             <CandleChart key={`${selected.tokenAddress.toLowerCase()}:${selectedMarketKey}:${interval}`} candles={activeSnapshot?.items ?? []} symbol={selected.symbol} refreshing={chartLoading || (!activeSnapshot && !marketError)} historyRetry={marketRetry} onLoadBefore={loadOlderCandles} />
             {(marketError || historyError) && <div className="market-retry" role="alert"><span>{marketError ?? historyError?.message}</span><button type="button" onClick={() => setMarketRetry((value) => value + 1)}>重试</button></div>}
-            {activeSnapshot && activeSnapshot.syncStatus !== 'BACKFILLING' && activeSnapshot.syncStatus !== 'CATCHING_UP'
-              && (activeSnapshot.syncStatus !== 'READY' || activeSnapshot.availability === 'PARTIAL') && <div className="chart-availability" role="status">
-              {activeSnapshot.syncStatus === 'STALE' || activeSnapshot.syncStatus === 'FAILED'
-                ? '数据同步失败，后端未提供详细原因'
-                : `历史 K 线部分缺失：${activeSnapshot.gaps.length ? activeSnapshot.gaps.map((gap) => `${gap.reason === 'EVENT_EXPIRED' ? '成交已过保留期' : '早于扫描起点'} ${new Date(gap.from * 1000).toLocaleString()}–${new Date(gap.to * 1000).toLocaleString()}`).join('；') : '请求区间未完整覆盖，后端未提供缺口明细'}`}
-            </div>}
-            {activeSnapshot?.availability === 'UNAVAILABLE_BEFORE_START' && <div className="chart-availability" role="status">请求区间早于扫描起点，暂无可用 K 线</div>}
+            {activeSnapshot && ['STALE', 'FAILED'].includes(activeSnapshot.syncStatus)
+              && <div className="chart-availability" role="status">行情暂时不可用，请稍后重试</div>}
             <section className="trade-tape" aria-label="实时成交">
               <header>
                 <strong>实时成交</strong>
@@ -1591,9 +1580,10 @@ export default function App() {
               <div><dt>最低得到</dt><dd>{quote ? `${readableAmount(quote.minAmountOut)} ${side === 'BUY' ? selected?.symbol : asset}` : '等待报价'}</dd></div>
               <div><dt>路由</dt><dd>{quote?.routeAssets ? quote.routeAssets.map((a) => a.symbol.startsWith('0x') ? `${a.address.slice(0,6)}…${a.address.slice(-4)}` : a.symbol).join(' → ') : selected ? poolLabel(selected.pool.poolType) : '未选择'}</dd></div>
               {quote?.residualAssets?.map((a) => <div key={a.address}><dt>预计保留 {a.symbol}</dt><dd>{readableAmount(a.decimals ? `${a.expectedAmountAtomic.padStart(a.decimals+1,'0').slice(0,-a.decimals)}.${a.expectedAmountAtomic.padStart(a.decimals+1,'0').slice(-a.decimals)}` : a.expectedAmountAtomic)} {a.symbol}</dd></div>)}
-              {quote?.routePools?.map((pool,index) => <div key={`${index}:${pool.poolKey}`}><dt>第 {index+1} 跳</dt><dd title={`${pool.poolKey} / factory ${pool.factoryAddress ?? ''}`}>{poolLabel(pool.poolType)} · {pool.poolKey.slice(0,10)}…{pool.fee !== undefined ? ` · fee ${pool.fee}` : ''}</dd></div>)}
-              {quote?.routePools && quote.routePools.length > 1 && <div><dt>执行方式</dt><dd>逐跳独立交易，后跳失败可能部分完成</dd></div>}
-              <div><dt>{quote?.routePools && quote.routePools.length > 1 ? '每跳滑点上限' : '滑点上限'}</dt><dd>{(slippageBps / 100).toFixed(slippageBps % 100 === 0 ? 0 : 2)}%</dd></div>
+              <div><dt>交易滑点上限</dt><dd><select aria-label="交易滑点上限" value={slippageBps} onChange={(event) => {
+                setSlippageBps(Number(event.target.value)); resetTradeDraft();
+              }}>{[...new Set([50,100,300,500,1000,3000,slippageBps])].sort((a,b)=>a-b).map((bps) =>
+                <option key={bps} value={bps}>{bps / 100}%</option>)}</select></dd></div>
               <div className="security-row"><dt>安全</dt><dd>{safety.map((item) => <span className={`security-${item.tone}`} key={item.text}>{item.text}</span>)}</dd></div>
             </dl>
             <button type="button" className="primary" disabled={!accountAvailable || !selected || !quoteRequest || !quote || Boolean(orderState) || (side === 'SELL' && Number(currentBalance) <= 0)} onClick={submitOrder}>
