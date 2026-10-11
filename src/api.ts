@@ -30,6 +30,10 @@ async function readEnvelope<T>(response: Response, prefix: 'MEME' | 'AZ'): Promi
     throw new ApiError(`${prefix}_${response.ok ? 'INVALID_RESPONSE' : 'REQUEST_FAILED'}`,
       `HTTP ${response.status}: 服务响应读取中断，请检查连接后重试`, response.status);
   }
+  if (prefix === 'MEME' && response.status === 403 && text.trim() === 'Signing is available only on the private account entry') {
+    throw new ApiError('MEME_PRIVATE_ACCOUNT_ENTRY_REQUIRED',
+      '当前为公开行情入口，报价和交易请使用私有主账户入口（Tailscale / 私网）', response.status);
+  }
   let payload: Partial<Envelope<T>> | null = null;
   try {
     const parsed: unknown = JSON.parse(text);
@@ -155,7 +159,8 @@ export const memeApi = {
     clientExecutionId: string;
     side: 'BUY' | 'SELL';
     tokenAddress: string;
-    settlementAsset: 'USDG' | 'ETH' | 'USDC';
+    settlementAsset: 'USDG' | 'ETH' | 'WETH' | 'USDC';
+    quoteId: string;
     amountIn: string;
     slippageBps: number;
   }) => request<AccountTransaction>('/sapi/v1/meme/account/transactions', {
@@ -170,7 +175,9 @@ export const memeApi = {
   getOrder: (orderId: string) => request<Order>(`/sapi/v1/meme/orders/${orderId}`),
   getWsTicket: (signal?: AbortSignal, publicMarket = false) => (publicMarket ? requestPublicMarket : request)<{ ticket: string; expiresAt: number }>(
     '/sapi/v1/meme/ws-ticket', { method: 'POST', signal }),
-  planTrade: (input: { side: 'BUY' | 'SELL'; tokenAddress: string; settlementAsset?: 'USDG' | 'ETH' | 'USDC'; amountIn: string; slippageBps: number; simulate: boolean }) =>
+  planAssetConversion: (input: {assetIn:'USDG'|'ETH'|'WETH'|'USDC';assetOut:'USDG'|'ETH'|'WETH'|'USDC';amountIn:string;slippageBps:number;simulate:boolean}) =>
+    request<TradePlan>('/sapi/v1/meme/transactions/conversion/plan',{method:'POST',body:JSON.stringify(input)}),
+  planTrade: (input: { side: 'BUY' | 'SELL'; tokenAddress: string; quoteId?: string; settlementAsset?: 'USDG' | 'ETH' | 'WETH' | 'USDC'; amountIn: string; slippageBps: number; simulate: boolean }) =>
     request<TradePlan>('/sapi/v1/meme/transactions/plan', { method: 'POST', body: JSON.stringify(input) }),
 };
 

@@ -2,6 +2,25 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, azAuth, memeApi, setSessionToken } from './api';
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); setSessionToken(null); });
 describe('HTTP envelopes', () => {
+  it('identifies the exact public gateway denial without retrying the quote POST', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response('Signing is available only on the private account entry\n', { status: 403, headers: { 'content-type': 'text/plain' } }));
+    vi.stubGlobal('fetch', fetch);
+    await expect(memeApi.createQuote({ side: 'BUY', tokenAddress: 'token', settlementAsset: 'USDG', amountIn: '1', slippageBps: 300 })).rejects.toMatchObject({
+      status: 403, code: 'MEME_PRIVATE_ACCOUNT_ENTRY_REQUIRED', message: expect.stringContaining('报价和交易请使用私有主账户入口'),
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0]![1].method).toBe('POST');
+  });
+  it.each(['Forbidden', 'Signing is available only on the private account entry: unrelated', '{"rc":403,"mc":"MEME_FORBIDDEN","ma":["Denied"],"result":null}'])('does not relabel an unrelated 403: %s', async (body) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status: 403 })));
+    await expect(memeApi.createQuote({ side: 'BUY', tokenAddress: 'token', settlementAsset: 'USDG', amountIn: '1', slippageBps: 300 })).rejects.toMatchObject({
+      status: 403, code: body.startsWith('{') ? 'MEME_FORBIDDEN' : 'MEME_REQUEST_FAILED',
+    });
+  });
+  it('retains the private unsupported-pool 409 as an explicit failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ rc: 409, mc: 'MEME_UNSUPPORTED_POOL_TYPE', ma: ['Unsupported pool'], result: null }), { status: 409 })));
+    await expect(memeApi.createQuote({ side: 'BUY', tokenAddress: 'token', settlementAsset: 'USDG', amountIn: '1', slippageBps: 300 })).rejects.toEqual(new ApiError('MEME_UNSUPPORTED_POOL_TYPE', 'Unsupported pool', 409));
+  });
   it('keeps public market reads and recovery tickets free of stale account credentials', async () => {
     const fetch = vi.fn(async (_input: string, _init: RequestInit) => new Response(JSON.stringify({ rc: 0, result: {} })));
     vi.stubGlobal('fetch', fetch); setSessionToken('stale-account-session');
@@ -143,7 +162,7 @@ describe('bounded HTTP requests', () => {
     vi.stubGlobal('fetch', fetch);
     let failure: unknown;
     void memeApi.executeMainAccountTrade({ clientExecutionId: 'same-id', side: 'BUY', tokenAddress: 'token',
-      settlementAsset: 'USDG', amountIn: '1', slippageBps: 300 }).catch((cause) => { failure = cause; });
+      settlementAsset: 'USDG', quoteId:'confirmed-quote', amountIn: '1', slippageBps: 300 }).catch((cause) => { failure = cause; });
     await vi.advanceTimersByTimeAsync(60_000);
     expect(failure).toMatchObject({ code: 'MEME_REQUEST_TIMEOUT', message: expect.stringContaining('可能已广播') });
     expect(fetch).toHaveBeenCalledTimes(1);

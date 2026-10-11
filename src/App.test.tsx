@@ -103,7 +103,7 @@ class ControlledQuoteSocket {
   }
 }
 
-function renderWithDeferredQuotes() {
+function renderWithDeferredQuotes(options: { settlementAssets?: string[] } = {}) {
   const quotes: Array<{ input: ReturnType<typeof quoteResult>; signal: AbortSignal | undefined; resolve: (value: Response) => void }> = [];
   ControlledQuoteSocket.latest = null;
   vi.stubGlobal('WebSocket', ControlledQuoteSocket);
@@ -117,7 +117,7 @@ function renderWithDeferredQuotes() {
       marketRefreshMs: { hot: 14_400_000, new: 300_000 },
       accountMode: 'MAIN_ACCOUNT_POC',
       mainAccountAddress: '0x9999999999999999999999999999999999999999',
-      settlementAssets: ['USDG', 'ETH'],
+      settlementAssets: options.settlementAssets ?? ['USDG', 'ETH'],
     });
     if (url.includes('/markets')) return response({ items: [token], stale: false });
     if (url.endsWith(`/tokens/${token.tokenAddress}`)) return response(token);
@@ -146,6 +146,179 @@ function displayedQuote(): string | null {
 }
 
 describe('App', () => {
+  it('displays the actual quote assets and per-hop pools for selected WETH and submits that quote', async () => {
+    const { quotes } = renderWithDeferredQuotes({ settlementAssets: ['USDG', 'ETH', 'WETH'] });
+    await screen.findByRole('button', { name: '查看 CASHCAT' });
+    fireEvent.change(screen.getByLabelText('支付资产'), { target: { value: 'WETH' } });
+    await waitFor(() => expect(quotes.at(-1)?.input.settlementAsset).toBe('WETH'));
+    const current = quotes.at(-1)!;
+    await act(async () => { current.resolve(await response({ ...current.input,
+      routeAssets: [{ symbol: 'WETH', address: `0x${'9'.repeat(40)}`, decimals: 18 },
+        { symbol: 'BRIDGE', address: `0x${'8'.repeat(40)}`, decimals: 18 }, { symbol: token.symbol, address: token.tokenAddress, decimals: 18 }],
+      routePools: [{ poolKey: 'pool-alpha', poolType: 'UNISWAP_V3', liquidityUsd: '10' }, { poolKey: 'pool-beta', poolType: 'UNISWAP_V2', liquidityUsd: '20' }],
+    })); });
+    await waitFor(() => expect(document.querySelector('.quote-details')).toHaveTextContent('WETH → BRIDGE → CASHCAT'));
+    expect(document.querySelector('.quote-details')).toHaveTextContent('pool-alpha');
+    expect(document.querySelector('.quote-details')).toHaveTextContent('pool-beta');
+    expect(document.querySelector('.quote-details')).toHaveTextContent('最低得到');
+    const fetch = vi.mocked(globalThis.fetch);
+    const fallback = fetch.getMockImplementation()!;
+    fetch.mockImplementation((input, init) => String(input).endsWith('/account/transactions')
+      ? response({ executionId: 'test', tokenAddress: token.tokenAddress, tokenSymbol: token.symbol, side: 'BUY', settlementAsset: 'WETH',
+        amountIn: '1', amountOut: null, status: 'FAILED', txHashes: [], errorMessage: 'test', createdAt: 1, updatedAt: 1 })
+      : String(input).endsWith('/account/transactions/test') ? response({ status: 'FAILED', txHashes: [], executionId: 'test' }) : fallback(input, init));
+    fireEvent.click(document.querySelector('button.primary')!);
+    await waitFor(() => expect(fetch.mock.calls.some(([input, init]) => String(input).endsWith('/account/transactions')
+      && JSON.parse(String(init?.body)).settlementAsset === 'WETH' && JSON.parse(String(init?.body)).quoteId === 'rest-quote')).toBe(true));
+  });
+  it('shows the converted ETH quote amount and explicitly retained WETH',async()=>{
+    const {quotes}=renderWithDeferredQuotes({settlementAssets:['USDG','ETH','WETH']});
+    await screen.findByRole('button',{name:'查看 CASHCAT'});
+    fireEvent.click(screen.getByRole('button',{name:'卖出'}));
+    fireEvent.change(screen.getByLabelText('结算资产'),{target:{value:'ETH'}});
+    fireEvent.change(screen.getByLabelText('卖出数量'),{target:{value:'1'}});
+    await waitFor(()=>expect(quotes.at(-1)?.input.settlementAsset).toBe('ETH'));
+    const current=quotes.at(-1)!;
+    await act(async()=>{current.resolve(await response({...current.input,expectedAmountOut:'1.94',minAmountOut:'1.94',
+      residualAssets:[{address:`0x${'9'.repeat(40)}`,symbol:'WETH',decimals:18,expectedAmountAtomic:'60000000000000000'}]}));});
+    await waitFor(()=>expect(document.querySelector('.quote-details')).toHaveTextContent('1.94 ETH'));
+    expect(document.querySelector('.quote-details')).toHaveTextContent('预计保留 WETH');
+    expect(document.querySelector('.quote-details')).toHaveTextContent('0.06 WETH');
+  });
+  it('shows 1h search volume and keeps the hot/new 24h change column', async () => {
+    renderWithDeferredQuotes();
+    await screen.findByRole('button', { name: '查看 CASHCAT' });
+    expect(document.querySelector('.token-head')).toHaveTextContent('24h');
+    const fetch = vi.mocked(globalThis.fetch);
+    const fallback = fetch.getMockImplementation()!;
+    fetch.mockImplementation((input, init) => String(input).includes('query=')
+      ? response({ items: [{ ...token, volume1hUsd: '1234.56' }], stale: false }) : fallback(input, init));
+    fireEvent.change(screen.getByPlaceholderText('搜索代币或粘贴合约地址'), { target: { value: 'CASHCAT' } });
+    await waitFor(() => expect(document.querySelector('.token-head')).toHaveTextContent('1h 量'));
+    await waitFor(() => expect(document.querySelector('.token-row')).toHaveTextContent('$1,234.56'));
+    expect(document.querySelector('.token-row')).not.toHaveTextContent('+88.00%');
+    fireEvent.change(screen.getByPlaceholderText('搜索代币或粘贴合约地址'), { target: { value: '' } });
+    expect(document.querySelector('.token-head')).toHaveTextContent('24h');
+    expect(document.querySelector('.token-row')).toHaveTextContent('+88.00%');
+  });
+
+  it.each([undefined, '0', '9876.54'])('preserves search snapshot 1h volume after selecting a result with detail volume %j', async (volume1hUsd) => {
+    renderWithDeferredQuotes();
+    await screen.findByRole('button', { name: '查看 CASHCAT' });
+    const summary = { ...token, tokenAddress: `0x${'2'.repeat(40)}`, symbol: 'SNAPSHOT', volume1hUsd: '1234.56' };
+    const fetch = vi.mocked(globalThis.fetch);
+    const fallback = fetch.getMockImplementation()!;
+    let resolveDetail!: (value: Response) => void;
+    fetch.mockImplementation((input, init) => String(input).includes('query=')
+      ? response({ items: [summary], stale: false })
+      : String(input).endsWith(`/tokens/${summary.tokenAddress}`)
+        ? new Promise<Response>((resolve) => { resolveDetail = resolve; }) : fallback(input, init));
+    fireEvent.change(screen.getByPlaceholderText('搜索代币或粘贴合约地址'), { target: { value: 'SNAPSHOT' } });
+    const row = await screen.findByRole('button', { name: '查看 SNAPSHOT' });
+    expect(row).toHaveTextContent('$1,234.56');
+    fireEvent.click(row);
+    await waitFor(() => expect(resolveDetail).toBeTypeOf('function'));
+    await act(async () => { resolveDetail(await response({ ...summary, symbol: 'DETAIL', priceUsd: '2.5', marketCapUsd: '2500000', volume1hUsd })); });
+    const updatedRow = await screen.findByRole('button', { name: '查看 DETAIL' });
+    expect(updatedRow).toHaveTextContent('$2.5M');
+    expect(updatedRow).toHaveTextContent('$1,234.56');
+    expect(screen.getByRole('button', { name: '买入 DETAIL' })).toBeInTheDocument();
+    expect(fetch.mock.calls.filter(([input]) => String(input).endsWith(`/tokens/${summary.tokenAddress}`))).toHaveLength(1);
+  });
+
+  it.each([undefined, '0', '9876.54'])('preserves search snapshot 1h volume after markets:live with volume %j', async (volume1hUsd) => {
+    renderWithDeferredQuotes();
+    await waitFor(() => expect(ControlledQuoteSocket.latest).not.toBeNull());
+    const socket = ControlledQuoteSocket.latest!;
+    act(() => socket.open());
+    await waitFor(() => expect(socket.sent.some((payload) =>
+      (JSON.parse(payload) as { channels: string[] }).channels.includes('markets:live'))).toBe(true));
+    const fetch = vi.mocked(globalThis.fetch);
+    const fallback = fetch.getMockImplementation()!;
+    fetch.mockImplementation((input, init) => String(input).includes('query=')
+      ? response({ items: [{ ...token, volume1hUsd: '1234.56' }], stale: false }) : fallback(input, init));
+    fireEvent.change(screen.getByPlaceholderText('搜索代币或粘贴合约地址'), { target: { value: 'CASHCAT' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: '查看 CASHCAT' })).toHaveTextContent('$1,234.56'));
+    const detailCallsBefore = fetch.mock.calls.filter(([input]) => String(input).includes('/tokens/')).length;
+    act(() => socket.receive({ channel: 'markets:live', epoch: 'snapshot-test', sequence: 1,
+      data: { items: [{ ...token, symbol: 'LIVE', priceUsd: '3.5', marketCapUsd: '3500000', change24h: '12', volume1hUsd }] } }));
+    const updatedRow = await screen.findByRole('button', { name: '查看 LIVE' });
+    expect(updatedRow).toHaveTextContent('$3.5M');
+    expect(updatedRow).toHaveTextContent('$1,234.56');
+    expect(fetch.mock.calls.filter(([input]) => String(input).includes('/tokens/'))).toHaveLength(detailCallsBefore);
+    fireEvent.change(screen.getByPlaceholderText('搜索代币或粘贴合约地址'), { target: { value: '' } });
+    expect(screen.getByRole('button', { name: '查看 LIVE' })).toHaveTextContent('+12.00%');
+  });
+
+  it.each([undefined, null, 'invalid'])('shows unknown search volume %j as unavailable instead of substituting 24h or zero', async (volume1hUsd) => {
+    renderWithDeferredQuotes();
+    await screen.findByRole('button', { name: '查看 CASHCAT' });
+    const fetch = vi.mocked(globalThis.fetch);
+    const fallback = fetch.getMockImplementation()!;
+    fetch.mockImplementation((input, init) => String(input).includes('query=') ? response({ items: [{ ...token, volume1hUsd }], stale: false }) : fallback(input, init));
+    fireEvent.change(screen.getByPlaceholderText('搜索代币或粘贴合约地址'), { target: { value: 'CASHCAT' } });
+    await waitFor(() => expect(document.querySelector('.token-head')).toHaveTextContent('1h 量'));
+    await waitFor(() => expect(fetch.mock.calls.some(([input]) => String(input).includes('query='))).toBe(true));
+    expect(screen.getByRole('button', { name: '查看 CASHCAT' })).toHaveTextContent('—');
+    expect(screen.getByRole('button', { name: '查看 CASHCAT' })).not.toHaveTextContent('$0');
+  });
+
+  it('ignores stale search results and retains the latest empty state', async () => {
+    renderWithDeferredQuotes();
+    await screen.findByRole('button', { name: '查看 CASHCAT' });
+    const pending: Array<(response: Response) => void> = [];
+    const fetch = vi.mocked(globalThis.fetch);
+    const fallback = fetch.getMockImplementation()!;
+    fetch.mockImplementation((input, init) => String(input).includes('query=') ? new Promise<Response>((resolve) => { pending.push(resolve); }) : fallback(input, init));
+    const search = screen.getByPlaceholderText('搜索代币或粘贴合约地址');
+    fireEvent.change(search, { target: { value: 'old' } });
+    await waitFor(() => expect(pending).toHaveLength(1));
+    fireEvent.change(search, { target: { value: 'latest' } });
+    await waitFor(() => expect(pending).toHaveLength(2));
+    await act(async () => { pending[1]!(await response({ items: [], stale: false })); });
+    await act(async () => { pending[0]!(await response({ items: [{ ...token, volume1hUsd: '1' }], stale: false })); });
+    expect(screen.getByText('没有匹配的代币')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '查看 CASHCAT' })).not.toBeInTheDocument();
+  });
+
+  it('explains the public quote denial, clears it on request change and ignores a late denial', async () => {
+    const { quotes } = renderWithDeferredQuotes();
+    await waitFor(() => expect(quotes).toHaveLength(1));
+    const denial = () => new Response('Signing is available only on the private account entry', { status: 403 });
+    await act(async () => { quotes[0]!.resolve(denial()); });
+    expect(await screen.findByRole('alert')).toHaveTextContent('报价和交易请使用私有主账户入口');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('登录已失效');
+    expect(document.querySelector('.trade-panel .primary')).toBeDisabled();
+    expect(quotes).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText('买入金额'), { target: { value: '2' } });
+    await waitFor(() => expect(quotes).toHaveLength(2));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('买入金额'), { target: { value: '3' } });
+    await waitFor(() => expect(quotes).toHaveLength(3));
+    await act(async () => { quotes[2]!.resolve(await response({ ...quotes[2]!.input, expectedAmountOut: '300' })); });
+    await act(async () => { quotes[1]!.resolve(denial()); });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(displayedQuote()).toBe('≈ 300 CASHCAT');
+    expect(vi.mocked(globalThis.fetch).mock.calls.some(([url, init]) => init?.method === 'POST' && /\/orders$|\/account\/transactions$|\/transactions\/plan$/.test(String(url)))).toBe(false);
+  });
+
+  it('keeps private unsupported-pool quotes blocked and clears their error when the token changes', async () => {
+    const { quotes } = renderWithDeferredQuotes();
+    await waitFor(() => expect(quotes).toHaveLength(1));
+    await act(async () => { quotes[0]!.resolve(new Response(JSON.stringify({ rc: 409, mc: 'MEME_UNSUPPORTED_POOL_TYPE', ma: ['Unsupported pool'], result: null }), { status: 409 })); });
+    expect(await screen.findByRole('alert')).toHaveTextContent('当前池暂不支持交易');
+    expect(document.querySelector('.trade-panel .primary')).toBeDisabled();
+    const second = { ...token, tokenAddress: `0x${'2'.repeat(40)}`, symbol: 'SECOND', volume1hUsd: '2' };
+    const fetch = vi.mocked(globalThis.fetch);
+    const fallback = fetch.getMockImplementation()!;
+    fetch.mockImplementation((input, init) => String(input).includes('query=') ? response({ items: [second], stale: false })
+      : String(input).endsWith(`/tokens/${second.tokenAddress}`) ? response(second) : fallback(input, init));
+    fireEvent.change(screen.getByPlaceholderText('搜索代币或粘贴合约地址'), { target: { value: 'SECOND' } });
+    fireEvent.click(await screen.findByRole('button', { name: '查看 SECOND' }));
+    await waitFor(() => expect(quotes).toHaveLength(2));
+    expect(quotes[1]!.input.tokenAddress).toBe(second.tokenAddress);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
   it('retries an empty HTTP account failure and restores the account session', async () => {
     renderWithDeferredQuotes();
     const fetch = vi.mocked(globalThis.fetch);

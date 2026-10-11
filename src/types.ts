@@ -1,5 +1,5 @@
 export type Interval = '1s' | '1m' | '15m' | '1h' | '4h';
-export type Asset = 'ETH' | 'USDC' | 'USDT' | 'USDG';
+export type Asset = 'WETH' | 'ETH' | 'USDC' | 'USDT' | 'USDG';
 
 export interface Token {
   chainId: number;
@@ -12,6 +12,7 @@ export interface Token {
   priceQuote: string;
   priceUsd: string;
   marketCapUsd: string;
+  volume1hUsd?: string;
   volume24hUsd: string;
   change5m: string;
   change24h: string;
@@ -91,6 +92,11 @@ export interface Quote {
   expectedAmountOut: string;
   minAmountOut: string;
   settlementAsset: Asset;
+  executionMode?: 'DIRECT_ETH' | 'PLATFORM_ETH_INVENTORY' | 'MAIN_ACCOUNT';
+  residualAssets?: Array<{address:string;symbol:string;decimals:number;expectedAmountAtomic:string}>;
+  routeAssets?: Array<{address:string;symbol:string;decimals:number}>;
+  routePools?: Array<{poolKey:string;poolType:string;liquidityUsd:string;fee?:number;factoryAddress?:string}>;
+  routeFingerprint?: string;
   fees: Array<{ type: string; asset: Asset; amount: string; estimated: boolean }>;
   expiresAt: number;
 }
@@ -107,10 +113,11 @@ export interface AccountTransaction {
   tokenAddress: string;
   tokenSymbol: string;
   side: 'BUY' | 'SELL';
-  settlementAsset: 'USDG' | 'ETH' | 'USDC';
+  settlementAsset: 'USDG' | 'ETH' | 'WETH' | 'USDC';
   amountIn: string;
   amountOut: string | null;
-  status: 'PENDING' | 'CONFIRMED' | 'FAILED' | 'SUBMISSION_UNKNOWN';
+  status: 'PENDING' | 'CONFIRMED' | 'FAILED' | 'PARTIAL' | 'SUBMISSION_UNKNOWN';
+  confirmedSteps?: Array<{stepIndex:number;kind:string;txHash:string}>;
   txHashes: string[];
   errorMessage: string | null;
   createdAt: number;
@@ -118,7 +125,10 @@ export interface AccountTransaction {
 }
 
 export interface TradePlan {
-  route: 'DIRECT' | 'USDG_BRIDGE' | 'SETTLEMENT_BRIDGE';
+  route: 'MULTI_HOP' | 'DIRECT' | 'USDG_BRIDGE' | 'SETTLEMENT_BRIDGE';
   selectedPool: { poolType: string; liquidityUsd: string; quoteTokenSymbol?: string };
+  routeAssets?: Quote['routeAssets'];
+  routePools?: Quote['routePools'];
+  routeFingerprint?: string;
   simulation?: { status: 'SUCCESS'; bufferedGas: string; estimatedFeeWei: string };
 }
