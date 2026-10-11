@@ -1580,12 +1580,14 @@ export default function App() {
               <div><dt>最低得到</dt><dd>{quote ? `${readableAmount(quote.minAmountOut)} ${side === 'BUY' ? selected?.symbol : asset}` : '等待报价'}</dd></div>
               <div><dt>路由</dt><dd>{quote?.routeAssets ? quote.routeAssets.map((a) => a.symbol.startsWith('0x') ? `${a.address.slice(0,6)}…${a.address.slice(-4)}` : a.symbol).join(' → ') : selected ? poolLabel(selected.pool.poolType) : '未选择'}</dd></div>
               {quote?.residualAssets?.map((a) => <div key={a.address}><dt>预计保留 {a.symbol}</dt><dd>{readableAmount(a.decimals ? `${a.expectedAmountAtomic.padStart(a.decimals+1,'0').slice(0,-a.decimals)}.${a.expectedAmountAtomic.padStart(a.decimals+1,'0').slice(-a.decimals)}` : a.expectedAmountAtomic)} {a.symbol}</dd></div>)}
-              <div><dt>交易滑点上限</dt><dd><select aria-label="交易滑点上限" value={slippageBps} onChange={(event) => {
+              <div><dt>滑点设置</dt><dd><select aria-label="滑点设置" value={slippageBps} onChange={(event) => {
                 setSlippageBps(Number(event.target.value)); resetTradeDraft();
               }}>{[...new Set([50,100,300,500,1000,3000,slippageBps])].sort((a,b)=>a-b).map((bps) =>
                 <option key={bps} value={bps}>{bps / 100}%</option>)}</select></dd></div>
               <div className="security-row"><dt>安全</dt><dd>{safety.map((item) => <span className={`security-${item.tone}`} key={item.text}>{item.text}</span>)}</dd></div>
             </dl>
+            {quote?.routePools && quote.routePools.length > 1 && <p className="trade-risk" role="note">交易可能分步完成；中途失败时，已成交部分不会撤销。</p>}
+            <p className="trade-risk" role="note">拆分执行时，累计滑点可能高于所设值；最终以最低得到为准。</p>
             <button type="button" className="primary" disabled={!accountAvailable || !selected || !quoteRequest || !quote || Boolean(orderState) || (side === 'SELL' && Number(currentBalance) <= 0)} onClick={submitOrder}>
               {accountError ? '账户连接失败' : !sessionReady ? accountMode === 'MAIN_ACCOUNT_POC' ? '等待主账户' : '等待登录' : orderState ?? (side === 'BUY' ? '买入' : '卖出')}
             </button>
