@@ -582,4 +582,57 @@ describe('public market resume and sparse retained history through actual App an
     expect(screen.getByTestId('tradingview-chart')).toBe(canvas);
     expect(engine.create).toHaveBeenCalledTimes(2); expect(engine.fit).toHaveBeenCalledTimes(2);
   });
+  it('owns older-history timeouts locally and clears them after retry without account disconnection', async () => {
+    let reads=0;
+    candles=async(url)=>{
+      const interval=url.searchParams.get('interval') as '1s';
+      if(!url.searchParams.has('to'))return envelope(snapshot(token.tokenAddress,interval,[candle(1000),candle(1050),candle(1100)]));
+      if(++reads===1)throw new Error('history body timeout');
+      return envelope(snapshot(token.tokenAddress,interval,Array.from({length:40},(_,i)=>candle(900+i))));
+    };
+    await mount();fireEvent.click(screen.getByRole('button',{name:'1s'}));await act(async()=>{});await advance(500);
+    expect(screen.getByRole('alert')).toHaveTextContent('更早行情加载失败');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('账户请求失败');
+    expect(screen.getByText('主账户已连接')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'重试'}));await act(async()=>{});await advance(500);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+  it('ends empty earlier coverage during catchup and does not spin forever', async () => {
+    candles=async(url)=>envelope(url.searchParams.has('to')
+      ? {...snapshot(token.tokenAddress,'1s',[]),syncStatus:'CATCHING_UP',availability:'UNAVAILABLE_BEFORE_START'}
+      : snapshot(token.tokenAddress,url.searchParams.get('interval') as '1s',[candle(1000),candle(1050),candle(1100)]));
+    await mount();fireEvent.click(screen.getByRole('button',{name:'1s'}));await act(async()=>{});await advance(500);
+    const reads=calls('/candles').filter(([u])=>new URL(String(u)).searchParams.has('to')).length;
+    await advance(30000);
+    expect(calls('/candles').filter(([u])=>new URL(String(u)).searchParams.has('to'))).toHaveLength(reads);
+    expect(screen.getByRole('figure')).toHaveAttribute('aria-busy','false');
+  });
+
+  it('ends canceled history loading on interval change and ignores its late failure', async () => {
+    const gate = deferred<Response>();
+    let oldSignal: AbortSignal | undefined;
+    candles = async (url, signal) => {
+      if (url.searchParams.has('to') && url.searchParams.get('interval') === '1s') {
+        oldSignal = signal;
+        return gate.promise;
+      }
+      return envelope(snapshot(token.tokenAddress, url.searchParams.get('interval') as '1s',
+        Array.from({ length: 40 }, (_, i) => candle(1000 + i))));
+    };
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: '1s' }));
+    await act(async () => {});
+    fireEvent.pointerDown(screen.getByTestId('tradingview-chart'));
+    act(() => engine.visible?.({ from: -5, to: 25 }));
+    await advance(500);
+    expect(screen.getByRole('figure')).toHaveAttribute('aria-busy', 'true');
+    expect(document.querySelectorAll('.history-loading-dots span')).toHaveLength(3);
+    fireEvent.click(screen.getByRole('button', { name: '15m' }));
+    await act(async () => {});
+    expect(oldSignal?.aborted).toBe(true);
+    await act(async () => gate.resolve(new Response('late failure', { status: 500 })));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('figure')).toHaveAttribute('aria-busy', 'false');
+  });
+
 });

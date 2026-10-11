@@ -383,7 +383,7 @@ export function CandleChart({ candles, symbol, refreshing = false, historyRetry 
   }, [data]);
 
   return (
-    <figure className="chart" aria-label={`${symbol} K 线图`}>
+    <figure className="chart" aria-label={`${symbol} K 线图`} aria-busy={historyLoading || refreshing}>
       <div
         ref={containerRef}
         className="chart-canvas"
@@ -402,7 +402,8 @@ export function CandleChart({ candles, symbol, refreshing = false, historyRetry 
         className="history-loading"
         role="status"
         aria-label={historyLoading ? '正在加载更早行情' : '正在加载行情'}
-      ><span /><span /><span /></div>}
+        aria-live="polite"
+      ><div className="history-loading-dots"><span /><span /><span /></div></div>}
     </figure>
   );
 }

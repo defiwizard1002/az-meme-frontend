@@ -425,6 +425,7 @@ describe('account bootstrap and selection-scoped pagination', () => {
       ? gate.promise : original(address, interval, options));
     render(<App />);
     await screen.findByLabelText('AAA K 线图');
+    await waitFor(() => expect(chart.current!.candles.map((item) => item.t)).toEqual([100]));
     let loading!: Promise<HistoryLoadResult>;
     act(() => { loading = chart.current!.onLoadBefore(99); });
     expect(memeApi.getCandles).toHaveBeenLastCalledWith(tokenA.tokenAddress, '1m', { to: 99, limit: 300, signal: expect.any(AbortSignal) });

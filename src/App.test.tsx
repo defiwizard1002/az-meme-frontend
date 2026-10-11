@@ -127,7 +127,7 @@ function renderWithDeferredQuotes(options: { settlementAssets?: string[] } = {})
     if (url.endsWith('/ws-ticket')) return response({ ticket: 'test-ticket', expiresAt: Date.now() + 30_000 });
     if (url.includes('/trades?')) return response({ items: [], nextCursor: null });
     if (url.includes('/candles')) return response({
-      chainId: 4663, tokenAddress: token.tokenAddress, interval: '1m', source: 'CHAIN',
+      chainId: 4663, tokenAddress: new URL(url).pathname.split('/').at(-2), interval: new URL(url).searchParams.get('interval') ?? '1m', source: 'CHAIN',
       items: [{ t: 1, o: '0.018', h: '0.019', l: '0.017', c: '0.0184', baseVolume: null, quoteVolume: null }],
     });
     if (url.endsWith('/quotes')) {

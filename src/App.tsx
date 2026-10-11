@@ -99,7 +99,7 @@ function CopyableAddress({ value, iconOnly = false }: { value: string; iconOnly?
 }
 
 function poolLabel(poolType: string): string {
-  return poolType.replaceAll('_', ' ');
+  return poolType === 'UNSUPPORTED' ? '协议未知' : poolType.replaceAll('_', ' ');
 }
 
 function stageLabel(token: Token): string {
@@ -354,6 +354,8 @@ export default function App() {
   const [marketRetry, setMarketRetry] = useState(0);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [accountError, setAccountError] = useState<string | null>(null);
+  const [transactionRefreshError, setTransactionRefreshError] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<{ owner: object; message: string } | null>(null);
   const [accountOriginIssue, setAccountOriginIssue] = useState(false);
   const [accountRetry, setAccountRetry] = useState(0);
   const [errorState, setErrorState] = useState<{ message: string; owner?: object } | null>(null);
@@ -592,7 +594,7 @@ export default function App() {
     let active = true;
     let refreshing = false;
     const refresh = async () => {
-      if (refreshing) return;
+      if (refreshing || document.visibilityState === 'hidden') return;
       refreshing = true;
       try {
         const result = await memeApi.getMarkets(discoveryTab);
@@ -706,6 +708,7 @@ export default function App() {
     setSessionReady(false);
     setAccount(null);
     setAccountTransactions([]);
+    setTransactionRefreshError(null);
     setAccountError(null);
     setAccountOriginIssue(false);
     const login = accountMode === 'MAIN_ACCOUNT_POC' ? Promise.resolve() : azAuth.loginMock(controller.signal).then(() => undefined);
@@ -751,12 +754,12 @@ export default function App() {
     const controller = new AbortController();
     let refreshing = false;
     const timer = window.setInterval(() => {
-      if (refreshing) return;
+      if (refreshing || document.visibilityState === 'hidden') return;
       refreshing = true;
       void memeApi.getAccountTransactions(controller.signal)
-        .then(({ items }) => { if (!controller.signal.aborted) setAccountTransactions(items); })
+        .then(({ items }) => { if (!controller.signal.aborted) { setAccountTransactions(items); setTransactionRefreshError(null); } })
         .catch((cause: unknown) => {
-          if (!controller.signal.aborted) { setSessionReady(false); setAccountError(friendlyError(cause, '交易记录刷新失败')); }
+          if (!controller.signal.aborted) setTransactionRefreshError(friendlyError(cause, '交易记录刷新失败'));
         })
         .finally(() => { refreshing = false; });
     }, 5_000);
@@ -775,6 +778,7 @@ export default function App() {
     const cacheKey = candleCacheKey(selectedTokenAddress, interval);
     const scope: NonNullable<typeof candleHistoryScopeRef.current> = { key: cacheKey, controller };
     candleHistoryScopeRef.current = scope;
+    setHistoryError(null);
     // Only selection cleanup owns the shared GET; a recovery waiter can cancel independently.
     let headFlight: Promise<CandleSnapshot> | undefined;
     scope.readHead = (signal) => {
@@ -1288,13 +1292,18 @@ export default function App() {
       const currentTimes = new Set(candleCacheRef.current.get(scope.key)?.items.map((item) => item.t));
       const added = new Set(result.items.filter((item) => item.t < earliest && !currentTimes.has(item.t)).map((item) => item.t)).size;
       // A completed bounded page with no earlier bars is exhausted for this scope.
-      scope.exhausted = (added === 0 && result.syncStatus === 'READY') || result.syncStatus === 'STALE' || result.syncStatus === 'FAILED';
-      if (result.syncStatus === 'STALE' || result.syncStatus === 'FAILED') setMarketError('数据同步失败，后端未提供详细原因，请重试');
+      scope.exhausted = (added === 0 && (result.syncStatus === 'READY' || result.availability === 'UNAVAILABLE_BEFORE_START'
+        || result.gaps.some((gap) => gap.reason === 'BEFORE_SCAN_START' && gap.to >= before)))
+        || result.syncStatus === 'STALE' || result.syncStatus === 'FAILED';
+      setHistoryError(result.syncStatus === 'STALE' || result.syncStatus === 'FAILED'
+        ? { owner: scope, message: '数据同步失败，后端未提供详细原因，请重试' } : null);
       setCachedSnapshot((current) => candleHistoryScopeRef.current === scope ? mergeSnapshots(current, result) : current);
       return { added, exhausted: scope.exhausted };
     } catch (cause) {
-      if (candleHistoryScopeRef.current === scope) setError(friendlyError(cause, '更早行情加载失败'));
-      if (candleHistoryScopeRef.current === scope) throw cause;
+      if (candleHistoryScopeRef.current === scope && !scope.controller.signal.aborted) {
+        setHistoryError({ owner: scope, message: friendlyError(cause, '更早行情加载失败') });
+        throw cause;
+      }
       return { added: 0, exhausted: false };
     } finally {
       scope.loading = false;
@@ -1469,7 +1478,7 @@ export default function App() {
               <div className="token-identity">
                 <TokenMark token={selected} />
                 <div>
-                  <div className="token-title"><strong>{selected.symbol} / {quoteLabel(selected)}</strong><span className={selected.stage === 'GRADUATED' ? 'badge graduated' : 'badge curve'}>{stageLabel(selected)}</span><span className="badge launchpad">{selected.launchpad}</span><span className="badge pool">{poolLabel(selected.pool.poolType)}</span></div>
+                  <div className="token-title"><strong>{selected.symbol} / {quoteLabel(selected)}</strong><span className={selected.stage === 'GRADUATED' ? 'badge graduated' : 'badge curve'}>{stageLabel(selected)}</span><span className="badge launchpad">{selected.launchpad}</span><span className="badge pool" title={`来源池 ${selected.pool.poolKey}`}>来源池：{poolLabel(selected.pool.poolType)}</span>{quote && <span className="badge executable">当前资产可报价</span>}</div>
                   <small>{selected.name} / <CopyableAddress value={selected.tokenAddress} /></small>
                 </div>
               </div>
@@ -1487,10 +1496,8 @@ export default function App() {
               </div>
               <span className={Number(selected.change24h) >= 0 ? 'positive' : 'negative'}>{formatPercent(selected.change24h)} / 24h</span>
             </div>
-            {activeSnapshot
-              ? <CandleChart key={`${selected.tokenAddress.toLowerCase()}:${activeSnapshot.marketKey}:${interval}`} candles={activeSnapshot.items} symbol={selected.symbol} refreshing={chartLoading} historyRetry={marketRetry} onLoadBefore={loadOlderCandles} />
-              : <div className="chart-state">{marketError ? '行情加载失败' : '正在加载行情'}</div>}
-            {marketError && <div className="market-retry"><span>{marketError}</span><button type="button" onClick={() => setMarketRetry((value) => value + 1)}>重试</button></div>}
+            <CandleChart key={`${selected.tokenAddress.toLowerCase()}:${selectedMarketKey}:${interval}`} candles={activeSnapshot?.items ?? []} symbol={selected.symbol} refreshing={chartLoading || (!activeSnapshot && !marketError)} historyRetry={marketRetry} onLoadBefore={loadOlderCandles} />
+            {(marketError || historyError) && <div className="market-retry" role="alert"><span>{marketError ?? historyError?.message}</span><button type="button" onClick={() => setMarketRetry((value) => value + 1)}>重试</button></div>}
             {activeSnapshot && activeSnapshot.syncStatus !== 'BACKFILLING' && activeSnapshot.syncStatus !== 'CATCHING_UP'
               && (activeSnapshot.syncStatus !== 'READY' || activeSnapshot.availability === 'PARTIAL') && <div className="chart-availability" role="status">
               {activeSnapshot.syncStatus === 'STALE' || activeSnapshot.syncStatus === 'FAILED'
@@ -1602,7 +1609,7 @@ export default function App() {
               return <div className="position" key={position.tokenAddress}><span><b>{position.symbol}</b><small>{compact(position.available)} 枚</small></span><span className={cost > 0 && Number(position.valueUsd) >= cost ? 'positive' : 'negative'}>{pnl}</span><button type="button" onClick={() => { setSelected(tokens.find((token) => token.tokenAddress.toLowerCase() === position.tokenAddress.toLowerCase()) ?? null); selectSide('SELL'); }}>卖</button></div>;
             })}
             <div className="transaction-history">
-              <div className="positions-head"><strong>交易记录</strong><span>{accountTransactions.length} 笔</span></div>
+              <div className="positions-head"><strong>交易记录</strong>{transactionRefreshError && <span className="transaction-refresh-error" role="alert">{transactionRefreshError}</span>}<span>{accountTransactions.length} 笔</span></div>
               {accountTransactions.length === 0
                 ? <div className="transaction-empty">暂无交易</div>
                 : accountTransactions.map((transaction) => <div className="account-transaction" key={transaction.executionId}>

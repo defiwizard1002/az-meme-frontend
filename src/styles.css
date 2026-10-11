@@ -134,8 +134,10 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .chart { position: relative; margin: 0; border-bottom: 1px solid var(--line); }
 .chart-canvas { width: 100%; height: clamp(480px, calc(100dvh - 232px), 720px); }
 .chart-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 11px; pointer-events: none; }
-.history-loading { position: absolute; top: 10px; left: 12px; display: flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: 1px solid var(--line); border-radius: 5px; background: rgb(13 12 18 / 88%); pointer-events: none; }
-.history-loading span { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); animation: history-dot 1s ease-in-out infinite; }
+.history-loading { position: absolute; inset: 0; display: grid; place-items: center; background: rgb(13 12 18 / 36%); pointer-events: none; z-index: 2; }
+.history-loading-dots { display: flex; align-items: center; gap: 7px; padding: 14px 18px; border: 1px solid var(--line); border-radius: 8px; background: rgb(13 12 18 / 88%); }
+.transaction-refresh-error { color: var(--negative); font-size: 12px; }
+.history-loading span { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: history-dot 1s ease-in-out infinite; }
 .history-loading span:nth-child(2) { animation-delay: .14s; }
 .history-loading span:nth-child(3) { animation-delay: .28s; }
 @keyframes history-dot { 0%, 60%, 100% { opacity: .28; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
