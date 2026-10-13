@@ -1,4 +1,4 @@
-import type { AccountSummary, AccountTransaction, Asset, CandleSnapshot, Interval, Order, Quote, Token, Trade, TradePlan } from './types';
+import type { AccountSummary, AccountTransaction, Asset, CandleSnapshot, Interval, Order, QuoteDisplay, Token, Trade, TradePlan } from './types';
 
 interface Envelope<T> {
   rc: number;
@@ -167,8 +167,11 @@ export const memeApi = {
     method: 'POST',
     body: JSON.stringify(input),
   }),
-  createQuote: (input: { side: 'BUY' | 'SELL'; tokenAddress: string; settlementAsset: Asset; amountIn: string; slippageBps: number }, signal?: AbortSignal) =>
-    request<Quote>('/sapi/v1/meme/quotes', { method: 'POST', body: JSON.stringify(input), signal }),
+  createQuote: (input: { side: 'BUY' | 'SELL'; tokenAddress: string; settlementAsset: Asset; amountIn: string; slippageBps: number; purpose?: 'ESTIMATE' | 'PREPARE_EXECUTION'; minAmountOut?: string }, signal?: AbortSignal) =>
+    request<QuoteDisplay | {status:'APPROVAL_REQUIRED'}>('/sapi/v1/meme/quotes', { method: 'POST', body: JSON.stringify(input), signal }).then((value):QuoteDisplay => {
+      if('status' in value&&value.status==='APPROVAL_REQUIRED')throw new ApiError('MEME_APPROVAL_REQUIRED','需要授权；完成授权后重新准备并确认交易',409);
+      return value as QuoteDisplay;
+    }),
   createOrder: (input: { clientOrderId: string; quoteId: string; maxAmountIn: string; minAmountOut: string }) =>
     request<Order>('/sapi/v1/meme/orders', { method: 'POST', body: JSON.stringify(input) }),
   getOrders: (signal?: AbortSignal) => request<{ items: Order[]; nextCursor: string | null }>('/sapi/v1/meme/orders', { signal }),

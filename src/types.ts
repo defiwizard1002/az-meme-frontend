@@ -103,6 +103,16 @@ export interface Quote {
   expiresAt: number;
 }
 
+export interface LocalEstimate extends Omit<Quote, 'quoteId' | 'executionMode' | 'routeAssets'> {
+  quoteId?: never;
+  status: 'LOCAL_ESTIMATE';
+  requiresExecutionPreparation: true;
+  precision: 'CORE_CURVE_ESTIMATE';
+  netRecipientGuaranteed: false;
+  routeAssets?: string[];
+}
+export type QuoteDisplay = Quote | LocalEstimate;
+
 export interface Order {
   orderId: string;
   status: 'CREATED' | 'RESERVED' | 'SIGNED' | 'SUBMITTING' | 'SUBMITTED' | 'CONFIRMED' | 'SETTLED' | 'FAILED_FINAL' | 'SUBMISSION_UNKNOWN' | 'MANUAL_REVIEW';

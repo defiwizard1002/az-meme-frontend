@@ -4,8 +4,9 @@ import { CandleChart, type HistoryLoadResult } from './CandleChart';
 import { streamBatchItems, streamSequenceAction } from './stream-batches';
 import { pollOrderUntilTerminal } from './order-tracker';
 import { pollTransactionUntilTerminal } from './transaction-tracker';
-import type { AccountSummary, AccountTransaction, Asset, Candle, CandleSnapshot, Interval, Quote, Token, Trade } from './types';
+import type { AccountSummary, AccountTransaction, Asset, Candle, CandleSnapshot, Interval, Quote, QuoteDisplay, Token, Trade } from './types';
 import './styles.css';
+import { preparationInput, requirePreparedQuote } from './quote-flow';
 
 const intervals: Interval[] = ['1s', '1m', '15m', '1h', '4h'];
 const ethPresets = ['0.05', '0.1', '0.25', '0.5'];
@@ -236,7 +237,7 @@ function normalizedDecimal(value: string): string {
   return normalizedFraction ? normalizedWhole + '.' + normalizedFraction : normalizedWhole;
 }
 
-function matchesQuoteRequest(quote: Quote, request: NonNullable<Parameters<typeof memeApi.createQuote>[0]>): boolean {
+function matchesQuoteRequest(quote: QuoteDisplay, request: NonNullable<Parameters<typeof memeApi.createQuote>[0]>): boolean {
   return quote.tokenAddress.toLowerCase() === request.tokenAddress.toLowerCase()
     && quote.side === request.side
     && quote.settlementAsset === request.settlementAsset
@@ -338,7 +339,7 @@ export default function App() {
   const [amount, setAmount] = useState('0.1');
   const [activePreset, setActivePreset] = useState<string | null>('0.1');
   const [quoteRefreshNonce,setQuoteRefreshNonce] = useState(0);
-  const [quoteState, setQuoteState] = useState<{ value: Quote; request: Parameters<typeof memeApi.createQuote>[0] } | null>(null);
+  const [quoteState, setQuoteState] = useState<{ value: QuoteDisplay; request: Parameters<typeof memeApi.createQuote>[0] } | null>(null);
   const [orderState, setOrderState] = useState<string | null>(null);
   useEffect(() => {
     const delay = ({ '交易成功': 3000, '交易失败，资金已释放': 1200, '交易失败': 1800 } as Record<string, number>)[orderState ?? ''];
@@ -431,6 +432,7 @@ export default function App() {
     });
   }, []);
 
+  const [preparedQuote,setPreparedQuote]=useState<{value:Quote;request:Parameters<typeof memeApi.createQuote>[0];minimum:string}|null>(null);
   const quoteRequest = useMemo(() => {
     if (!selectedTokenAddress || (selectedTradeStatus !== 'TRADABLE' && accountMode !== 'MAIN_ACCOUNT_POC')
       || !/^\d+(?:\.\d+)?$/.test(amount) || Number(amount) <= 0) return null;
@@ -440,12 +442,15 @@ export default function App() {
       settlementAsset: asset,
       amountIn: amount,
       slippageBps,
+      ...(accountMode==='MAIN_ACCOUNT_POC'?{purpose:'ESTIMATE' as const}:{}),
     } as const;
   }, [accountMode, amount, asset, selectedTokenAddress, selectedTradeStatus, side, slippageBps]);
   const quoteRequestRef = useRef(quoteRequest);
   quoteRequestRef.current = quoteRequest;
   const quoteVersionRef = useRef(0);
-  const quote = quoteState?.request === quoteRequest ? quoteState.value : null;
+  const prepared=preparedQuote?.request===quoteRequest?preparedQuote:null;
+  const quote = prepared?.value ?? (quoteState?.request === quoteRequest ? quoteState.value : null);
+  useEffect(()=>{setPreparedQuote(null);},[quoteRequest,accountAvailable]);
 
   const trackOrder = useCallback(async (orderId: string) => {
     const existing = orderPollsRef.current.get(orderId);
@@ -1316,6 +1321,17 @@ export default function App() {
     setOrderState('提交中');
     try {
       if (accountMode === 'MAIN_ACCOUNT_POC') {
+        if(!quoteRequest)throw new Error('请输入有效金额');
+        if(!prepared){
+          setOrderState('准备中');
+          const input=preparationInput(quoteRequest,quote);
+          const response=await memeApi.createQuote(input);
+          if(quoteRequestRef.current!==quoteRequest)throw new Error('输入已变化，请重新准备');
+          const value=requirePreparedQuote(response,input);
+          setPreparedQuote({value,request:quoteRequest,minimum:input.minAmountOut!});
+          setOrderState(null);return;
+        }
+        requirePreparedQuote(prepared.value,{...quoteRequest,minAmountOut:prepared.minimum});
         if (!selected) throw new Error('请选择代币');
         if (asset === 'USDT') throw new Error('当前主账户未配置 USDT');
         if (quote.expiresAt <= Date.now()) throw new Error('报价已过期，请等待新报价并重新确认');
@@ -1338,7 +1354,7 @@ export default function App() {
           side,
           tokenAddress: selected.tokenAddress,
           settlementAsset,
-          quoteId: quote.quoteId,
+          quoteId: quote.quoteId!,
           amountIn: quote.amountIn,
           slippageBps,
         });
@@ -1350,6 +1366,7 @@ export default function App() {
         });
         return;
       }
+      if(!quote.quoteId)throw new Error('估计不能提交订单，请先准备交易');
       let clientOrderId = orderIdempotencyRef.current.get(quote.quoteId);
       if (!clientOrderId) {
         clientOrderId = crypto.randomUUID();
@@ -1357,7 +1374,7 @@ export default function App() {
       }
       const order = await memeApi.createOrder({
         clientOrderId,
-        quoteId: quote.quoteId,
+        quoteId: quote.quoteId!,
         maxAmountIn: quote.amountIn,
         minAmountOut: quote.minAmountOut,
       });
@@ -1370,7 +1387,7 @@ export default function App() {
       setOrderState(null);
       setError(friendlyError(cause, '下单请求未完成'));
     }
-  }, [accountAvailable, accountMode, asset, quote, selected, side, slippageBps, trackMainAccountTransaction, trackOrder]);
+  }, [accountAvailable, accountMode, asset, quote, quoteRequest, prepared, selected, side, slippageBps, trackMainAccountTransaction, trackOrder]);
 
   const submitTransfer = useCallback(async () => {
     if (!accountAvailable) return;
@@ -1592,10 +1609,13 @@ export default function App() {
                 <option key={bps} value={bps}>{bps / 100}%</option>)}</select></dd></div>
               <div className="security-row"><dt>安全</dt><dd>{safety.map((item) => <span className={`security-${item.tone}`} key={item.text}>{item.text}</span>)}</dd></div>
             </dl>
+            {accountMode==='MAIN_ACCOUNT_POC'&&!prepared&&quote&&<p className="trade-risk" role="note">本地估计不保证实际到账；先准备交易，再确认提交。</p>}
+            {prepared&&<p className="trade-risk" role="note">交易已准备，请核对数量和最低得到后确认提交。</p>}
+            {prepared&&<button type="button" disabled={Boolean(orderState)} onClick={()=>setPreparedQuote(null)}>重新估计</button>}
             {quote?.routePools && quote.routePools.length > 1 && <p className="trade-risk" role="note">交易可能分步完成；中途失败时，已成交部分不会撤销。</p>}
             <p className="trade-risk" role="note">拆分执行时，累计滑点可能高于所设值；最终以最低得到为准。</p>
             <button type="button" className="primary" disabled={!accountAvailable || !selected || !quoteRequest || !quote || Boolean(orderState) || (side === 'SELL' && Number(currentBalance) <= 0)} onClick={submitOrder}>
-              {accountError ? '账户连接失败' : !sessionReady ? accountMode === 'MAIN_ACCOUNT_POC' ? '等待主账户' : '等待登录' : orderState ?? (side === 'BUY' ? '买入' : '卖出')}
+              {accountError ? '账户连接失败' : !sessionReady ? accountMode === 'MAIN_ACCOUNT_POC' ? '等待主账户' : '等待登录' : orderState ?? (accountMode==='MAIN_ACCOUNT_POC'?(prepared?'确认提交':'准备交易'):(side === 'BUY' ? '买入' : '卖出'))}
             </button>
           </div>
 
