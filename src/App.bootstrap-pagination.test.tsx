@@ -659,7 +659,7 @@ describe('hotfix: bounded account bootstrap and empty demand', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('响应');
   });
 
-  it.each(['CATCHING_UP', 'BACKFILLING'] as const)('keeps %s metadata internal beyond the entire refresh retry budget with committed candles', async (syncStatus) => {
+  it.each(['CATCHING_UP', 'BACKFILLING'] as const)('shows %s catch-up status while keeping committed candles through refresh retries', async (syncStatus) => {
     setup('MAIN_ACCOUNT_POC');
     vi.useFakeTimers();
     const items = Array.from({ length: 320 }, (_, index) => candle(100 + index, '11'));
@@ -674,7 +674,7 @@ describe('hotfix: bounded account bootstrap and empty demand', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(elapsed); });
       expect(screen.getByLabelText('AAA K 线图')).toBe(canvas);
       expect(chart.current!.candles).toEqual(items);
-      expect(screen.getByRole('status',{name:'行情状态'})).toHaveTextContent('正在同步历史行情');
+      expect(screen.getByRole('status',{name:'行情状态'})).toHaveTextContent('行情追赶中');
       expect(document.body).not.toHaveTextContent(/BACKFILLING|CATCHING_UP|历史 K 线部分缺失/);
       expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
     }
@@ -689,7 +689,7 @@ describe('hotfix: bounded account bootstrap and empty demand', () => {
     vi.mocked(memeApi.getCandles).mockResolvedValueOnce({ ...snapshot(tokenA, '1m', []),
       syncStatus: 'BACKFILLING', availability: 'PARTIAL', gaps: [] });
     await mount();
-    expect(screen.getByRole('status',{name:'行情状态'})).toHaveTextContent('正在同步历史行情');
+    expect(screen.getByRole('status',{name:'行情状态'})).toHaveTextContent('行情追赶中');
     expect(screen.queryByText('暂无成交 K 线')).not.toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
     expect(memeApi.getCandles).toHaveBeenCalledTimes(2);
@@ -704,7 +704,7 @@ describe('hotfix: bounded account bootstrap and empty demand', () => {
     vi.useFakeTimers();
     vi.mocked(memeApi.getCandles).mockResolvedValue({ ...snapshot(tokenA, '1m', []), syncStatus, availability: 'PARTIAL' });
     await mount();
-    expect(screen.getByRole('status',{name:'行情状态'})).toHaveTextContent(syncStatus==='BACKFILLING'?'正在同步历史行情':'暂无可用行情');
+    expect(screen.getByRole('status',{name:'行情状态'})).toHaveTextContent(syncStatus==='BACKFILLING'?'行情追赶中':'暂无可用行情');
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
     const reads = vi.mocked(memeApi.getCandles).mock.calls.length;
     expect(reads).toBe(syncStatus === 'READY' ? 1 : 6);

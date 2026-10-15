@@ -1513,7 +1513,7 @@ export default function App() {
             {(marketError || historyError) && <div className="market-retry" role="alert"><span>{marketError ?? historyError?.message}</span><button type="button" onClick={() => setMarketRetry((value) => value + 1)}>重试</button></div>}
             {activeSnapshot && !marketError && <div className="chart-availability" role="status" aria-label="行情状态">
               {['STALE', 'FAILED'].includes(activeSnapshot.syncStatus) ? '行情暂时不可用，请稍后重试'
-                : ['BACKFILLING', 'CATCHING_UP'].includes(activeSnapshot.syncStatus) ? '正在同步历史行情'
+                : ['BACKFILLING', 'CATCHING_UP'].includes(activeSnapshot.syncStatus) ? '行情追赶中，仅显示已处理数据；缺少价格证据时暂不显示成交价格或 K 线'
                 : activeSnapshot.items.length === 0 ? '暂无可用行情' : null}
               {activeSnapshot.items.length > 0 ? ` 最后可用行情：${new Date(activeSnapshot.items.at(-1)!.t * 1000).toISOString().replace('T', ' ').replace('.000Z', ' UTC')}`
                 : trades.length > 0 ? ` 最新成交：${new Date(trades[0]!.t * 1000).toISOString().replace('T', ' ').replace('.000Z', ' UTC')}` : null}
