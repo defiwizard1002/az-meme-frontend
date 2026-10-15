@@ -683,6 +683,14 @@ describe('hotfix: bounded account bootstrap and empty demand', () => {
     expect(vi.mocked(memeApi.getCandles).mock.calls.every(([, interval]) => interval === '1s')).toBe(true);
   });
 
+  it('discloses partial fresh history even when processing is READY', async () => {
+    setup('MAIN_ACCOUNT_POC');
+    vi.mocked(memeApi.getCandles).mockResolvedValue({ ...snapshot(tokenA), syncStatus: 'READY', availability: 'PARTIAL' });
+    await mount();
+    expect(screen.getByRole('status', {name:'行情状态'})).toHaveTextContent('部分历史行情');
+    expect(chart.current!.candles).toEqual([candle(100, '11')]);
+  });
+
   it('refetches empty BACKFILLING/PARTIAL demand and clears pending metadata when complete', async () => {
     setup('MAIN_ACCOUNT_POC');
     vi.useFakeTimers();
