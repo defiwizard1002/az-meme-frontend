@@ -13,10 +13,11 @@ import {
   type Time,
   type UTCTimestamp,
 } from 'lightweight-charts';
-import type { Candle } from './types';
+import type { Candle, CandleSnapshot } from './types';
 
 interface Props {
   candles: Candle[];
+  gaps?: CandleSnapshot['gaps'];
   symbol: string;
   refreshing?: boolean;
   historyRetry?: number;
@@ -32,6 +33,7 @@ export interface HistoryLoadResult {
 const CHART_VALUE_BOUND = Number.MAX_SAFE_INTEGER / 100;
 const MINIMUM_VIEW_BARS = 30;
 const HISTORY_PAGES_PER_BURST = 4;
+const NO_GAPS: CandleSnapshot['gaps'] = [];
 
 interface ChartData {
   candles: CandlestickData<UTCTimestamp>[];
@@ -43,7 +45,7 @@ function isRenderableValue(value: number): boolean {
   return Number.isFinite(value) && Math.abs(value) <= CHART_VALUE_BOUND;
 }
 
-function buildChartData(candles: Candle[]): ChartData {
+function buildChartData(candles: Candle[], gaps: CandleSnapshot['gaps']): ChartData {
   const data: ChartData = { candles: [], volumes: [], excludedCount: 0 };
   for (const item of [...candles].sort((a, b) => a.t - b.t)) {
     const bar = {
@@ -57,9 +59,12 @@ function buildChartData(candles: Candle[]): ChartData {
       data.excludedCount += 1;
       continue;
     }
-    // Presentation only: connect genuine bars, including across seconds with no trades.
+    // Connect quiet periods, but keep an explicit break across confirmed hidden bars.
     // Raw OHLC, revisions and volumes remain owned by the snapshot/cache.
-    bar.open = data.candles.at(-1)?.close ?? bar.open;
+    const previous = data.candles.at(-1);
+    const crossesSuppression = previous && gaps.some((gap) => gap.reason === 'PRICING_SUPPRESSED'
+      && gap.to > previous.time && gap.from <= bar.time);
+    if (previous && !crossesSuppression) bar.open = previous.close;
     bar.high = Math.max(bar.high, bar.open);
     bar.low = Math.min(bar.low, bar.open);
     data.candles.push(bar);
@@ -101,8 +106,8 @@ function pricePrecision(candles: ChartData['candles']): { precision: number; min
   return { precision: 8, minMove: 0.00000001 };
 }
 
-export function CandleChart({ candles, symbol, refreshing = false, historyRetry = 0, onLoadBefore }: Props) {
-  const data = useMemo(() => buildChartData(candles), [candles]);
+export function CandleChart({ candles, gaps = NO_GAPS, symbol, refreshing = false, historyRetry = 0, onLoadBefore }: Props) {
+  const data = useMemo(() => buildChartData(candles, gaps), [candles, gaps]);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -397,6 +402,9 @@ export function CandleChart({ candles, symbol, refreshing = false, historyRetry 
       </div>}
       {data.excludedCount > 0 && <figcaption className="chart-availability" role="status">
         部分 K 线点无法渲染，已排除 {data.excludedCount} 个
+      </figcaption>}
+      {gaps.some((gap) => gap.reason === 'PRICING_SUPPRESSED') && <figcaption className="chart-availability" role="status">
+        部分历史 K 线已隐藏，缺口保留
       </figcaption>}
       {(historyLoading || refreshing) && <div
         className="history-loading"

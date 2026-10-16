@@ -1,4 +1,4 @@
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CandleChart } from './CandleChart';
 import { mergeSnapshots } from './App';
@@ -56,6 +56,22 @@ describe('chart continuity and user viewport', () => {
     expect(engine.volumes.mock.lastCall?.[0].map((bar: { time: number; value: number }) => [bar.time, bar.value]))
       .toEqual([[100, 7], [105, 7], [110, 7]]);
     expect(raw).toEqual(before);
+  });
+
+  it('breaks presentation continuity only across confirmed suppressed gaps and restores it afterward', () => {
+    const raw = [candle(100, '2'), candle(110, '4'), candle(115, '3')];
+    const { rerender } = render(<CandleChart symbol="A" candles={raw} />);
+    rerender(<CandleChart symbol="A" candles={raw}
+      gaps={[{ from: 105, to: 110, reason: 'PRICING_SUPPRESSED' }, { from: 111, to: 115, reason: 'EVENT_EXPIRED' }]} />);
+    expect(engine.set).toHaveBeenLastCalledWith([
+      { time: 100, open: 2, high: 2, low: 2, close: 2 },
+      { time: 110, open: 4, high: 4, low: 4, close: 4 },
+      { time: 115, open: 4, high: 4, low: 3, close: 3 },
+    ]);
+    expect(screen.getByText('部分历史 K 线已隐藏，缺口保留')).toBeInTheDocument();
+    rerender(<CandleChart symbol="A" candles={raw} />);
+    expect(engine.set.mock.lastCall?.[0][1]).toEqual({ time: 110, open: 2, high: 4, low: 2, close: 4 });
+    expect(screen.queryByText('部分历史 K 线已隐藏，缺口保留')).not.toBeInTheDocument();
   });
 
   it('recomputes continuity after history prepend and out-of-order revision merges, keeping the same times visible', () => {

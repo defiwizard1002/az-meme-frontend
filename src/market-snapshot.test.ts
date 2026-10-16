@@ -13,6 +13,18 @@ const snapshot = (items: Candle[], revision = '1'): CandleSnapshot => ({
 });
 
 describe('USD candle snapshot and live batch revision handling', () => {
+  it('evicts suppressed cached bars and keeps half-open gaps authoritative over REST and live revisions', () => {
+    const old = snapshot([candle(9, '10'), candle(10, '10'), candle(11, '10'), candle(12, '10')]);
+    const hidden: CandleSnapshot = { ...snapshot([]), availability: 'PARTIAL',
+      gaps: [{ from: 10, to: 12, reason: 'PRICING_SUPPRESSED' }] };
+    const merged = mergeSnapshots(old, hidden);
+    expect(merged.items.map((bar) => bar.t)).toEqual([9, 12]);
+    expect(mergeSnapshots(merged, old).items.map((bar) => bar.t)).toEqual([9, 12]);
+    const live = { ...merged, items: [candle(11, '99'), candle(13, '99')] };
+    expect(mergeSnapshots(merged, live).items.map((bar) => bar.t)).toEqual([9, 12, 13]);
+    expect(mergeSnapshots(null, { ...hidden, items: old.items }).items.map((bar) => bar.t)).toEqual([9, 12]);
+  });
+
   it('product recovery keeps retractions across stale REST/WS pages without resurrecting old bars', () => {
     const old = snapshot([candle(1, '10'), candle(2, '10')]);
     const removed = { ...snapshot([], '11'), retractions: [{t:1,revision:'11'}] };

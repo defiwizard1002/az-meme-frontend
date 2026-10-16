@@ -52,7 +52,7 @@ export interface CandleSnapshot {
   syncStatus: 'BACKFILLING' | 'CATCHING_UP' | 'READY' | 'STALE' | 'FAILED';
   availability: 'COMPLETE' | 'PARTIAL' | 'UNAVAILABLE_BEFORE_START';
   coverage: { from: number | null; to: number | null };
-  gaps: Array<{ from: number; to: number; reason: 'BEFORE_SCAN_START' | 'EVENT_EXPIRED' }>;
+  gaps: Array<{ from: number; to: number; reason: 'BEFORE_SCAN_START' | 'EVENT_EXPIRED' | 'PRICING_SUPPRESSED' }>;
   revision: string;
   asOfBlock: number | null;
   source: 'CHAIN';

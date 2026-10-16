@@ -283,7 +283,14 @@ function boundedMapSet<T>(map: Map<string, T>, key: string, value: T, capacity: 
   map.set(key, value);
 }
 
+function visibleCandles(items: Candle[], gaps: CandleSnapshot['gaps']): Candle[] {
+  const suppressed = gaps.filter((gap) => gap.reason === 'PRICING_SUPPRESSED');
+  return suppressed.length ? items.filter((item) => !suppressed.some((gap) => item.t >= gap.from && item.t < gap.to)) : items;
+}
+
 export function mergeSnapshots(previous: CandleSnapshot | null, next: CandleSnapshot): CandleSnapshot {
+  const nextItems = visibleCandles(next.items, next.gaps);
+  if (nextItems !== next.items) next = { ...next, items: nextItems };
   if (!previous
     || previous.tokenAddress.toLowerCase() !== next.tokenAddress.toLowerCase()
     || previous.marketKey !== next.marketKey
@@ -314,7 +321,7 @@ export function mergeSnapshots(previous: CandleSnapshot | null, next: CandleSnap
     revision: BigInt(previous.revision) > BigInt(next.revision) ? previous.revision : next.revision,
     asOfBlock: Math.max(previous.asOfBlock ?? 0, next.asOfBlock ?? 0) || null,
     coverage: { from: from.length ? Math.min(...from) : null, to: to.length ? Math.max(...to) : null },
-    items: [...byTime.values()].sort((a, b) => a.t - b.t) };
+    items: visibleCandles([...byTime.values()], gaps).sort((a, b) => a.t - b.t) };
 }
 
 function TokenMark({ token }: { token: Token }) {
@@ -1509,7 +1516,7 @@ export default function App() {
               </div>
               <span className={Number(selected.change24h) >= 0 ? 'positive' : 'negative'}>{formatPercent(selected.change24h)} / 24h</span>
             </div>
-            <CandleChart key={`${selected.tokenAddress.toLowerCase()}:${selectedMarketKey}:${interval}`} candles={activeSnapshot?.items ?? []} symbol={selected.symbol} refreshing={chartLoading || (!activeSnapshot && !marketError) || Boolean(activeSnapshot && activeSnapshot.items.length === 0 && ['BACKFILLING', 'CATCHING_UP'].includes(activeSnapshot.syncStatus))} historyRetry={marketRetry} onLoadBefore={loadOlderCandles} />
+            <CandleChart key={`${selected.tokenAddress.toLowerCase()}:${selectedMarketKey}:${interval}`} candles={activeSnapshot?.items ?? []} gaps={activeSnapshot?.gaps} symbol={selected.symbol} refreshing={chartLoading || (!activeSnapshot && !marketError) || Boolean(activeSnapshot && activeSnapshot.items.length === 0 && ['BACKFILLING', 'CATCHING_UP'].includes(activeSnapshot.syncStatus))} historyRetry={marketRetry} onLoadBefore={loadOlderCandles} />
             {(marketError || historyError) && <div className="market-retry" role="alert"><span>{marketError ?? historyError?.message}</span><button type="button" onClick={() => setMarketRetry((value) => value + 1)}>重试</button></div>}
             {activeSnapshot && !marketError && <div className="chart-availability" role="status" aria-label="行情状态">
               {['STALE', 'FAILED'].includes(activeSnapshot.syncStatus) ? '行情暂时不可用，请稍后重试'
