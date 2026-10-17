@@ -80,7 +80,7 @@ describe('CandleChart renderability', () => {
 
     expect(engine.setCandles).toHaveBeenLastCalledWith([
       { time: 100, open: 0.0184, high: 0.022, low: 0.017, close: 0.0195 },
-      { time: 220, open: 0.0195, high: 0.022, low: 0.017, close: 0.021 },
+      { time: 220, open: 0.02, high: 0.022, low: 0.017, close: 0.021 },
     ]);
     expect(engine.setVolumes.mock.lastCall?.[0].map((bar: ChartVolume) => bar.time)).toEqual([100, 220]);
     expect(candles).toEqual(original);
@@ -119,8 +119,8 @@ describe('CandleChart renderability', () => {
 
     expect(engine.setCandles).toHaveBeenLastCalledWith([
       { time: 100, open: Number(prices[0]), high: Number(prices[0]), low: Number(prices[0]), close: Number(prices[0]) },
-      { time: 160, open: Number(prices[0]), high: Number(prices[0]), low: Number(prices[1]), close: Number(prices[1]) },
-      { time: 220, open: Number(prices[1]), high: Number(prices[2]), low: Number(prices[1]), close: Number(prices[2]) },
+      { time: 160, open: Number(prices[1]), high: Number(prices[1]), low: Number(prices[1]), close: Number(prices[1]) },
+      { time: 220, open: Number(prices[2]), high: Number(prices[2]), low: Number(prices[2]), close: Number(prices[2]) },
     ]);
     expect(candles.map((bar) => bar.o)).toEqual(prices);
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
@@ -146,7 +146,7 @@ describe('CandleChart renderability', () => {
     expect(engine.updateCandle.mock.calls.every(([bar]) => bar.time === 100)).toBe(true);
 
     rerender(<CandleChart symbol="LIVE" candles={[candle(100), candle(160)]} />);
-    expect(engine.updateCandle).toHaveBeenCalledWith({ time: 160, open: 0.0195, high: 0.022, low: 0.017, close: 0.0195 });
+    expect(engine.updateCandle).toHaveBeenCalledWith({ time: 160, open: 0.0184, high: 0.022, low: 0.017, close: 0.0195 });
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 

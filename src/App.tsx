@@ -288,12 +288,17 @@ function visibleCandles(items: Candle[], gaps: CandleSnapshot['gaps']): Candle[]
   return suppressed.length ? items.filter((item) => !suppressed.some((gap) => item.t >= gap.from && item.t < gap.to)) : items;
 }
 
+export function snapshotCandleSeries(snapshot: CandleSnapshot): NonNullable<Candle['series']> {
+  return snapshot.candleRules?.series ?? 'USD';
+}
+
 export function mergeSnapshots(previous: CandleSnapshot | null, next: CandleSnapshot): CandleSnapshot {
-  const nextItems = visibleCandles(next.items, next.gaps);
+  const nextItems = visibleCandles(next.items.filter((item) => (item.series ?? 'USD') === snapshotCandleSeries(next)), next.gaps);
   if (nextItems !== next.items) next = { ...next, items: nextItems };
   if (!previous
     || previous.tokenAddress.toLowerCase() !== next.tokenAddress.toLowerCase()
     || previous.marketKey !== next.marketKey
+    || snapshotCandleSeries(previous) !== snapshotCandleSeries(next)
     || previous.interval !== next.interval) return next.gaps.length > 0 && next.availability === 'COMPLETE'
       ? { ...next, availability: 'PARTIAL' }
       : next;
@@ -906,6 +911,7 @@ export default function App() {
     const upsertCandle = (candle: Candle) => {
       setCachedSnapshot((current) => {
         if (!current || current.tokenAddress.toLowerCase() !== selectedTokenAddress.toLowerCase() || current.interval !== interval) return current;
+        if ((candle.series ?? 'USD') !== snapshotCandleSeries(current)) return current;
         return mergeSnapshots(current,{...current,items:candle.retracted?[]:[candle],retractions:candle.retracted?[{t:candle.t,revision:candle.revision}]:[]});
       });
     };
@@ -1029,7 +1035,8 @@ export default function App() {
             }
             if (message.channel === candleChannel) {
               const candles = streamBatchItems(message.data as Candle | StreamBatch<Candle>);
-              if (requiresResync) recover(candleChannel);
+              const current = candleCacheRef.current.get(candleCacheKey(selectedTokenAddress, interval));
+              if (requiresResync || (current && candles.some((candle) => (candle.series ?? 'USD') !== snapshotCandleSeries(current)))) recover(candleChannel);
               candles.forEach(upsertCandle);
               return;
             }
@@ -1293,9 +1300,15 @@ export default function App() {
     if (!Number.isSafeInteger(before) || before < 0 || earliest === undefined || before >= earliest) return { added: 0, exhausted: false };
     scope.loading = true;
     try {
-      const result = await memeApi.getCandles(selected.tokenAddress, interval, { to: before, limit: candlePageSize, signal: scope.controller.signal });
+      const cached = candleCacheRef.current.get(scope.key);
+      const requestedSeries = cached ? snapshotCandleSeries(cached) : 'USD';
+      const result = await memeApi.getCandles(selected.tokenAddress, interval, { to: before, limit: candlePageSize, signal: scope.controller.signal,
+        ...(cached?.candleRules ? { series: requestedSeries } : {}) });
       if (candleHistoryScopeRef.current !== scope) return { added: 0, exhausted: false };
+      const current = candleCacheRef.current.get(scope.key);
+      if (current && snapshotCandleSeries(current) !== requestedSeries) return { added: 0, exhausted: false };
       if (result.tokenAddress.toLowerCase() !== selected.tokenAddress.toLowerCase() || result.interval !== interval || result.marketKey !== selectedMarketKey
+        || snapshotCandleSeries(result) !== requestedSeries
         || result.items.some((item) => item.t > before)) throw new Error('更早行情响应超出请求范围');
       const currentTimes = new Set(candleCacheRef.current.get(scope.key)?.items.map((item) => item.t));
       const added = new Set(result.items.filter((item) => item.t < earliest && !currentTimes.has(item.t)).map((item) => item.t)).size;
@@ -1516,7 +1529,7 @@ export default function App() {
               </div>
               <span className={Number(selected.change24h) >= 0 ? 'positive' : 'negative'}>{formatPercent(selected.change24h)} / 24h</span>
             </div>
-            <CandleChart key={`${selected.tokenAddress.toLowerCase()}:${selectedMarketKey}:${interval}`} candles={activeSnapshot?.items ?? []} gaps={activeSnapshot?.gaps} symbol={selected.symbol} refreshing={chartLoading || (!activeSnapshot && !marketError) || Boolean(activeSnapshot && activeSnapshot.items.length === 0 && ['BACKFILLING', 'CATCHING_UP'].includes(activeSnapshot.syncStatus))} historyRetry={marketRetry} onLoadBefore={loadOlderCandles} />
+            <CandleChart key={`${selected.tokenAddress.toLowerCase()}:${selectedMarketKey}:${interval}:${activeSnapshot ? snapshotCandleSeries(activeSnapshot) : 'USD'}`} candles={activeSnapshot?.items ?? []} gaps={activeSnapshot?.gaps} legacy={Boolean(activeSnapshot && snapshotCandleSeries(activeSnapshot) === 'USD')} symbol={selected.symbol} refreshing={chartLoading || (!activeSnapshot && !marketError) || Boolean(activeSnapshot && activeSnapshot.items.length === 0 && ['BACKFILLING', 'CATCHING_UP'].includes(activeSnapshot.syncStatus))} historyRetry={marketRetry} onLoadBefore={loadOlderCandles} />
             {(marketError || historyError) && <div className="market-retry" role="alert"><span>{marketError ?? historyError?.message}</span><button type="button" onClick={() => setMarketRetry((value) => value + 1)}>重试</button></div>}
             {activeSnapshot && !marketError && <div className="chart-availability" role="status" aria-label="行情状态">
               {['STALE', 'FAILED'].includes(activeSnapshot.syncStatus) ? '行情暂时不可用，请稍后重试'

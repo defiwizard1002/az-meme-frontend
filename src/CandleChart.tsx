@@ -18,6 +18,7 @@ import type { Candle, CandleSnapshot } from './types';
 interface Props {
   candles: Candle[];
   gaps?: CandleSnapshot['gaps'];
+  legacy?: boolean;
   symbol: string;
   refreshing?: boolean;
   historyRetry?: number;
@@ -45,7 +46,7 @@ function isRenderableValue(value: number): boolean {
   return Number.isFinite(value) && Math.abs(value) <= CHART_VALUE_BOUND;
 }
 
-function buildChartData(candles: Candle[], gaps: CandleSnapshot['gaps']): ChartData {
+function buildChartData(candles: Candle[]): ChartData {
   const data: ChartData = { candles: [], volumes: [], excludedCount: 0 };
   for (const item of [...candles].sort((a, b) => a.t - b.t)) {
     const bar = {
@@ -59,14 +60,6 @@ function buildChartData(candles: Candle[], gaps: CandleSnapshot['gaps']): ChartD
       data.excludedCount += 1;
       continue;
     }
-    // Connect quiet periods, but keep an explicit break across confirmed hidden bars.
-    // Raw OHLC, revisions and volumes remain owned by the snapshot/cache.
-    const previous = data.candles.at(-1);
-    const crossesSuppression = previous && gaps.some((gap) => gap.reason === 'PRICING_SUPPRESSED'
-      && gap.to > previous.time && gap.from <= bar.time);
-    if (previous && !crossesSuppression) bar.open = previous.close;
-    bar.high = Math.max(bar.high, bar.open);
-    bar.low = Math.min(bar.low, bar.open);
     data.candles.push(bar);
     if (item.quoteVolume !== null) {
       const volume = Number(item.quoteVolume);
@@ -106,8 +99,8 @@ function pricePrecision(candles: ChartData['candles']): { precision: number; min
   return { precision: 8, minMove: 0.00000001 };
 }
 
-export function CandleChart({ candles, gaps = NO_GAPS, symbol, refreshing = false, historyRetry = 0, onLoadBefore }: Props) {
-  const data = useMemo(() => buildChartData(candles, gaps), [candles, gaps]);
+export function CandleChart({ candles, gaps = NO_GAPS, legacy = false, symbol, refreshing = false, historyRetry = 0, onLoadBefore }: Props) {
+  const data = useMemo(() => buildChartData(candles), [candles]);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -406,6 +399,7 @@ export function CandleChart({ candles, gaps = NO_GAPS, symbol, refreshing = fals
       {gaps.some((gap) => gap.reason === 'PRICING_SUPPRESSED') && <figcaption className="chart-availability" role="status">
         部分历史 K 线已隐藏，缺口保留
       </figcaption>}
+      {legacy && <figcaption className="chart-availability" role="status">历史规则 · 未重建</figcaption>}
       {(historyLoading || refreshing) && <div
         className="history-loading"
         role="status"

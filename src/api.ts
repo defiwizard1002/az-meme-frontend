@@ -1,4 +1,4 @@
-import type { AccountSummary, AccountTransaction, Asset, CandleSnapshot, Interval, Order, QuoteDisplay, Token, Trade, TradePlan } from './types';
+import type { AccountSummary, AccountTransaction, Asset, Candle, CandleSnapshot, Interval, Order, QuoteDisplay, Token, Trade, TradePlan } from './types';
 
 interface Envelope<T> {
   rc: number;
@@ -141,10 +141,11 @@ export const memeApi = {
   getMarkets: (tab: 'hot' | 'new' = 'hot') => requestPublicMarket<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?tab=${tab}&limit=50`),
   searchMarkets: (query: string) => requestPublicMarket<{ items: Token[]; stale: boolean }>(`/sapi/v1/meme/markets?query=${encodeURIComponent(query)}&limit=50`),
   getToken: (tokenAddress: string) => requestPublicMarket<Token>(`/sapi/v1/meme/tokens/${tokenAddress}`),
-  getCandles: (tokenAddress: string, interval: Interval, options?: { from?: number; to?: number; limit?: number; signal?: AbortSignal }) => {
+  getCandles: (tokenAddress: string, interval: Interval, options?: { from?: number; to?: number; limit?: number; series?: Candle['series']; signal?: AbortSignal }) => {
     const query = new URLSearchParams({ interval, limit: String(options?.limit ?? 300) });
     if (options?.from !== undefined) query.set('from', String(options.from));
     if (options?.to !== undefined) query.set('to', String(options.to));
+    if (options?.series !== undefined) query.set('series', options.series);
     return requestPublicMarket<CandleSnapshot>(`/sapi/v1/meme/tokens/${tokenAddress}/candles?${query.toString()}`, { signal: options?.signal });
   },
   getTrades: (tokenAddress: string, cursor?: string, signal?: AbortSignal) => {

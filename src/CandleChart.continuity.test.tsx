@@ -22,7 +22,7 @@ const snapshot = (items: Candle[]): CandleSnapshot => ({
   gaps: [], revision: '1', asOfBlock: 100, source: 'CHAIN', items,
 });
 
-describe('chart continuity and user viewport', () => {
+describe('bucket OHLC and user viewport', () => {
   afterEach(cleanup);
   beforeEach(() => {
     vi.resetAllMocks();
@@ -44,21 +44,21 @@ describe('chart continuity and user viewport', () => {
     });
   });
 
-  it('connects sorted genuine bars across empty seconds without changing raw facts or volumes', () => {
-    const raw = [candle(110, '1'), candle(100, '2'), candle(105, '3')];
+  it('preserves bucket OHLC across adjacent bars and empty seconds without injecting previous closes', () => {
+    const raw = [{ ...candle(110, '1'), o: '1.1', h: '1.2', l: '0.9' }, candle(100, '2'), candle(101, '3')];
     const before = structuredClone(raw);
     render(<CandleChart symbol="A" candles={raw} />);
     expect(engine.set).toHaveBeenLastCalledWith([
       { time: 100, open: 2, high: 2, low: 2, close: 2 },
-      { time: 105, open: 2, high: 3, low: 2, close: 3 },
-      { time: 110, open: 3, high: 3, low: 1, close: 1 },
+      { time: 101, open: 3, high: 3, low: 3, close: 3 },
+      { time: 110, open: 1.1, high: 1.2, low: 0.9, close: 1 },
     ]);
     expect(engine.volumes.mock.lastCall?.[0].map((bar: { time: number; value: number }) => [bar.time, bar.value]))
-      .toEqual([[100, 7], [105, 7], [110, 7]]);
+      .toEqual([[100, 7], [101, 7], [110, 7]]);
     expect(raw).toEqual(before);
   });
 
-  it('breaks presentation continuity only across confirmed suppressed gaps and restores it afterward', () => {
+  it('preserves hidden-history warnings without stitching bars across any kind of gap', () => {
     const raw = [candle(100, '2'), candle(110, '4'), candle(115, '3')];
     const { rerender } = render(<CandleChart symbol="A" candles={raw} />);
     rerender(<CandleChart symbol="A" candles={raw}
@@ -66,15 +66,15 @@ describe('chart continuity and user viewport', () => {
     expect(engine.set).toHaveBeenLastCalledWith([
       { time: 100, open: 2, high: 2, low: 2, close: 2 },
       { time: 110, open: 4, high: 4, low: 4, close: 4 },
-      { time: 115, open: 4, high: 4, low: 3, close: 3 },
+      { time: 115, open: 3, high: 3, low: 3, close: 3 },
     ]);
     expect(screen.getByText('部分历史 K 线已隐藏，缺口保留')).toBeInTheDocument();
     rerender(<CandleChart symbol="A" candles={raw} />);
-    expect(engine.set.mock.lastCall?.[0][1]).toEqual({ time: 110, open: 2, high: 4, low: 2, close: 4 });
+    expect(engine.set.mock.lastCall?.[0][1]).toEqual({ time: 110, open: 4, high: 4, low: 4, close: 4 });
     expect(screen.queryByText('部分历史 K 线已隐藏，缺口保留')).not.toBeInTheDocument();
   });
 
-  it('recomputes continuity after history prepend and out-of-order revision merges, keeping the same times visible', () => {
+  it('preserves REST/replay OHLC after history prepend and out-of-order revision merges', () => {
     const initial = snapshot([candle(100, '2'), candle(105, '3')]);
     const { rerender } = render(<CandleChart symbol="A" candles={initial.items} />);
     const merged = mergeSnapshots(initial, snapshot([candle(105, '99', '0'), candle(100, '4', '2'), candle(90, '5')]));
@@ -82,8 +82,8 @@ describe('chart continuity and user viewport', () => {
     rerender(<CandleChart symbol="A" candles={merged.items} />);
     expect(engine.set).toHaveBeenLastCalledWith([
       { time: 90, open: 5, high: 5, low: 5, close: 5 },
-      { time: 100, open: 5, high: 5, low: 4, close: 4 },
-      { time: 105, open: 4, high: 4, low: 3, close: 3 },
+      { time: 100, open: 4, high: 4, low: 4, close: 4 },
+      { time: 105, open: 3, high: 3, low: 3, close: 3 },
     ]);
     expect(engine.restore).toHaveBeenLastCalledWith({ from: 1.25, to: 2.75 });
     expect(engine.fit).toHaveBeenCalledTimes(1);
@@ -102,7 +102,7 @@ describe('chart continuity and user viewport', () => {
     engine.update.mockImplementation(() => engine.range.mockReturnValue({ from: 8, to: 10 }));
     rerender(<CandleChart symbol="A" candles={[initial[0]!, candle(105, '4', '2'), candle(110, '1')]} />);
     expect(engine.set).toHaveBeenCalledTimes(setCount);
-    expect(engine.update).toHaveBeenLastCalledWith({ time: 110, open: 4, high: 4, low: 1, close: 1 });
+    expect(engine.update).toHaveBeenLastCalledWith({ time: 110, open: 1, high: 1, low: 1, close: 1 });
     expect(engine.restore).toHaveBeenLastCalledWith({ from: 0.25, to: 1.75 });
     expect(engine.restorePrice).toHaveBeenLastCalledWith({ from: 1, to: 4 });
     expect(engine.scaleOptions).not.toHaveBeenCalledWith({ autoScale: true });
@@ -141,5 +141,12 @@ describe('chart continuity and user viewport', () => {
     expect(engine.range()).toEqual({ from: 0.25, to: 1.75 });
     expect(engine.restore).not.toHaveBeenCalled();
     expect(engine.fit).toHaveBeenCalledTimes(1);
+  });
+
+  it('labels legacy history without claiming it has the new trade threshold', () => {
+    const { rerender } = render(<CandleChart symbol="A" candles={[candle(100, '2')]} legacy />);
+    expect(screen.getByRole('status')).toHaveTextContent('历史规则 · 未重建');
+    rerender(<CandleChart symbol="A" candles={[candle(100, '2')]} legacy={false} />);
+    expect(screen.queryByText('历史规则 · 未重建')).not.toBeInTheDocument();
   });
 });

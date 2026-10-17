@@ -570,6 +570,45 @@ describe('bounded older candle pages', () => {
   });
 });
 
+describe('versioned candle rules through App', () => {
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  const fresh = (items: Candle[]): CandleSnapshot => ({ ...snapshot(tokenA, '1m', items.map((item) => ({ ...item, series: 'USD_EXEC_01_V1' }))),
+    candleRules: { series: 'USD_EXEC_01_V1', minTradeNotionalUsd: '0.1', ohlc: 'BUCKET_TRADES', historyRebuilt: false } });
+
+  it('pins older pages to committed rules and rejects a legacy page without polluting the chart', async () => {
+    setup('MAIN_ACCOUNT_POC');
+    vi.mocked(memeApi.getCandles).mockImplementation(async (_address, _interval, options) => options?.to === undefined
+      ? fresh([candle(100, '2')]) : snapshot(tokenA, '1m', [candle(50, '1')]));
+    render(<App />);
+    await waitFor(() => expect(chart.current?.candles).toHaveLength(1));
+    await act(async () => { await expect(chart.current!.onLoadBefore(99)).rejects.toThrow('请求范围'); });
+    expect(memeApi.getCandles).toHaveBeenLastCalledWith(tokenA.tokenAddress, '1m', {
+      to: 99, limit: 300, series: 'USD_EXEC_01_V1', signal: expect.any(AbortSignal),
+    });
+    expect(chart.current!.candles.map((item) => item.t)).toEqual([100]);
+    vi.mocked(memeApi.getCandles).mockResolvedValue(fresh([candle(50, '1')]));
+    await act(async () => expect(await chart.current!.onLoadBefore(99)).toEqual({ added: 1, exhausted: false }));
+    expect(chart.current!.candles.map((item) => item.t)).toEqual([50, 100]);
+  });
+
+  it('recovers a WS rule transition and never merges later unmarked legacy replay into new candles', async () => {
+    setup('MAIN_ACCOUNT_POC', true);
+    render(<App />);
+    await waitFor(() => expect(ControlledSocket.instances).toHaveLength(1));
+    await waitFor(() => expect(chart.current?.candles.map((item) => item.t)).toEqual([100]));
+    const socket = ControlledSocket.instances[0]!;
+    act(() => socket.open());
+    vi.mocked(memeApi.getCandles).mockResolvedValue(fresh([candle(110, '3')]));
+    await act(async () => socket.receive({ channel: `candle:${tokenA.tokenAddress}:USD:USDG:1m`, epoch: 'rules', sequence: 1,
+      data: { items: [{ ...candle(110, '3'), series: 'USD_EXEC_01_V1' }] } }));
+    await waitFor(() => expect(chart.current?.candles.map((item) => item.t)).toEqual([110]));
+    await act(async () => socket.receive({ channel: `candle:${tokenA.tokenAddress}:USD:USDG:1m`, epoch: 'rules', sequence: 2,
+      data: { items: [candle(111, '999'), { ...candle(112, '4'), series: 'USD_EXEC_01_V1' }] } }));
+    expect(chart.current!.candles.map((item) => item.t)).toEqual([110, 112]);
+    expect(chart.current!.candles.every((item) => item.series === 'USD_EXEC_01_V1')).toBe(true);
+  });
+});
+
 it('cancels a settled-order status timer when the account component unmounts', async () => {
   setup('AZ_ACCOUNT');
   const timer = vi.spyOn(window, 'setTimeout'), clear = vi.spyOn(window, 'clearTimeout');

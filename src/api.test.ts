@@ -2,6 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, azAuth, memeApi, setSessionToken } from './api';
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); setSessionToken(null); });
 describe('HTTP envelopes', () => {
+  it('passes a pinned candle series through pagination without changing its boundary', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ rc: 0, result: {} })));
+    vi.stubGlobal('fetch', fetch);
+    await memeApi.getCandles('token', '4h', { to: 99, series: 'USD_EXEC_01_V1' });
+    const query = new URL(fetch.mock.calls[0]![0]).searchParams;
+    expect(Object.fromEntries(query)).toEqual({ interval: '4h', limit: '300', to: '99', series: 'USD_EXEC_01_V1' });
+  });
   it('identifies the exact public gateway denial without retrying the quote POST', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response('Signing is available only on the private account entry\n', { status: 403, headers: { 'content-type': 'text/plain' } }));
     vi.stubGlobal('fetch', fetch);

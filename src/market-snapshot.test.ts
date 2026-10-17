@@ -13,6 +13,26 @@ const snapshot = (items: Candle[], revision = '1'): CandleSnapshot => ({
 });
 
 describe('USD candle snapshot and live batch revision handling', () => {
+  it('replaces legacy cached history and tombstones when the committed candle series changes', () => {
+    const legacy: CandleSnapshot = { ...snapshot([candle(1, '100'), candle(2, '100')]),
+      retractions: [{ t: 3, revision: '101' }],
+      gaps: [{ from: 4, to: 5, reason: 'PRICING_SUPPRESSED' }] };
+    const fresh: CandleSnapshot = { ...snapshot([{ ...candle(3, '1'), series: 'USD_EXEC_01_V1' }]),
+      candleRules: { series: 'USD_EXEC_01_V1', minTradeNotionalUsd: '0.1', ohlc: 'BUCKET_TRADES', historyRebuilt: false } };
+    expect(mergeSnapshots(legacy, fresh)).toEqual(fresh);
+    expect(mergeSnapshots(fresh, legacy).candleRules).toBeUndefined();
+  });
+
+  it('keeps old REST/replay items from being relabeled as the new series', () => {
+    const fresh: CandleSnapshot = { ...snapshot([{ ...candle(3, '1'), series: 'USD_EXEC_01_V1' }]),
+      candleRules: { series: 'USD_EXEC_01_V1', minTradeNotionalUsd: '0.1', ohlc: 'BUCKET_TRADES', historyRebuilt: false } };
+    for (const old of [candle(1, '999'), { ...candle(2, '999'), series: 'USD' as const }]) {
+      expect(mergeSnapshots(fresh, { ...fresh, items: [old] }).items).toEqual(fresh.items);
+    }
+    expect(mergeSnapshots(null, { ...fresh, items: [...fresh.items, candle(4, '999')] }).items).toEqual(fresh.items);
+    expect(mergeSnapshots(fresh, { ...fresh, items: [{ ...candle(4, '2'), series: 'USD_EXEC_01_V1' }] }).items.map((bar) => bar.t)).toEqual([3, 4]);
+  });
+
   it('evicts suppressed cached bars and keeps half-open gaps authoritative over REST and live revisions', () => {
     const old = snapshot([candle(9, '10'), candle(10, '10'), candle(11, '10'), candle(12, '10')]);
     const hidden: CandleSnapshot = { ...snapshot([]), availability: 'PARTIAL',

@@ -31,6 +31,7 @@ export interface Token {
   };
 }
 export interface Candle {
+  series?: 'USD' | 'USD_EXEC_01_V1';
   retracted?: true;
   t: number;
   o: string;
@@ -45,6 +46,12 @@ export interface Candle {
 }
 
 export interface CandleSnapshot {
+  candleRules?: {
+    series: 'USD' | 'USD_EXEC_01_V1';
+    minTradeNotionalUsd: '0.01' | '0.1';
+    ohlc: 'LEGACY_CONTINUOUS' | 'BUCKET_TRADES';
+    historyRebuilt: boolean;
+  };
   chainId: number;
   tokenAddress: string;
   marketKey: string;

@@ -77,7 +77,7 @@ describe('CandleChart', () => {
     expect(chartMocks.setData).toHaveBeenCalled();
     expect(chartMocks.setData.mock.calls[0]?.[0]).toEqual([
       expect.objectContaining({ time: 1_789_600_000 }),
-      expect.objectContaining({ time: 1_789_600_002, open: 0.018, low: 0.018, close: 0.0184 }),
+      expect.objectContaining({ time: 1_789_600_002, open: 0.0184, low: 0.0184, close: 0.0184 }),
     ]);
     expect(chartMocks.fitContent).toHaveBeenCalled();
   });
