@@ -162,6 +162,8 @@ export const memeApi = {
     tokenAddress: string;
     settlementAsset: 'USDG' | 'ETH' | 'WETH' | 'USDC';
     quoteId: string;
+    routeFingerprint?: string;
+    minAmountOut?: string;
     amountIn: string;
     slippageBps: number;
   }) => request<AccountTransaction>('/sapi/v1/meme/account/transactions', {

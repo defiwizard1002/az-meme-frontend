@@ -103,6 +103,31 @@ function poolLabel(poolType: string): string {
   return poolType === 'UNSUPPORTED' ? '协议未知' : poolType.replaceAll('_', ' ');
 }
 
+function PreparedRouteDetails({ quote, outputSymbol }: { quote: Quote; outputSymbol: string }) {
+  const assets = quote.routeAssets ?? [];
+  const symbol = (address: string) => assets.find((asset) => asset.address.toLowerCase() === address.toLowerCase())?.symbol ?? shortAddress(address);
+  const expires = new Date(quote.expiresAt);
+  const remaining = Math.max(0, Math.ceil((quote.expiresAt - Date.now()) / 1000));
+  return <section className="prepared-route" aria-label="已选交易路径">
+    <strong>已选交易路径</strong>
+    <p className="route-estimate">估计，未经模拟</p>
+    <p className="route-assets">{assets.map((asset) => asset.symbol).join(' → ')}</p>
+    <ol className="route-venues">
+      {quote.routeHops?.length ? quote.routeHops.map((hop, index) => <li key={`${index}:${hop.poolKey}`}>
+        <span>{symbol(hop.tokenIn)} → {symbol(hop.tokenOut)}</span>
+        <span title={`${hop.venue} · ${hop.poolKey}`}>{poolLabel(hop.poolType)} · {shortAddress(hop.venue)}</span>
+      </li>) : quote.routePools?.map((pool, index) => <li key={`${index}:${pool.poolKey}`}>{poolLabel(pool.poolType)}</li>)}
+    </ol>
+    <dl className="quote-details">
+      <div><dt>支付数量</dt><dd>{quote.amountIn} {quote.side === 'BUY' ? quote.settlementAsset : assets[0]?.symbol}</dd></div>
+      <div><dt>预计得到</dt><dd>≈ {quote.expectedAmountOut} {outputSymbol}</dd></div>
+      <div><dt>最低得到</dt><dd>{quote.minAmountOut} {outputSymbol}</dd></div>
+      <div><dt>确认期限</dt><dd><time dateTime={expires.toISOString()}>{expires.toISOString().replace('T', ' ').slice(0, 19)} UTC</time><br />{remaining > 0 ? `剩余 ${remaining} 秒` : '路径已过期，请重新准备'}</dd></div>
+    </dl>
+    <p className="trade-risk" role="note">确认后、提交上链前才会模拟；模拟失败需重新准备并确认。</p>
+  </section>;
+}
+
 function stageLabel(token: Token): string {
   return token.stage === 'GRADUATED' ? '已毕业' : '内盘';
 }
@@ -461,6 +486,7 @@ export default function App() {
   quoteRequestRef.current = quoteRequest;
   const quoteVersionRef = useRef(0);
   const prepared=preparedQuote?.request===quoteRequest?preparedQuote:null;
+  const preparedExpired = Boolean(prepared && prepared.value.expiresAt <= Date.now());
   const quote = prepared?.value ?? (quoteState?.request === quoteRequest ? quoteState.value : null);
   useEffect(()=>{setPreparedQuote(null);},[quoteRequest,accountAvailable]);
 
@@ -519,7 +545,13 @@ export default function App() {
             setAccountError(friendlyError(cause, '余额刷新失败'));
           });
         } else if (latest.status === 'FAILED' || latest.status === 'PARTIAL') {
-          setOrderState(latest.status === 'PARTIAL' ? '部分完成，请检查交易记录' : '交易失败');
+          if (latest.status === 'FAILED' && latest.txHashes.length === 0) {
+            setPreparedQuote(null);
+            setOrderState(null);
+            setError(`${latest.errorMessage ?? '所选路径执行失败'}；请重新准备并确认`);
+          } else {
+            setOrderState(latest.status === 'PARTIAL' ? '部分完成，请检查交易记录' : '交易失败');
+          }
           for (const [key, value] of mainAccountIdempotencyRef.current) {
             if (value === executionId) mainAccountIdempotencyRef.current.delete(key);
           }
@@ -1375,6 +1407,8 @@ export default function App() {
           tokenAddress: selected.tokenAddress,
           settlementAsset,
           quoteId: quote.quoteId!,
+          routeFingerprint: prepared.value.routeFingerprint!,
+          minAmountOut: prepared.minimum,
           amountIn: quote.amountIn,
           slippageBps,
         });
@@ -1405,6 +1439,7 @@ export default function App() {
       });
     } catch (cause) {
       setOrderState(null);
+      if (prepared && cause instanceof ApiError && ['MEME_ROUTE_STALE', 'MEME_QUOTE_REQUEST_MISMATCH', 'MEME_QUOTE_EXPIRED'].includes(cause.code)) setPreparedQuote(null);
       setError(friendlyError(cause, '下单请求未完成'));
     }
   }, [accountAvailable, accountMode, asset, quote, quoteRequest, prepared, selected, side, slippageBps, trackMainAccountTransaction, trackOrder]);
@@ -1622,7 +1657,7 @@ export default function App() {
             </div>
             <dl className="quote-details">
               <div><dt>预计得到</dt><dd>{quote ? `≈ ${readableAmount(quote.expectedAmountOut)} ${side === 'BUY' ? selected?.symbol : asset}` : '等待报价'}</dd></div>
-              <div><dt>最低得到</dt><dd>{quote ? `${readableAmount(quote.minAmountOut)} ${side === 'BUY' ? selected?.symbol : asset}` : '等待报价'}</dd></div>
+              <div><dt>最低得到</dt><dd>{quote ? `${prepared ? quote.minAmountOut : readableAmount(quote.minAmountOut)} ${side === 'BUY' ? selected?.symbol : asset}` : '等待报价'}</dd></div>
               {quote?.residualAssets?.map((a) => <div key={a.address}><dt>预计保留 {a.symbol}</dt><dd>{readableAmount(a.decimals ? `${a.expectedAmountAtomic.padStart(a.decimals+1,'0').slice(0,-a.decimals)}.${a.expectedAmountAtomic.padStart(a.decimals+1,'0').slice(-a.decimals)}` : a.expectedAmountAtomic)} {a.symbol}</dd></div>)}
               <div><dt>滑点设置</dt><dd><select aria-label="滑点设置" value={slippageBps} onChange={(event) => {
                 setSlippageBps(Number(event.target.value)); resetTradeDraft();
@@ -1631,12 +1666,12 @@ export default function App() {
               <div className="security-row"><dt>安全</dt><dd>{safety.map((item) => <span className={`security-${item.tone}`} key={item.text}>{item.text}</span>)}</dd></div>
             </dl>
             {accountMode==='MAIN_ACCOUNT_POC'&&!prepared&&quote&&<p className="trade-risk" role="note">本地估计不保证实际到账；先准备交易，再确认提交。</p>}
-            {prepared&&<p className="trade-risk" role="note">交易已准备，请核对数量和最低得到后确认提交。</p>}
+            {prepared&&<PreparedRouteDetails quote={prepared.value} outputSymbol={side === 'BUY' ? selected?.symbol ?? '' : asset} />}
             {prepared&&<button type="button" disabled={Boolean(orderState)} onClick={()=>setPreparedQuote(null)}>重新估计</button>}
-            {quote?.routePools && quote.routePools.length > 1 && <p className="trade-risk" role="note">交易可能分步完成；中途失败时，已成交部分不会撤销。</p>}
-            <p className="trade-risk" role="note">拆分执行时，累计滑点可能高于所设值；最终以最低得到为准。</p>
-            <button type="button" className="primary" disabled={!accountAvailable || !selected || !quoteRequest || !quote || Boolean(orderState) || (side === 'SELL' && Number(currentBalance) <= 0)} onClick={submitOrder}>
-              {accountError ? '账户连接失败' : !sessionReady ? accountMode === 'MAIN_ACCOUNT_POC' ? '等待主账户' : '等待登录' : orderState ?? (accountMode==='MAIN_ACCOUNT_POC'?(prepared?'确认提交':'准备交易'):(side === 'BUY' ? '买入' : '卖出'))}
+            {!prepared&&quote?.routePools && quote.routePools.length > 1 && <p className="trade-risk" role="note">交易可能分步完成；中途失败时，已成交部分不会撤销。</p>}
+            {!prepared&&<p className="trade-risk" role="note">拆分执行时，累计滑点可能高于所设值；最终以最低得到为准。</p>}
+            <button type="button" className="primary" disabled={!accountAvailable || !selected || !quoteRequest || !quote || Boolean(orderState) || preparedExpired || (side === 'SELL' && Number(currentBalance) <= 0)} onClick={submitOrder}>
+              {accountError ? '账户连接失败' : !sessionReady ? accountMode === 'MAIN_ACCOUNT_POC' ? '等待主账户' : '等待登录' : orderState ?? (accountMode==='MAIN_ACCOUNT_POC'?(prepared?(preparedExpired?'路径已过期':'确认提交'):'准备交易'):(side === 'BUY' ? '买入' : '卖出'))}
             </button>
           </div>
 

@@ -288,7 +288,9 @@ function setup(mode: 'AZ_ACCOUNT' | 'MAIN_ACCOUNT_POC', withSocket = false) {
     nextCursor: cursor ? null : address === tokenA.tokenAddress ? 'a-cursor' : 'b-cursor',
   }));
   vi.spyOn(memeApi, 'createQuote').mockImplementation(async (input) => ({ ...input,
-    quoteId: 'quote', expectedAmountOut: '100', minAmountOut: '95', fees: [], expiresAt: 9999999999999 }));
+    quoteId: 'quote', expectedAmountOut: '100', minAmountOut: '95', fees: [], expiresAt: 9999999999999,
+    routeFingerprint:'chosen',routeAssets:[{address:'input',symbol:'USDG',decimals:18},{address:input.tokenAddress,symbol:'AAA',decimals:18}],
+    routePools:[{poolKey:'actual',poolType:'UNISWAP_V3',liquidityUsd:'1'}] }));
   vi.spyOn(memeApi, 'createOrder').mockResolvedValue({ orderId: 'order', status: 'SETTLED', fundStatus: 'SETTLED' });
   vi.spyOn(memeApi, 'getOrder').mockResolvedValue({ orderId: 'order', status: 'SETTLED', fundStatus: 'SETTLED' });
   const transaction = { executionId: 'execution', tokenAddress: tokenA.tokenAddress, tokenSymbol: tokenA.symbol,

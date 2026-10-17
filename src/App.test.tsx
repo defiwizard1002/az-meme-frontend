@@ -69,7 +69,9 @@ function response(result: unknown) {
 
 function quoteResult(init?: RequestInit) {
   const input = JSON.parse(String(init?.body)) as { tokenAddress: string; side: 'BUY' | 'SELL'; settlementAsset: 'USDG' | 'ETH'; amountIn: string;minAmountOut?:string;purpose?:'ESTIMATE'|'PREPARE_EXECUTION' };
-  return { ...input, quoteId: 'rest-quote', expectedAmountOut: input.minAmountOut??'100', minAmountOut: input.minAmountOut??'95', fees: [], expiresAt: Date.now() + 10_000 };
+  return { ...input, quoteId: 'rest-quote', expectedAmountOut: input.minAmountOut??'100', minAmountOut: input.minAmountOut??'95', fees: [], expiresAt: Date.now() + 10_000,
+    routeFingerprint:'chosen-route',routeAssets:[{address:'input',symbol:input.settlementAsset,decimals:18},{address:input.tokenAddress,symbol:'CASHCAT',decimals:18}],
+    routePools:[{poolKey:'chosen-pool',poolType:'UNISWAP_V3',liquidityUsd:'1'}] };
 }
 
 class ControlledQuoteSocket {

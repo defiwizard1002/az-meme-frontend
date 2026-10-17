@@ -197,6 +197,13 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .quote-details > div { display: flex; justify-content: space-between; gap: 12px; }
 .quote-details dt { flex: 0 0 auto; color: var(--muted); }
 .quote-details dd { min-width: 0; margin: 0; color: #d4d0da; text-align: right; overflow-wrap: anywhere; }
+.prepared-route { padding: 12px 0; border-top: 1px solid var(--line); font-size: 11px; }
+.prepared-route > strong { color: var(--text); }
+.route-estimate { margin: 6px 0 10px; color: #f2b75e; }
+.route-assets { margin: 0 0 9px; color: var(--accent); overflow-wrap: anywhere; line-height: 1.6; }
+.route-venues { display: grid; gap: 8px; margin: 0; padding-left: 18px; color: var(--muted); }
+.route-venues li span { display: block; overflow-wrap: anywhere; line-height: 1.6; }
+.prepared-route .quote-details { margin: 12px 0; }
 .security-row dd { display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
 .security-row dd span { white-space: nowrap; }
 .security-row dd .security-safe { color: var(--positive); }

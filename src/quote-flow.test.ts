@@ -4,7 +4,9 @@ import {memeApi} from './api';
 import type {LocalEstimate,Quote} from './types';
 const request={side:'BUY' as const,tokenAddress:'token',settlementAsset:'USDG' as const,amountIn:'1.000000000000000001',slippageBps:100,purpose:'ESTIMATE' as const};
 const estimate:LocalEstimate={...request,status:'LOCAL_ESTIMATE',requiresExecutionPreparation:true,precision:'CORE_CURVE_ESTIMATE',netRecipientGuaranteed:false,expectedAmountOut:'10',minAmountOut:'9.900000000000000001',fees:[],expiresAt:2000};
-const ready:Quote={...request,quoteId:'prepared-id',expectedAmountOut:'10',minAmountOut:estimate.minAmountOut,fees:[],expiresAt:2000};
+const ready:Quote={...request,quoteId:'prepared-id',expectedAmountOut:'10',minAmountOut:estimate.minAmountOut,fees:[],expiresAt:2000,
+ routeFingerprint:'chosen',routeAssets:[{address:'input',symbol:'USDG',decimals:18},{address:'token',symbol:'TOKEN',decimals:18}],
+ routePools:[{poolKey:'actual',poolType:'UNISWAP_V3',liquidityUsd:'1'}]};
 afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals();});
 describe('estimate → explicit preparation → separate confirmation helpers',()=>{
  it('preserves the exact draft amount and minimum in the preparation POST; no execution POST',async()=>{
@@ -19,6 +21,11 @@ describe('estimate → explicit preparation → separate confirmation helpers',(
  it('rejects edited input, expired preparation and preserves a stricter existing minimum',()=>{
   const input=preparationInput({...request,minAmountOut:'9.99'},estimate);expect(input.minAmountOut).toBe('9.99');
   expect(()=>requirePreparedQuote(ready,{...input,amountIn:'2'},1000)).toThrow('输入不匹配');expect(()=>requirePreparedQuote(ready,input,2000)).toThrow('过期');expect(()=>preparationInput({...request,amountIn:'2'},estimate)).toThrow('不匹配');
+ });
+ it('requires the displayed chosen route and preserves the exact confirmed minimum',()=>{
+  const input=preparationInput(request,estimate);
+  expect(()=>requirePreparedQuote({...ready,routeAssets:[]},input,1000)).toThrow('缺少路径');
+  expect(()=>requirePreparedQuote({...ready,minAmountOut:'9.99'},input,1000)).toThrow('最低得到与确认值不一致');
  });
  it('handles approval-required preparation explicitly without executing or approving',async()=>{
   const fetch=vi.fn().mockResolvedValue(new Response(JSON.stringify({rc:0,result:{status:'APPROVAL_REQUIRED',prerequisiteId:'id'}})));vi.stubGlobal('fetch',fetch);

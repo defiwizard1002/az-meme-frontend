@@ -95,6 +95,10 @@ export interface AccountSummary {
 
 export interface Quote {
   quoteId: string;
+  status?: 'PREPARED_ROUTE';
+  precision?: 'CORE_CURVE_ESTIMATE';
+  netRecipientGuaranteed?: false;
+  simulationStatus?: 'NOT_SIMULATED';
   tokenAddress: string;
   side: 'BUY' | 'SELL';
   amountIn: string;
@@ -105,12 +109,13 @@ export interface Quote {
   residualAssets?: Array<{address:string;symbol:string;decimals:number;expectedAmountAtomic:string}>;
   routeAssets?: Array<{address:string;symbol:string;decimals:number}>;
   routePools?: Array<{poolKey:string;poolType:string;liquidityUsd:string;fee?:number;factoryAddress?:string}>;
+  routeHops?: Array<{poolKey:string;poolType:string;venue:string;tokenIn:string;tokenOut:string}>;
   routeFingerprint?: string;
   fees: Array<{ type: string; asset: Asset; amount: string; estimated: boolean }>;
   expiresAt: number;
 }
 
-export interface LocalEstimate extends Omit<Quote, 'quoteId' | 'executionMode' | 'routeAssets'> {
+export interface LocalEstimate extends Omit<Quote, 'quoteId' | 'status' | 'executionMode' | 'routeAssets'> {
   quoteId?: never;
   status: 'LOCAL_ESTIMATE';
   requiresExecutionPreparation: true;
