@@ -562,6 +562,7 @@ describe('bounded older candle pages', () => {
   it('rejects pages outside the requested upper boundary and permits retry', async () => {
     setup('MAIN_ACCOUNT_POC');
     render(<App />); await screen.findByLabelText('AAA K 线图');
+    await waitFor(() => expect(chart.current!.candles.map((item) => item.t)).toEqual([100]));
     await act(async () => { await expect(chart.current!.onLoadBefore(99)).rejects.toThrow('请求范围'); });
     expect(chart.current!.candles.map((item) => item.t)).toEqual([100]);
     vi.mocked(memeApi.getCandles).mockResolvedValue(snapshot(tokenA, '1m', [candle(50, '1')]));
