@@ -367,6 +367,7 @@ describe('account bootstrap and selection-scoped pagination', () => {
     await waitFor(() => expect(document.querySelector('button.primary')).toBeEnabled());
     expect(memeApi.createQuote).toHaveBeenCalledTimes(1);
     fireEvent.click(document.querySelector('button.primary')!);
+    if(mode==='MAIN_ACCOUNT_POC')fireEvent.click(await screen.findByRole('button',{name:'确认提交'}));
     await waitFor(() => expect(mode === 'MAIN_ACCOUNT_POC' ? memeApi.executeMainAccountTrade : memeApi.createOrder).toHaveBeenCalledTimes(1));
   });
 
@@ -407,6 +408,7 @@ describe('account bootstrap and selection-scoped pagination', () => {
       : { ...snapshot(tokenA, interval), availability: 'PARTIAL', gaps: [gap] });
     render(<App />);
     await screen.findByLabelText('AAA K 线图');
+    await waitFor(()=>expect(chart.current!.candles).toHaveLength(1));
     expect(screen.queryByText(/历史 K 线部分缺失/)).not.toBeInTheDocument();
     await act(async () => { expect(await chart.current!.onLoadBefore(99)).toEqual({ added: 1, exhausted: false }); });
     expect(chart.current!.candles.map((item) => item.t)).toEqual([50, 100]);
@@ -551,6 +553,7 @@ describe('bounded older candle pages', () => {
         : snapshot(tokenA, interval, [candle(50, '1')]);
     });
     render(<App />); await screen.findByLabelText('AAA K 线图');
+    await waitFor(()=>expect(chart.current!.candles).toHaveLength(1));
     await act(async () => expect(await chart.current!.onLoadBefore(99)).toEqual({ added: 0, exhausted: false }));
     await act(async () => expect(await chart.current!.onLoadBefore(99)).toEqual({ added: 1, exhausted: false }));
     expect(olderPages).toBe(2);
@@ -726,13 +729,13 @@ describe('hotfix: bounded account bootstrap and empty demand', () => {
     vi.mocked(memeApi.getCandles).mockResolvedValueOnce({ ...snapshot(tokenA, '1m', []), syncStatus, availability: 'PARTIAL' })
       .mockResolvedValue({ ...snapshot(tokenA), syncStatus, availability: 'PARTIAL' });
     await mount();
-    expect(screen.getByRole('status')).toHaveTextContent('行情暂时不可用');
-    expect(screen.getByRole('status')).toHaveTextContent('请稍后重试');
+    expect(await screen.findByRole('alert')).toHaveTextContent('数据同步失败');
+    expect(screen.getByRole('alert')).toHaveTextContent('请重试');
     expect(screen.getByRole('button', { name: '重试' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     await act(async () => {});
     expect(chart.current!.candles).toEqual([candle(100, '11')]);
-    expect(screen.getByRole('status')).toHaveTextContent('行情暂时不可用');
+    expect(await screen.findByRole('alert')).toHaveTextContent('数据同步失败');
     expect(screen.getByRole('button', { name: '重试' })).toBeEnabled();
   });
 

@@ -68,8 +68,8 @@ function response(result: unknown) {
 }
 
 function quoteResult(init?: RequestInit) {
-  const input = JSON.parse(String(init?.body)) as { tokenAddress: string; side: 'BUY' | 'SELL'; settlementAsset: 'USDG' | 'ETH'; amountIn: string };
-  return { ...input, quoteId: 'rest-quote', expectedAmountOut: '100', minAmountOut: '95', fees: [], expiresAt: Date.now() + 10_000 };
+  const input = JSON.parse(String(init?.body)) as { tokenAddress: string; side: 'BUY' | 'SELL'; settlementAsset: 'USDG' | 'ETH'; amountIn: string;minAmountOut?:string;purpose?:'ESTIMATE'|'PREPARE_EXECUTION' };
+  return { ...input, quoteId: 'rest-quote', expectedAmountOut: input.minAmountOut??'100', minAmountOut: input.minAmountOut??'95', fees: [], expiresAt: Date.now() + 10_000 };
 }
 
 class ControlledQuoteSocket {
@@ -169,6 +169,9 @@ describe('App', () => {
         amountIn: '1', amountOut: null, status: 'FAILED', txHashes: [], errorMessage: 'test', createdAt: 1, updatedAt: 1 })
       : String(input).endsWith('/account/transactions/test') ? response({ status: 'FAILED', txHashes: [], executionId: 'test' }) : fallback(input, init));
     fireEvent.click(document.querySelector('button.primary')!);
+    await waitFor(()=>expect(quotes.at(-1)?.input.purpose).toBe('PREPARE_EXECUTION'));
+    const preparation=quotes.at(-1)!;await act(async()=>preparation.resolve(await response({...preparation.input})));
+    fireEvent.click(await screen.findByRole('button',{name:'确认提交'}));
     await waitFor(() => expect(fetch.mock.calls.some(([input, init]) => String(input).endsWith('/account/transactions')
       && JSON.parse(String(init?.body)).settlementAsset === 'WETH' && JSON.parse(String(init?.body)).quoteId === 'rest-quote')).toBe(true));
   });
@@ -930,9 +933,10 @@ describe('App', () => {
       });
     });
 
-    const buy = (await screen.findAllByRole('button', { name: '买入' })).at(-1)!;
+    const buy = await screen.findByRole('button', { name: '准备交易' });
     await waitFor(() => expect(buy).toBeEnabled());
     fireEvent.click(buy);
+    fireEvent.click(await screen.findByRole('button',{name:'确认提交'}));
 
     await waitFor(() => expect(submittedBody).toMatchObject({
       clientExecutionId: executionId,
