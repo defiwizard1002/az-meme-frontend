@@ -1,9 +1,9 @@
 import {describe,expect,it,vi,afterEach} from 'vitest';
-import {preparationInput,requirePreparedQuote,compareAmounts} from './quote-flow';
+import {preparationInput,requirePreparedQuote,compareAmounts,withSlippageMinimum} from './quote-flow';
 import {memeApi} from './api';
 import type {LocalEstimate,Quote} from './types';
 const request={side:'BUY' as const,tokenAddress:'token',settlementAsset:'USDG' as const,amountIn:'1.000000000000000001',slippageBps:100,purpose:'ESTIMATE' as const};
-const estimate:LocalEstimate={...request,status:'LOCAL_ESTIMATE',requiresExecutionPreparation:true,precision:'CORE_CURVE_ESTIMATE',netRecipientGuaranteed:false,expectedAmountOut:'10',minAmountOut:'9.900000000000000001',fees:[],expiresAt:2000};
+const estimate:LocalEstimate={...request,status:'LOCAL_ESTIMATE',requiresExecutionPreparation:true,precision:'CORE_CURVE_ESTIMATE',netRecipientGuaranteed:false,expectedAmountOut:'10',expectedAmountOutAtomic:'10000000000000000000',outputDecimals:18,minAmountOut:'9.900000000000000001',fees:[],expiresAt:Date.now()+30000};
 const ready:Quote={...request,quoteId:'prepared-id',expectedAmountOut:'10',minAmountOut:estimate.minAmountOut,fees:[],expiresAt:2000,
  routeFingerprint:'chosen',routeAssets:[{address:'input',symbol:'USDG',decimals:18},{address:'token',symbol:'TOKEN',decimals:18}],
  routePools:[{poolKey:'actual',poolType:'UNISWAP_V3',liquidityUsd:'1'}]};
@@ -35,4 +35,13 @@ describe('estimate → explicit preparation → separate confirmation helpers',(
   expect(compareAmounts('9.900000000000000001','9.900000000000000000')).toBe(1);expect(compareAmounts('1.00','1')).toBe(0);
   const sell={...request,side:'SELL' as const};expect(preparationInput(sell,{...estimate,side:'SELL'}).amountIn).toBe(request.amountIn);
  });
+});
+
+it('uses atomic integer floors at 18 and 8 decimals, validates precision and never prepares an expired estimate',()=>{
+ const q={...estimate,outputDecimals:18,expectedAmountOut:'10.000000000000000002',expectedAmountOutAtomic:'10000000000000000002'};
+ expect(withSlippageMinimum(q,2000).minAmountOut).toBe('8.000000000000000001');
+ expect(withSlippageMinimum(q,300).minAmountOut).toBe('9.700000000000000001');
+ expect(withSlippageMinimum({...q,outputDecimals:8,expectedAmountOut:'0.00000026',expectedAmountOutAtomic:'26'},2000).minAmountOut).toBe('0.0000002');
+ expect(()=>withSlippageMinimum({...q,expectedAmountOutAtomic:'1'},2000)).toThrow();
+ expect(()=>preparationInput(request,{...q,expiresAt:Date.now()-1})).toThrow('过期');
 });

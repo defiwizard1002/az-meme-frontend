@@ -6,7 +6,7 @@ import { pollOrderUntilTerminal } from './order-tracker';
 import { pollTransactionUntilTerminal } from './transaction-tracker';
 import type { AccountSummary, AccountTransaction, Asset, Candle, CandleSnapshot, Interval, Quote, QuoteDisplay, Token, Trade } from './types';
 import './styles.css';
-import { preparationInput, requirePreparedQuote } from './quote-flow';
+import { preparationInput, requirePreparedQuote, withSlippageMinimum } from './quote-flow';
 
 const intervals: Interval[] = ['1s', '1m', '15m', '1h', '4h'];
 const ethPresets = ['0.05', '0.1', '0.25', '0.5'];
@@ -399,7 +399,7 @@ export default function App() {
   const setError = useCallback((message: string | null) => setErrorState(message === null ? null : { message }), []);
   const [chainName, setChainName] = useState('Robinhood Chain');
   const [explorerBaseUrl, setExplorerBaseUrl] = useState('');
-  const [slippageBps, setSlippageBps] = useState(300);
+  const [slippageBps, setSlippageBps] = useState(2000);
   const [search, setSearch] = useState('');
   const [searchResults, setSearchResults] = useState<Token[] | null>(null);
   const [discoveryTab, setDiscoveryTab] = useState<'hot' | 'new'>('hot');
@@ -603,7 +603,6 @@ export default function App() {
         if (!active) return;
         setChainName(config.chainName);
         setExplorerBaseUrl(config.explorerBaseUrl);
-        setSlippageBps(config.defaultSlippageBps);
         setMarketRefreshMs(config.marketRefreshMs ?? { hot: 14_400_000, new: 300_000 });
         const nextAccountMode = config.accountMode ?? 'AZ_ACCOUNT';
         const nextSettlementAssets = config.settlementAssets?.length
@@ -1060,7 +1059,7 @@ export default function App() {
               const expected = quoteRequestRef.current;
               if (accountAvailable && expected && matchesQuoteRequest(liveQuote, expected)) {
                 quoteVersionRef.current += 1;
-                setQuoteState({ value: liveQuote, request: expected });
+                setQuoteState({ value: withSlippageMinimum(liveQuote, expected.slippageBps), request: expected });
                 setErrorState((current) => current?.owner === expected ? null : current);
               }
               return;
@@ -1197,7 +1196,7 @@ export default function App() {
         .then((freshQuote) => {
           if (controller.signal.aborted || quoteRequestRef.current !== quoteRequest || quoteVersionRef.current !== version) return;
           if (!matchesQuoteRequest(freshQuote, quoteRequest)) throw new Error('报价与当前请求不匹配');
-          setQuoteState({ value: freshQuote, request: quoteRequest });
+          setQuoteState({ value: withSlippageMinimum(freshQuote, quoteRequest.slippageBps), request: quoteRequest });
           setErrorState((current) => current?.owner === quoteRequest ? null : current);
         })
         .catch((cause: unknown) => {
@@ -1656,16 +1655,16 @@ export default function App() {
               >{preset.label}</button>)}
             </div>
             <dl className="quote-details">
-              <div><dt>预计得到</dt><dd>{quote ? `≈ ${readableAmount(quote.expectedAmountOut)} ${side === 'BUY' ? selected?.symbol : asset}` : '等待报价'}</dd></div>
-              <div><dt>最低得到</dt><dd>{quote ? `${prepared ? quote.minAmountOut : readableAmount(quote.minAmountOut)} ${side === 'BUY' ? selected?.symbol : asset}` : '等待报价'}</dd></div>
+              <div><dt>预计得到</dt><dd>{quote ? `≈ ${quote.expectedAmountOut} ${side === 'BUY' ? selected?.symbol : asset}` : '等待报价'}</dd></div>
+              <div><dt>最低得到</dt><dd>{quote ? `${quote.minAmountOut} ${side === 'BUY' ? selected?.symbol : asset}` : '等待报价'}</dd></div>
               {quote?.residualAssets?.map((a) => <div key={a.address}><dt>预计保留 {a.symbol}</dt><dd>{readableAmount(a.decimals ? `${a.expectedAmountAtomic.padStart(a.decimals+1,'0').slice(0,-a.decimals)}.${a.expectedAmountAtomic.padStart(a.decimals+1,'0').slice(-a.decimals)}` : a.expectedAmountAtomic)} {a.symbol}</dd></div>)}
               <div><dt>滑点设置</dt><dd><select aria-label="滑点设置" value={slippageBps} onChange={(event) => {
                 setSlippageBps(Number(event.target.value)); resetTradeDraft();
-              }}>{[...new Set([50,100,300,500,1000,3000,slippageBps])].sort((a,b)=>a-b).map((bps) =>
+              }}>{[...new Set([50,100,300,500,1000,2000,3000,slippageBps])].sort((a,b)=>a-b).map((bps) =>
                 <option key={bps} value={bps}>{bps / 100}%</option>)}</select></dd></div>
               <div className="security-row"><dt>安全</dt><dd>{safety.map((item) => <span className={`security-${item.tone}`} key={item.text}>{item.text}</span>)}</dd></div>
             </dl>
-            {accountMode==='MAIN_ACCOUNT_POC'&&!prepared&&quote&&<p className="trade-risk" role="note">本地估计不保证实际到账；先准备交易，再确认提交。</p>}
+            {accountMode==='MAIN_ACCOUNT_POC'&&!prepared&&quote&&<p className="trade-risk" role="note">预计得到来自本地可执行曲线报价，与图表最新成交价可能不同，不保证实际到账；先准备交易，再确认提交。</p>}
             {prepared&&<PreparedRouteDetails quote={prepared.value} outputSymbol={side === 'BUY' ? selected?.symbol ?? '' : asset} />}
             {prepared&&<button type="button" disabled={Boolean(orderState)} onClick={()=>setPreparedQuote(null)}>重新估计</button>}
             {!prepared&&quote?.routePools && quote.routePools.length > 1 && <p className="trade-risk" role="note">交易可能分步完成；中途失败时，已成交部分不会撤销。</p>}

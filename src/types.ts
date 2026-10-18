@@ -116,6 +116,8 @@ export interface Quote {
 }
 
 export interface LocalEstimate extends Omit<Quote, 'quoteId' | 'status' | 'executionMode' | 'routeAssets'> {
+  expectedAmountOutAtomic: string;
+  outputDecimals: number;
   quoteId?: never;
   status: 'LOCAL_ESTIMATE';
   requiresExecutionPreparation: true;

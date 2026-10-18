@@ -12,10 +12,10 @@ const token = { chainId: 4663, tokenAddress, symbol: 'CAT', name: 'Cat', launchp
   quoteAssetKey: 'NATIVE', priceUsd: '1', marketCapUsd: '1', volume24hUsd: '1', change5m: '0', change24h: '0',
   holders: 1, ageSeconds: 1, pool: { poolKey: 'display-source', poolType: 'UNSUPPORTED', liquidityUsd: '1' },
   tradeStatus: 'TRADABLE', riskFlags: [], security: {} };
-const minimum = '9.700000000000000001';
+const minimum = '8.000000000000000001';
 const estimate: LocalEstimate = { tokenAddress, side: 'BUY', settlementAsset: 'USDG', amountIn: '1',
   status: 'LOCAL_ESTIMATE', requiresExecutionPreparation: true, precision: 'CORE_CURVE_ESTIMATE',
-  netRecipientGuaranteed: false, expectedAmountOut: '10', minAmountOut: minimum, fees: [], expiresAt: Date.now() + 30_000 };
+  netRecipientGuaranteed: false, expectedAmountOut: '10.000000000000000002', expectedAmountOutAtomic: '10000000000000000002', outputDecimals: 18, minAmountOut: minimum, fees: [], expiresAt: Date.now() + 30_000 };
 function selectedRoute(): Quote {
   return { ...estimate, quoteId: 'chosen-route', status: 'PREPARED_ROUTE', simulationStatus: 'NOT_SIMULATED',
     expiresAt: Date.now() + 15_000, routeFingerprint: 'bound-route',
@@ -40,7 +40,7 @@ function setup() {
       syncStatus: 'READY', availability: 'COMPLETE', gaps: [], coverage: { from: null, to: null }, revision: '1', asOfBlock: 1, source: 'CHAIN', items: [] });
     return envelope(token);
   });
-  const prepare = vi.spyOn(memeApi, 'createQuote').mockImplementation(async (request) => request.purpose === 'PREPARE_EXECUTION' ? selectedRoute() : estimate);
+  const prepare = vi.spyOn(memeApi, 'createQuote').mockImplementation(async (request) => request.purpose === 'PREPARE_EXECUTION' ? { ...selectedRoute(), amountIn: request.amountIn, minAmountOut: request.minAmountOut! } : { ...estimate, amountIn: request.amountIn });
   const execute = vi.spyOn(memeApi, 'executeMainAccountTrade');
   const order = vi.spyOn(memeApi, 'createOrder');
   render(<App />);
@@ -63,7 +63,7 @@ describe('route first, separate user confirmation', () => {
     expect(route).toHaveTextContent('估计，未经模拟');
     expect(route).toHaveTextContent(`最低得到${minimum} CAT`);
     expect(route).toHaveTextContent('支付数量1 USDG');
-    expect(route).toHaveTextContent('预计得到≈ 10 CAT');
+    expect(route).toHaveTextContent('预计得到≈ 10.000000000000000002 CAT');
     expect(route.querySelector('time')).toHaveAttribute('dateTime');
     expect(route).toHaveTextContent(/剩余 1[45] 秒/);
     expect(prepare.mock.calls.at(-1)?.[0]).toMatchObject({ purpose: 'PREPARE_EXECUTION', amountIn: '1', minAmountOut: minimum });
@@ -125,4 +125,36 @@ describe('route first, separate user confirmation', () => {
     expect(execute).toHaveBeenCalledTimes(1);
     expect(order).not.toHaveBeenCalled();
   });
+});
+
+it('defaults to exactly 20%, shows exact quote/minimum, and carries an edited 3% through refresh and preparation', async () => {
+ const {prepare,execute}=setup();
+ const button=await screen.findByRole('button',{name:'准备交易'});
+ await waitFor(()=>expect(button).toBeEnabled());
+ expect(screen.getByLabelText('滑点设置')).toHaveValue('2000');
+ expect(prepare.mock.calls.at(-1)?.[0].slippageBps).toBe(2000);
+ expect(document.querySelector('.quote-details')).toHaveTextContent('预计得到≈ 10.000000000000000002 CAT');
+ expect(document.querySelector('.quote-details')).toHaveTextContent(`最低得到${minimum} CAT`);
+ fireEvent.change(screen.getByLabelText('滑点设置'),{target:{value:'300'}});
+ await waitFor(()=>expect(button).toBeEnabled());
+ expect(prepare.mock.calls.at(-1)?.[0].slippageBps).toBe(300);
+ expect(document.querySelector('.quote-details')).toHaveTextContent('最低得到9.700000000000000001 CAT');
+ fireEvent.click(button);
+ await screen.findByRole('region',{name:'已选交易路径'});
+ expect(prepare.mock.calls.at(-1)?.[0]).toMatchObject({purpose:'PREPARE_EXECUTION',slippageBps:300,minAmountOut:'9.700000000000000001'});
+ expect(execute).not.toHaveBeenCalled();
+});
+
+it('updates the visible minimum with refreshed estimates but keeps a prepared commitment unchanged',async()=>{
+ vi.useFakeTimers();const {prepare,execute}=setup();await act(async()=>{});
+ prepare.mockImplementation(async request=>request.purpose==='PREPARE_EXECUTION'
+  ?{...selectedRoute(),minAmountOut:request.minAmountOut!}
+  :{...estimate,expectedAmountOut:'12.000000000000000002',expectedAmountOutAtomic:'12000000000000000002'});
+ await act(async()=>vi.advanceTimersByTimeAsync(10001));
+ expect(document.querySelector('.quote-details')).toHaveTextContent('最低得到9.600000000000000001 CAT');
+ fireEvent.click(screen.getByRole('button',{name:'准备交易'}));await act(async()=>{});
+ expect(prepare.mock.calls.at(-1)?.[0].minAmountOut).toBe('9.600000000000000001');
+ await act(async()=>vi.advanceTimersByTimeAsync(10001));
+ expect(screen.getByRole('region',{name:'已选交易路径'})).toHaveTextContent('最低得到9.600000000000000001 CAT');
+ expect(execute).not.toHaveBeenCalled();
 });
