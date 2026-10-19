@@ -20,14 +20,12 @@ describe("HTTP envelopes", () => {
     });
   });
   it("identifies the exact public gateway denial without retrying the quote POST", async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValue(
-        new Response("Signing is available only on the private account entry\n", {
-          status: 403,
-          headers: { "content-type": "text/plain" },
-        }),
-      );
+    const fetch = vi.fn().mockResolvedValue(
+      new Response("Signing is available only on the private account entry\n", {
+        status: 403,
+        headers: { "content-type": "text/plain" },
+      }),
+    );
     vi.stubGlobal("fetch", fetch);
     await expect(
       memeApi.createQuote({
@@ -67,19 +65,17 @@ describe("HTTP envelopes", () => {
   it("retains the private unsupported-pool 409 as an explicit failure", async () => {
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          new Response(
-            JSON.stringify({
-              rc: 409,
-              mc: "MEME_UNSUPPORTED_POOL_TYPE",
-              ma: ["Unsupported pool"],
-              result: null,
-            }),
-            { status: 409 },
-          ),
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            rc: 409,
+            mc: "MEME_UNSUPPORTED_POOL_TYPE",
+            ma: ["Unsupported pool"],
+            result: null,
+          }),
+          { status: 409 },
         ),
+      ),
     );
     await expect(
       memeApi.createQuote({

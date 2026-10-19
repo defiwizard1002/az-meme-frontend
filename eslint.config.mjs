@@ -25,6 +25,10 @@ export default defineConfig(
     rules: {
       // Existing public and test APIs use explicit any; changing those types is a separate task.
       "@typescript-eslint/no-explicit-any": "off",
+      // Provider/filesystem errors are deliberately sanitized; raw causes may expose secrets.
+      "preserve-caught-error": "off",
+      // Allow mixed mutable declarations and callbacks wired before their value is assigned.
+      "prefer-const": ["error", { destructuring: "all", ignoreReadBeforeAssign: true }],
       "@typescript-eslint/no-unused-vars": [
         "error",
         {

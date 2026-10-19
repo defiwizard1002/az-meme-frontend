@@ -134,6 +134,7 @@ export function CandleChart({
   onLoadBefore,
 }: Props) {
   const data = useMemo(() => buildChartData(candles), [candles]);
+  const initialPrecisionRef = useRef(pricePrecision(data.candles));
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -217,7 +218,7 @@ export function CandleChart({
       borderVisible: false,
       wickUpColor: "#39d98a",
       wickDownColor: "#ff4d79",
-      priceFormat: { type: "price", ...pricePrecision(data.candles) },
+      priceFormat: { type: "price", ...initialPrecisionRef.current },
     });
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" },

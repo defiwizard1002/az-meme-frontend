@@ -811,7 +811,7 @@ export default function App() {
       transactionPollsRef.current.set(executionId, { controller, promise });
       return await promise;
     },
-    [refreshMainAccount],
+    [refreshMainAccount, setError],
   );
 
   useEffect(
@@ -824,34 +824,37 @@ export default function App() {
     [],
   );
 
-  const selectToken = useCallback(async (summary: Token) => {
-    const requestId = ++selectionRequestRef.current;
-    setError(null);
-    setMarketError(null);
-    tradesPausedRef.current = false;
-    setTradesPaused(false);
-    setSelected(summary);
-    try {
-      const detail = await memeApi.getToken(summary.tokenAddress);
-      if (requestId !== selectionRequestRef.current) return;
-      setTokens((current) =>
-        current.map((item) => (item.tokenAddress === detail.tokenAddress ? detail : item)),
-      );
-      setSearchResults(
-        (current) =>
-          current?.map((item) =>
-            item.tokenAddress === detail.tokenAddress
-              ? { ...detail, volume1hUsd: item.volume1hUsd }
-              : item,
-          ) ?? null,
-      );
-      setSelected(detail);
-    } catch (cause) {
-      if (requestId === selectionRequestRef.current) {
-        setMarketError(friendlyError(cause, "该代币行情暂不可用"));
+  const selectToken = useCallback(
+    async (summary: Token) => {
+      const requestId = ++selectionRequestRef.current;
+      setError(null);
+      setMarketError(null);
+      tradesPausedRef.current = false;
+      setTradesPaused(false);
+      setSelected(summary);
+      try {
+        const detail = await memeApi.getToken(summary.tokenAddress);
+        if (requestId !== selectionRequestRef.current) return;
+        setTokens((current) =>
+          current.map((item) => (item.tokenAddress === detail.tokenAddress ? detail : item)),
+        );
+        setSearchResults(
+          (current) =>
+            current?.map((item) =>
+              item.tokenAddress === detail.tokenAddress
+                ? { ...detail, volume1hUsd: item.volume1hUsd }
+                : item,
+            ) ?? null,
+        );
+        setSelected(detail);
+      } catch (cause) {
+        if (requestId === selectionRequestRef.current) {
+          setMarketError(friendlyError(cause, "该代币行情暂不可用"));
+        }
       }
-    }
-  }, []);
+    },
+    [setError],
+  );
 
   useEffect(() => {
     let active = true;
@@ -927,7 +930,7 @@ export default function App() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [discoveryTab, marketRefreshMs, tokens.length]);
+  }, [discoveryTab, marketRefreshMs, tokens.length, setError]);
 
   useEffect(() => {
     if (!activeTradeKey || !selectedTokenAddress || !selectedMarketKey) {
@@ -971,7 +974,7 @@ export default function App() {
       if (tradeHistoryScopeRef.current === scope) tradeHistoryScopeRef.current = null;
       controller.abort();
     };
-  }, [activeTradeKey, selectedMarketKey, selectedTokenAddress]);
+  }, [activeTradeKey, selectedMarketKey, selectedTokenAddress, setError]);
 
   useEffect(() => {
     if (!hasTrades || tradesPaused) return;
@@ -1008,7 +1011,7 @@ export default function App() {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [search]);
+  }, [search, setError]);
 
   useEffect(() => {
     if (!accountMode) return;
@@ -1088,7 +1091,7 @@ export default function App() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [accountMode, accountRetry, trackMainAccountTransaction, trackOrder]);
+  }, [accountMode, accountRetry, trackMainAccountTransaction, trackOrder, setError]);
 
   useEffect(() => {
     if (!sessionReady || accountMode !== "MAIN_ACCOUNT_POC") return;
@@ -1670,6 +1673,7 @@ export default function App() {
     marketStreamAvailable,
     interval,
     setCachedSnapshot,
+    setError,
   ]);
 
   useEffect(() => {
@@ -1773,7 +1777,14 @@ export default function App() {
           if (tradeHistoryScopeRef.current === scope) setTradesLoading(false);
         });
     },
-    [activeTradeKey, selectedMarketKey, selectedTokenAddress, tradeNextCursor, tradesLoading],
+    [
+      activeTradeKey,
+      selectedMarketKey,
+      selectedTokenAddress,
+      tradeNextCursor,
+      tradesLoading,
+      setError,
+    ],
   );
   const toggleTradesPaused = useCallback(() => {
     const next = !tradesPausedRef.current;
@@ -1835,7 +1846,7 @@ export default function App() {
         setMarketLoading(false);
       }
     },
-    [discoveryTab, marketLoading, selectToken, selected?.tokenAddress],
+    [discoveryTab, marketLoading, selectToken, selected?.tokenAddress, setError],
   );
   const tradePresets = useMemo(() => {
     if (side === "BUY") {
@@ -2073,6 +2084,7 @@ export default function App() {
     slippageBps,
     trackMainAccountTransaction,
     trackOrder,
+    setError,
   ]);
 
   const submitApproval = useCallback(async () => {
@@ -2137,7 +2149,7 @@ export default function App() {
       setTransferState(null);
       setError(friendlyError(cause, "划转失败"));
     }
-  }, [accountAvailable, transferAmount, transferAsset, transferDirection]);
+  }, [accountAvailable, transferAmount, transferAsset, transferDirection, setError]);
 
   if (loading) return <main className="full-state">正在加载</main>;
   if (bootstrapError)

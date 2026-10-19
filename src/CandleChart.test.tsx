@@ -244,7 +244,9 @@ describe("visible-range left history", () => {
   });
   it("prepends genuinely older bars and preserves the viewport", async () => {
     const { rerender } = render(<CandleChart symbol="A" candles={candles} />);
+    const creations = chartMocks.createChart.mock.calls.length;
     rerender(<CandleChart symbol="A" candles={[{ ...candles[0]!, t: 40 }, ...candles]} />);
+    expect(chartMocks.createChart).toHaveBeenCalledTimes(creations);
     expect(chartMocks.setData).toHaveBeenCalledWith(
       expect.arrayContaining([expect.objectContaining({ time: 40 })]),
     );
