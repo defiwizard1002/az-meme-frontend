@@ -1,0 +1,21 @@
+# Dependencies and generated output
+**/node_modules/
+**/dist/
+**/build/
+**/coverage/
+**/*.tsbuildinfo
+# Separate repositories; the parent scripts invoke our two children explicitly.
+submodules/
+# Package-manager output and captured historical evidence/data
+**/pnpm-lock.yaml
+**/package-lock.json
+**/yarn.lock
+docs/
+**/artifacts/
+**/snapshots/
+**/fixtures/**/*.json
+# Secrets and repository instructions
+**/.env*
+**/*.pem
+**/*.key
+**/AGENTS.md

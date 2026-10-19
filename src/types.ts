@@ -1,5 +1,5 @@
-export type Interval = '1s' | '1m' | '15m' | '1h' | '4h';
-export type Asset = 'WETH' | 'ETH' | 'USDC' | 'USDT' | 'USDG';
+export type Interval = "1s" | "1m" | "15m" | "1h" | "4h";
+export type Asset = "WETH" | "ETH" | "USDC" | "USDT" | "USDG";
 
 export interface Token {
   chainId: number;
@@ -7,13 +7,13 @@ export interface Token {
   symbol: string;
   name: string;
   launchpad: string;
-  stage: 'CURVE' | 'GRADUATED';
-  quoteAssetKey: 'NATIVE' | 'USDC' | 'USDT' | 'USDG' | 'OTHER';
+  stage: "CURVE" | "GRADUATED";
+  quoteAssetKey: "NATIVE" | "USDC" | "USDT" | "USDG" | "OTHER";
   priceQuote: string;
   priceUsd: string;
   marketCapUsd: string;
   liquidityUsd?: string;
-  liquiditySource?: 'GMGN_TOKEN_AGGREGATE';
+  liquiditySource?: "GMGN_TOKEN_AGGREGATE";
   volume1hUsd?: string;
   volume24hUsd: string;
   change5m: string;
@@ -21,7 +21,7 @@ export interface Token {
   holders: number;
   ageSeconds: number;
   pool: { poolKey: string; poolType: string; liquidityUsd: string; quoteTokenSymbol?: string };
-  tradeStatus: 'TRADABLE' | 'UNSUPPORTED_POOL_TYPE';
+  tradeStatus: "TRADABLE" | "UNSUPPORTED_POOL_TYPE";
   riskFlags: string[];
   security: {
     isHoneypot: boolean | null;
@@ -46,7 +46,7 @@ export interface Token {
   };
 }
 export interface Candle {
-  series?: 'USD' | 'USD_EXEC_01_V1';
+  series?: "USD" | "USD_EXEC_01_V1";
   retracted?: true;
   t: number;
   o: string;
@@ -56,30 +56,34 @@ export interface Candle {
   baseVolume: string | null;
   quoteVolume: string | null;
   rawVolume?: string;
-  rawVolumeUnit?: 'BASE' | 'QUOTE' | 'USD' | 'UNKNOWN';
+  rawVolumeUnit?: "BASE" | "QUOTE" | "USD" | "UNKNOWN";
   revision: string;
 }
 
 export interface CandleSnapshot {
   candleRules?: {
-    series: 'USD' | 'USD_EXEC_01_V1';
-    minTradeNotionalUsd: '0.01' | '0.1';
-    ohlc: 'LEGACY_CONTINUOUS' | 'BUCKET_TRADES';
+    series: "USD" | "USD_EXEC_01_V1";
+    minTradeNotionalUsd: "0.01" | "0.1";
+    ohlc: "LEGACY_CONTINUOUS" | "BUCKET_TRADES";
     historyRebuilt: boolean;
   };
   chainId: number;
   tokenAddress: string;
   marketKey: string;
   interval: Interval;
-  syncStatus: 'BACKFILLING' | 'CATCHING_UP' | 'READY' | 'STALE' | 'FAILED';
-  availability: 'COMPLETE' | 'PARTIAL' | 'UNAVAILABLE_BEFORE_START';
+  syncStatus: "BACKFILLING" | "CATCHING_UP" | "READY" | "STALE" | "FAILED";
+  availability: "COMPLETE" | "PARTIAL" | "UNAVAILABLE_BEFORE_START";
   coverage: { from: number | null; to: number | null };
-  gaps: Array<{ from: number; to: number; reason: 'BEFORE_SCAN_START' | 'EVENT_EXPIRED' | 'PRICING_SUPPRESSED' }>;
+  gaps: Array<{
+    from: number;
+    to: number;
+    reason: "BEFORE_SCAN_START" | "EVENT_EXPIRED" | "PRICING_SUPPRESSED";
+  }>;
   revision: string;
   asOfBlock: number | null;
-  source: 'CHAIN';
+  source: "CHAIN";
   items: Candle[];
-  retractions?: Array<{t:number;revision:string}>;
+  retractions?: Array<{ t: number; revision: string }>;
 }
 
 export interface Trade {
@@ -94,7 +98,7 @@ export interface Trade {
   counterAddress?: string;
   tradeId: string;
   t: number;
-  side: 'BUY' | 'SELL';
+  side: "BUY" | "SELL";
   priceUsd: string;
   baseAmount: string;
   quoteAmount: string;
@@ -105,12 +109,18 @@ export interface Trade {
 
 export interface AccountSummary {
   quoteBalances: Array<{ asset: Asset; available: string; frozen: string }>;
-  positions: Array<{ tokenAddress: string; symbol: string; available: string; costUsd: string; valueUsd: string }>;
+  positions: Array<{
+    tokenAddress: string;
+    symbol: string;
+    available: string;
+    costUsd: string;
+    valueUsd: string;
+  }>;
 }
 
 export interface GasEstimate {
   estimated: true;
-  source: 'RECENT_ATOMIC_RECEIPT';
+  source: "RECENT_ATOMIC_RECEIPT";
   gasUnits: string;
   gasPriceWei: string;
   estimatedFeeWei: string;
@@ -122,34 +132,54 @@ export interface GasEstimate {
 
 export interface Quote {
   quoteId: string;
-  status?: 'PREPARED_ROUTE';
-  precision?: 'CORE_CURVE_ESTIMATE';
+  status?: "PREPARED_ROUTE";
+  precision?: "CORE_CURVE_ESTIMATE";
   netRecipientGuaranteed?: false;
-  simulationStatus?: 'NOT_SIMULATED';
+  simulationStatus?: "NOT_SIMULATED";
   tokenAddress: string;
-  side: 'BUY' | 'SELL';
+  side: "BUY" | "SELL";
   amountIn: string;
   expectedAmountOut: string;
   minAmountOut: string;
   settlementAsset: Asset;
-  executionMode?: 'DIRECT_ETH' | 'PLATFORM_ETH_INVENTORY' | 'MAIN_ACCOUNT';
-  residualAssets?: Array<{address:string;symbol:string;decimals:number;expectedAmountAtomic:string}>;
-  routeAssets?: Array<{address:string;symbol:string;decimals:number}>;
-  routePools?: Array<{poolKey:string;poolType:string;liquidityUsd:string;fee?:number;factoryAddress?:string}>;
-  routeHops?: Array<{poolKey:string;poolType:string;venue:string;tokenIn:string;tokenOut:string}>;
+  executionMode?: "DIRECT_ETH" | "PLATFORM_ETH_INVENTORY" | "MAIN_ACCOUNT";
+  residualAssets?: Array<{
+    address: string;
+    symbol: string;
+    decimals: number;
+    expectedAmountAtomic: string;
+  }>;
+  routeAssets?: Array<{ address: string; symbol: string; decimals: number }>;
+  routePools?: Array<{
+    poolKey: string;
+    poolType: string;
+    liquidityUsd: string;
+    fee?: number;
+    factoryAddress?: string;
+  }>;
+  routeHops?: Array<{
+    poolKey: string;
+    poolType: string;
+    venue: string;
+    tokenIn: string;
+    tokenOut: string;
+  }>;
   routeFingerprint?: string;
   fees: Array<{ type: string; asset: Asset; amount: string; estimated: boolean }>;
   gasEstimate?: GasEstimate;
   expiresAt: number;
 }
 
-export interface LocalEstimate extends Omit<Quote, 'quoteId' | 'status' | 'executionMode' | 'routeAssets'> {
+export interface LocalEstimate extends Omit<
+  Quote,
+  "quoteId" | "status" | "executionMode" | "routeAssets"
+> {
   expectedAmountOutAtomic: string;
   outputDecimals: number;
   quoteId?: never;
-  status: 'LOCAL_ESTIMATE';
+  status: "LOCAL_ESTIMATE";
   requiresExecutionPreparation: true;
-  precision: 'CORE_CURVE_ESTIMATE';
+  precision: "CORE_CURVE_ESTIMATE";
   netRecipientGuaranteed: false;
   routeAssets?: string[];
 }
@@ -157,8 +187,18 @@ export type QuoteDisplay = Quote | LocalEstimate;
 
 export interface Order {
   orderId: string;
-  status: 'CREATED' | 'RESERVED' | 'SIGNED' | 'SUBMITTING' | 'SUBMITTED' | 'CONFIRMED' | 'SETTLED' | 'FAILED_FINAL' | 'SUBMISSION_UNKNOWN' | 'MANUAL_REVIEW';
-  fundStatus: 'RESERVED' | 'SETTLED' | 'RELEASED';
+  status:
+    | "CREATED"
+    | "RESERVED"
+    | "SIGNED"
+    | "SUBMITTING"
+    | "SUBMITTED"
+    | "CONFIRMED"
+    | "SETTLED"
+    | "FAILED_FINAL"
+    | "SUBMISSION_UNKNOWN"
+    | "MANUAL_REVIEW";
+  fundStatus: "RESERVED" | "SETTLED" | "RELEASED";
   txHash?: string;
 }
 
@@ -166,12 +206,12 @@ export interface AccountTransaction {
   executionId: string;
   tokenAddress: string;
   tokenSymbol: string;
-  side: 'BUY' | 'SELL';
-  settlementAsset: 'USDG' | 'ETH' | 'WETH' | 'USDC';
+  side: "BUY" | "SELL";
+  settlementAsset: "USDG" | "ETH" | "WETH" | "USDC";
   amountIn: string;
   amountOut: string | null;
-  status: 'PENDING' | 'CONFIRMED' | 'FAILED' | 'PARTIAL' | 'SUBMISSION_UNKNOWN';
-  confirmedSteps?: Array<{stepIndex:number;kind:string;txHash:string}>;
+  status: "PENDING" | "CONFIRMED" | "FAILED" | "PARTIAL" | "SUBMISSION_UNKNOWN";
+  confirmedSteps?: Array<{ stepIndex: number; kind: string; txHash: string }>;
   txHashes: string[];
   errorMessage: string | null;
   createdAt: number;
@@ -179,10 +219,10 @@ export interface AccountTransaction {
 }
 
 export interface TradePlan {
-  route: 'MULTI_HOP' | 'DIRECT' | 'USDG_BRIDGE' | 'SETTLEMENT_BRIDGE';
+  route: "MULTI_HOP" | "DIRECT" | "USDG_BRIDGE" | "SETTLEMENT_BRIDGE";
   selectedPool: { poolType: string; liquidityUsd: string; quoteTokenSymbol?: string };
-  routeAssets?: Quote['routeAssets'];
-  routePools?: Quote['routePools'];
+  routeAssets?: Quote["routeAssets"];
+  routePools?: Quote["routePools"];
   routeFingerprint?: string;
-  simulation?: { status: 'SUCCESS'; bufferedGas: string; estimatedFeeWei: string };
+  simulation?: { status: "SUCCESS"; bufferedGas: string; estimatedFeeWei: string };
 }

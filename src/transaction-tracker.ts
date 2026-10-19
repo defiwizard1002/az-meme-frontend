@@ -1,4 +1,4 @@
-import type { AccountTransaction } from './types';
+import type { AccountTransaction } from "./types";
 
 interface PollTransactionOptions {
   signal: AbortSignal;
@@ -10,7 +10,7 @@ interface PollTransactionOptions {
 }
 
 function isTerminal(transaction: AccountTransaction): boolean {
-  return transaction.status !== 'PENDING';
+  return transaction.status !== "PENDING";
 }
 
 function wait(ms: number, signal: AbortSignal): Promise<void> {
@@ -18,11 +18,11 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     const timer = window.setTimeout(finish, ms);
     function finish() {
-      signal.removeEventListener('abort', finish);
+      signal.removeEventListener("abort", finish);
       window.clearTimeout(timer);
       resolve();
     }
-    signal.addEventListener('abort', finish, { once: true });
+    signal.addEventListener("abort", finish, { once: true });
   });
 }
 
@@ -44,7 +44,10 @@ export async function pollTransactionUntilTerminal(
       if (options.signal.aborted) break;
       consecutiveErrors += 1;
       options.onTemporaryError?.(cause);
-      const retryMs = Math.min(maxRetryIntervalMs, pollIntervalMs * 2 ** Math.min(consecutiveErrors, 6));
+      const retryMs = Math.min(
+        maxRetryIntervalMs,
+        pollIntervalMs * 2 ** Math.min(consecutiveErrors, 6),
+      );
       await wait(retryMs, options.signal);
     }
   }

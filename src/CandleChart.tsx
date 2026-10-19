@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CandlestickSeries,
   ColorType,
@@ -12,12 +12,12 @@ import {
   type MouseEventParams,
   type Time,
   type UTCTimestamp,
-} from 'lightweight-charts';
-import type { Candle, CandleSnapshot } from './types';
+} from "lightweight-charts";
+import type { Candle, CandleSnapshot } from "./types";
 
 interface Props {
   candles: Candle[];
-  gaps?: CandleSnapshot['gaps'];
+  gaps?: CandleSnapshot["gaps"];
   legacy?: boolean;
   symbol: string;
   refreshing?: boolean;
@@ -34,7 +34,7 @@ export interface HistoryLoadResult {
 const CHART_VALUE_BOUND = Number.MAX_SAFE_INTEGER / 100;
 const MINIMUM_VIEW_BARS = 30;
 const HISTORY_PAGES_PER_BURST = 4;
-const NO_GAPS: CandleSnapshot['gaps'] = [];
+const NO_GAPS: CandleSnapshot["gaps"] = [];
 
 export interface ChartData {
   candles: CandlestickData<UTCTimestamp>[];
@@ -63,7 +63,11 @@ export function buildChartData(candles: Candle[]): ChartData {
       low: Number(item.l),
       close: Number(item.c),
     };
-    if (![bar.open, bar.high, bar.low, bar.close].every((value) => value > 0 && isRenderableValue(value))) {
+    if (
+      ![bar.open, bar.high, bar.low, bar.close].every(
+        (value) => value > 0 && isRenderableValue(value),
+      )
+    ) {
       data.excludedCount += 1;
       continue;
     }
@@ -76,7 +80,11 @@ export function buildChartData(candles: Candle[]): ChartData {
     if (item.quoteVolume !== null) {
       const volume = Number(item.quoteVolume);
       if (volume >= 0 && isRenderableValue(volume)) {
-        data.volumes.push({ time: bar.time, value: volume, color: bar.close >= bar.open ? '#39d98a55' : '#ff4d7955' });
+        data.volumes.push({
+          time: bar.time,
+          value: volume,
+          color: bar.close >= bar.open ? "#39d98a55" : "#ff4d7955",
+        });
       }
     }
   }
@@ -84,7 +92,9 @@ export function buildChartData(candles: Candle[]): ChartData {
 }
 
 function remapLogicalRange(
-  range: { from: number; to: number }, previous: ChartData['candles'], next: ChartData['candles'],
+  range: { from: number; to: number },
+  previous: ChartData["candles"],
+  next: ChartData["candles"],
 ): { from: number; to: number } {
   const indexes = new Map(next.map((bar, index) => [bar.time, index]));
   const anchors = previous.flatMap((bar, index) => {
@@ -95,7 +105,10 @@ function remapLogicalRange(
     const right = anchors.find((anchor) => anchor.before >= logical);
     const left = [...anchors].reverse().find((anchor) => anchor.before <= logical);
     if (left && right && left !== right) {
-      return left.after + (logical - left.before) * (right.after - left.after) / (right.before - left.before);
+      return (
+        left.after +
+        ((logical - left.before) * (right.after - left.after)) / (right.before - left.before)
+      );
     }
     const anchor = left ?? right;
     return anchor ? logical + anchor.after - anchor.before : logical;
@@ -103,7 +116,7 @@ function remapLogicalRange(
   return { from: remap(range.from), to: remap(range.to) };
 }
 
-function pricePrecision(candles: ChartData['candles']): { precision: number; minMove: number } {
+function pricePrecision(candles: ChartData["candles"]): { precision: number; minMove: number } {
   const last = candles.at(-1)?.close ?? 0;
   if (last >= 100) return { precision: 2, minMove: 0.01 };
   if (last >= 1) return { precision: 4, minMove: 0.0001 };
@@ -111,16 +124,28 @@ function pricePrecision(candles: ChartData['candles']): { precision: number; min
   return { precision: 8, minMove: 0.00000001 };
 }
 
-export function CandleChart({ candles, gaps = NO_GAPS, legacy = false, symbol, refreshing = false, historyRetry = 0, onLoadBefore }: Props) {
+export function CandleChart({
+  candles,
+  gaps = NO_GAPS,
+  legacy = false,
+  symbol,
+  refreshing = false,
+  historyRetry = 0,
+  onLoadBefore,
+}: Props) {
   const data = useMemo(() => buildChartData(candles), [candles]);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
-  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const previousDataRef = useRef<ChartData | null>(null);
   const fittedRef = useRef(false);
-  const savedViewportRef = useRef<{ data: ChartData; range: { from: number; to: number }; priceRange: { from: number; to: number } | null;
-    crosshair: { time: Time; price: number } | null } | null>(null);
+  const savedViewportRef = useRef<{
+    data: ChartData;
+    range: { from: number; to: number };
+    priceRange: { from: number; to: number } | null;
+    crosshair: { time: Time; price: number } | null;
+  } | null>(null);
   const crosshairRef = useRef<{ time: Time; price: number } | null>(null);
   const candlesRef = useRef(candles);
   const loadBeforeRef = useRef(onLoadBefore);
@@ -132,8 +157,12 @@ export function CandleChart({ candles, gaps = NO_GAPS, legacy = false, symbol, r
   const checkHistoryRef = useRef<((restart?: boolean) => void) | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  useEffect(() => { candlesRef.current = candles; }, [candles]);
-  useEffect(() => { loadBeforeRef.current = onLoadBefore; }, [onLoadBefore]);
+  useEffect(() => {
+    candlesRef.current = candles;
+  }, [candles]);
+  useEffect(() => {
+    loadBeforeRef.current = onLoadBefore;
+  }, [onLoadBefore]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -143,24 +172,24 @@ export function CandleChart({ candles, gaps = NO_GAPS, legacy = false, symbol, r
       width: container.clientWidth,
       height: container.clientHeight || 360,
       layout: {
-        background: { type: ColorType.Solid, color: '#0f1011' },
-        textColor: '#8a8f98',
-        fontFamily: 'SFMono-Regular, Menlo, monospace',
+        background: { type: ColorType.Solid, color: "#0f1011" },
+        textColor: "#8a8f98",
+        fontFamily: "SFMono-Regular, Menlo, monospace",
         fontSize: 11,
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: '#191a1b' },
-        horzLines: { color: '#191a1b' },
+        vertLines: { color: "#191a1b" },
+        horzLines: { color: "#191a1b" },
       },
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: {
         autoScale: true,
-        borderColor: '#24272b',
+        borderColor: "#24272b",
         scaleMargins: { top: 0.1, bottom: 0.18 },
       },
       timeScale: {
-        borderColor: '#24272b',
+        borderColor: "#24272b",
         timeVisible: true,
         secondsVisible: true,
         rightOffset: 5,
@@ -183,16 +212,16 @@ export function CandleChart({ candles, gaps = NO_GAPS, legacy = false, symbol, r
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: '#39d98a',
-      downColor: '#ff4d79',
+      upColor: "#39d98a",
+      downColor: "#ff4d79",
       borderVisible: false,
-      wickUpColor: '#39d98a',
-      wickDownColor: '#ff4d79',
-      priceFormat: { type: 'price', ...pricePrecision(data.candles) },
+      wickUpColor: "#39d98a",
+      wickDownColor: "#ff4d79",
+      priceFormat: { type: "price", ...pricePrecision(data.candles) },
     });
     const volumeSeries = chart.addSeries(HistogramSeries, {
-      priceFormat: { type: 'volume' },
-      priceScaleId: '',
+      priceFormat: { type: "volume" },
+      priceScaleId: "",
       lastValueVisible: false,
       priceLineVisible: false,
     });
@@ -204,7 +233,8 @@ export function CandleChart({ candles, gaps = NO_GAPS, legacy = false, symbol, r
 
     const handleCrosshair = (event: MouseEventParams) => {
       const price = event.point ? candleSeries.coordinateToPrice(event.point.y) : null;
-      crosshairRef.current = event.time !== undefined && price !== null ? { time: event.time, price } : null;
+      crosshairRef.current =
+        event.time !== undefined && price !== null ? { time: event.time, price } : null;
     };
     chart.subscribeCrosshairMove?.(handleCrosshair);
 
@@ -212,37 +242,59 @@ export function CandleChart({ candles, gaps = NO_GAPS, legacy = false, symbol, r
     let historyTimer: number | undefined;
     let pages = 0;
     let pendingAttempt = 0;
-    const needsHistory = (range: { from: number; to: number } | null) => candlesRef.current.length > 0
-      && (candlesRef.current.length < MINIMUM_VIEW_BARS || interactedRef.current && range !== null && range.from < 8);
+    const needsHistory = (range: { from: number; to: number } | null) =>
+      candlesRef.current.length > 0 &&
+      (candlesRef.current.length < MINIMUM_VIEW_BARS ||
+        (interactedRef.current && range !== null && range.from < 8));
     const scheduleHistory = (delay = 250) => {
-      if (!active || historyTimer !== undefined || document.visibilityState === 'hidden' || !loadBeforeRef.current
-        || !needsHistory(chart.timeScale().getVisibleLogicalRange())) return;
+      if (
+        !active ||
+        historyTimer !== undefined ||
+        document.visibilityState === "hidden" ||
+        !loadBeforeRef.current ||
+        !needsHistory(chart.timeScale().getVisibleLogicalRange())
+      )
+        return;
       const burstFull = pages >= HISTORY_PAGES_PER_BURST;
-      historyTimer = window.setTimeout(() => {
-        historyTimer = undefined;
-        if (burstFull) pages = 0;
-        if (retryableBeforeRef.current !== null && Date.now() >= retryAfterRef.current) {
-          retryableBeforeRef.current = null;
-          requestedBeforeRef.current = null;
-        }
-        handleVisibleRange(chart.timeScale().getVisibleLogicalRange());
-      }, burstFull ? Math.max(delay, 30_000) : delay);
+      historyTimer = window.setTimeout(
+        () => {
+          historyTimer = undefined;
+          if (burstFull) pages = 0;
+          if (retryableBeforeRef.current !== null && Date.now() >= retryAfterRef.current) {
+            retryableBeforeRef.current = null;
+            requestedBeforeRef.current = null;
+          }
+          handleVisibleRange(chart.timeScale().getVisibleLogicalRange());
+        },
+        burstFull ? Math.max(delay, 30_000) : delay,
+      );
     };
     const handleVisibleRange = (range: { from: number; to: number } | null) => {
-      if (document.visibilityState === 'hidden' || !needsHistory(range) || loadingBeforeRef.current || !loadBeforeRef.current) return;
-      if (pages >= HISTORY_PAGES_PER_BURST) { scheduleHistory(); return; }
+      if (
+        document.visibilityState === "hidden" ||
+        !needsHistory(range) ||
+        loadingBeforeRef.current ||
+        !loadBeforeRef.current
+      )
+        return;
+      if (pages >= HISTORY_PAGES_PER_BURST) {
+        scheduleHistory();
+        return;
+      }
       const before = (candlesRef.current[0]?.t ?? 0) - 1;
       if (before <= 0 || requestedBeforeRef.current === before) return;
       requestedBeforeRef.current = before;
       loadingBeforeRef.current = true;
       pages += 1;
       setHistoryLoading(true);
-      void loadBeforeRef.current(before)
+      void loadBeforeRef
+        .current(before)
         .then(({ added, exhausted }) => {
           if (!active) return;
           if (added === 0 && !exhausted) {
             retryableBeforeRef.current = before;
-            retryAfterRef.current = Date.now() + Math.min(30_000, 1_000 * 2 ** Math.min(pendingAttempt++, 5));
+            retryAfterRef.current =
+              Date.now() + Math.min(30_000, 1_000 * 2 ** Math.min(pendingAttempt++, 5));
           } else {
             pendingAttempt = 0;
             retryableBeforeRef.current = null;
@@ -251,38 +303,51 @@ export function CandleChart({ candles, gaps = NO_GAPS, legacy = false, symbol, r
         .catch(() => {
           if (!active) return;
           retryableBeforeRef.current = before;
-          retryAfterRef.current = Date.now() + Math.min(30_000, 1_000 * 2 ** Math.min(pendingAttempt++, 5));
+          retryAfterRef.current =
+            Date.now() + Math.min(30_000, 1_000 * 2 ** Math.min(pendingAttempt++, 5));
         })
         .finally(() => {
           if (!active) return;
           loadingBeforeRef.current = false;
           setHistoryLoading(false);
           // Follow genuine retained pages; never fill gaps with synthetic seconds.
-          if (retryableBeforeRef.current !== null) scheduleHistory(Math.max(250, retryAfterRef.current - Date.now()));
-          else if (requestedBeforeRef.current !== (candlesRef.current[0]?.t ?? 0) - 1) scheduleHistory();
+          if (retryableBeforeRef.current !== null)
+            scheduleHistory(Math.max(250, retryAfterRef.current - Date.now()));
+          else if (requestedBeforeRef.current !== (candlesRef.current[0]?.t ?? 0) - 1)
+            scheduleHistory();
         });
     };
     checkHistoryRef.current = (restart = false) => {
-      if (restart) { pages = 0; pendingAttempt = 0; window.clearTimeout(historyTimer); historyTimer = undefined; }
+      if (restart) {
+        pages = 0;
+        pendingAttempt = 0;
+        window.clearTimeout(historyTimer);
+        historyTimer = undefined;
+      }
       scheduleHistory();
     };
     const markInteraction = () => {
       interactedRef.current = true;
       pages = 0;
-      if (retryableBeforeRef.current === null || loadingBeforeRef.current || Date.now() < retryAfterRef.current) return;
+      if (
+        retryableBeforeRef.current === null ||
+        loadingBeforeRef.current ||
+        Date.now() < retryAfterRef.current
+      )
+        return;
       retryableBeforeRef.current = null;
       requestedBeforeRef.current = null;
       handleVisibleRange(chart.timeScale().getVisibleLogicalRange());
     };
     const resumeHistory = () => {
-      if (document.visibilityState === 'hidden') {
+      if (document.visibilityState === "hidden") {
         window.clearTimeout(historyTimer);
         historyTimer = undefined;
       } else scheduleHistory(Math.max(250, retryAfterRef.current - Date.now()));
     };
-    document.addEventListener('visibilitychange', resumeHistory);
-    container.addEventListener('pointerdown', markInteraction);
-    container.addEventListener('wheel', markInteraction, { passive: true });
+    document.addEventListener("visibilitychange", resumeHistory);
+    container.addEventListener("pointerdown", markInteraction);
+    container.addEventListener("wheel", markInteraction, { passive: true });
     chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRange);
 
     const resizeObserver = new ResizeObserver((entries) => {
@@ -296,10 +361,10 @@ export function CandleChart({ candles, gaps = NO_GAPS, legacy = false, symbol, r
       active = false;
       window.clearTimeout(historyTimer);
       checkHistoryRef.current = null;
-      document.removeEventListener('visibilitychange', resumeHistory);
+      document.removeEventListener("visibilitychange", resumeHistory);
       resizeObserver.disconnect();
-      container.removeEventListener('pointerdown', markInteraction);
-      container.removeEventListener('wheel', markInteraction);
+      container.removeEventListener("pointerdown", markInteraction);
+      container.removeEventListener("wheel", markInteraction);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRange);
       chart.unsubscribeCrosshairMove?.(handleCrosshair);
       chart.remove();
@@ -330,11 +395,17 @@ export function CandleChart({ candles, gaps = NO_GAPS, legacy = false, symbol, r
     const timeScale = chart.timeScale();
     const visibleRange = timeScale.getVisibleLogicalRange();
     const priceScale = candleSeries.priceScale();
-    const manualPriceRange = priceScale.options?.().autoScale === false ? priceScale.getVisibleRange?.() : null;
+    const manualPriceRange =
+      priceScale.options?.().autoScale === false ? priceScale.getVisibleRange?.() : null;
     const crosshair = crosshairRef.current;
     if (candleData.length === 0) {
       if (previous?.candles.length && visibleRange) {
-        savedViewportRef.current = { data: previous, range: visibleRange, priceRange: manualPriceRange ?? null, crosshair };
+        savedViewportRef.current = {
+          data: previous,
+          range: visibleRange,
+          priceRange: manualPriceRange ?? null,
+          crosshair,
+        };
       }
       candleSeries.setData([]);
       volumeSeries.setData([]);
@@ -348,15 +419,30 @@ export function CandleChart({ candles, gaps = NO_GAPS, legacy = false, symbol, r
     const prepended = previousFirst !== undefined && firstTime < previousFirst;
     // Filtering/recovery can change older timestamps even when the count stays the same.
     // Rebuild in that case; update() can only replace the latest bar or append newer bars.
-    const historyChanged = previous?.candles.some((bar, index) => {
-      const next = candleData[index];
-      return !next || next.time !== bar.time || (bar.time < lastSeen
-        && (next.open !== bar.open || next.high !== bar.high || next.low !== bar.low || next.close !== bar.close));
-    }) || previous?.volumes.some((bar, index) => {
-      const next = volumeData[index];
-      return !next || next.time !== bar.time || (bar.time < lastSeen
-        && (next.value !== bar.value || next.color !== bar.color));
-    }) || volumeData.some((bar, index) => bar.time < lastSeen && previous?.volumes[index]?.time !== bar.time);
+    const historyChanged =
+      previous?.candles.some((bar, index) => {
+        const next = candleData[index];
+        return (
+          !next ||
+          next.time !== bar.time ||
+          (bar.time < lastSeen &&
+            (next.open !== bar.open ||
+              next.high !== bar.high ||
+              next.low !== bar.low ||
+              next.close !== bar.close))
+        );
+      }) ||
+      previous?.volumes.some((bar, index) => {
+        const next = volumeData[index];
+        return (
+          !next ||
+          next.time !== bar.time ||
+          (bar.time < lastSeen && (next.value !== bar.value || next.color !== bar.color))
+        );
+      }) ||
+      volumeData.some(
+        (bar, index) => bar.time < lastSeen && previous?.volumes[index]?.time !== bar.time,
+      );
     const reset = !previous?.candles.length || firstTime > lastSeen || prepended || historyChanged;
     if (reset) {
       candleSeries.setData(candleData);
@@ -373,9 +459,14 @@ export function CandleChart({ candles, gaps = NO_GAPS, legacy = false, symbol, r
       timeScale.fitContent();
       fittedRef.current = true;
     } else {
-      const viewport = previous?.candles.length && visibleRange ? { data: previous, range: visibleRange } : savedViewportRef.current;
+      const viewport =
+        previous?.candles.length && visibleRange
+          ? { data: previous, range: visibleRange }
+          : savedViewportRef.current;
       if (viewport) {
-        const target = reset ? remapLogicalRange(viewport.range, viewport.data.candles, candleData) : viewport.range;
+        const target = reset
+          ? remapLogicalRange(viewport.range, viewport.data.candles, candleData)
+          : viewport.range;
         const currentRange = timeScale.getVisibleLogicalRange();
         // Avoid interrupting an active gesture when the chart already kept its range.
         if (!currentRange || currentRange.from !== target.from || currentRange.to !== target.to) {
@@ -387,37 +478,60 @@ export function CandleChart({ candles, gaps = NO_GAPS, legacy = false, symbol, r
     const restoreCrosshair = crosshair ?? savedViewportRef.current?.crosshair;
     savedViewportRef.current = null;
     if (restorePrice) priceScale.setVisibleRange(restorePrice);
-    if (restoreCrosshair) chart.setCrosshairPosition?.(restoreCrosshair.price, restoreCrosshair.time, candleSeries);
+    if (restoreCrosshair)
+      chart.setCrosshairPosition?.(restoreCrosshair.price, restoreCrosshair.time, candleSeries);
     previousDataRef.current = data;
     checkHistoryRef.current?.();
   }, [data]);
 
   return (
-    <figure className="chart" aria-label={`${symbol} K 线图`} aria-busy={historyLoading || refreshing}>
+    <figure
+      className="chart"
+      aria-label={`${symbol} K 线图`}
+      aria-busy={historyLoading || refreshing}
+    >
       <div
         ref={containerRef}
         className="chart-canvas"
         data-testid="tradingview-chart"
         data-candle-count={data.candles.length}
         data-first-candle-time={data.candles[0]?.time}
-        data-history-loading={historyLoading ? 'true' : 'false'}
+        data-history-loading={historyLoading ? "true" : "false"}
       />
-      {data.candles.length === 0 && !refreshing && <div className="chart-empty">
-        {candles.length === 0 ? '暂无成交 K 线' : '暂无可渲染 K 线'}
-      </div>}
-      {data.excludedCount > 0 && <figcaption className="chart-availability" role="status">
-        部分 K 线点无法渲染，已排除 {data.excludedCount} 个
-      </figcaption>}
-      {gaps.some((gap) => gap.reason === 'PRICING_SUPPRESSED') && <figcaption className="chart-availability" role="status">
-        部分历史 K 线已隐藏，缺口保留
-      </figcaption>}
-      {legacy && <figcaption className="chart-availability" role="status">历史规则 · 未重建</figcaption>}
-      {(historyLoading || refreshing) && <div
-        className="history-loading"
-        role="status"
-        aria-label={historyLoading ? '正在加载更早行情' : '正在加载行情'}
-        aria-live="polite"
-      ><div className="history-loading-dots"><span /><span /><span /></div></div>}
+      {data.candles.length === 0 && !refreshing && (
+        <div className="chart-empty">
+          {candles.length === 0 ? "暂无成交 K 线" : "暂无可渲染 K 线"}
+        </div>
+      )}
+      {data.excludedCount > 0 && (
+        <figcaption className="chart-availability" role="status">
+          部分 K 线点无法渲染，已排除 {data.excludedCount} 个
+        </figcaption>
+      )}
+      {gaps.some((gap) => gap.reason === "PRICING_SUPPRESSED") && (
+        <figcaption className="chart-availability" role="status">
+          部分历史 K 线已隐藏，缺口保留
+        </figcaption>
+      )}
+      {legacy && (
+        <figcaption className="chart-availability" role="status">
+          历史规则 · 未重建
+        </figcaption>
+      )}
+      {(historyLoading || refreshing) && (
+        <div
+          className="history-loading"
+          role="status"
+          aria-label={historyLoading ? "正在加载更早行情" : "正在加载行情"}
+          aria-live="polite"
+        >
+          <div className="history-loading-dots">
+            <span />
+            <span />
+            <span />
+          </div>
+        </div>
+      )}
     </figure>
   );
 }
