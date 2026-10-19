@@ -36,7 +36,7 @@ const MINIMUM_VIEW_BARS = 30;
 const HISTORY_PAGES_PER_BURST = 4;
 const NO_GAPS: CandleSnapshot['gaps'] = [];
 
-interface ChartData {
+export interface ChartData {
   candles: CandlestickData<UTCTimestamp>[];
   volumes: HistogramData<UTCTimestamp>[];
   excludedCount: number;
@@ -46,9 +46,16 @@ function isRenderableValue(value: number): boolean {
   return Number.isFinite(value) && Math.abs(value) <= CHART_VALUE_BOUND;
 }
 
-function buildChartData(candles: Candle[]): ChartData {
+/** Presentation-only continuity: the API candles remain the authoritative trade buckets. */
+export function buildChartData(candles: Candle[]): ChartData {
   const data: ChartData = { candles: [], volumes: [], excludedCount: 0 };
-  for (const item of [...candles].sort((a, b) => a.t - b.t)) {
+  const byTime = new Map<number, Candle>();
+  for (const item of candles) {
+    const previous = byTime.get(item.t);
+    if (!previous || BigInt(item.revision) >= BigInt(previous.revision)) byTime.set(item.t, item);
+  }
+  for (const item of [...byTime.values()].sort((a, b) => a.t - b.t)) {
+    if (item.retracted) continue;
     const bar = {
       time: item.t as UTCTimestamp,
       open: Number(item.o),
@@ -60,6 +67,11 @@ function buildChartData(candles: Candle[]): ChartData {
       data.excludedCount += 1;
       continue;
     }
+    // Recompute from the combined history on every change, including a prepend or
+    // an older WS correction. Never fill missing timestamps or rewrite real closes.
+    bar.open = data.candles.at(-1)?.close ?? bar.open;
+    bar.high = Math.max(bar.high, bar.open, bar.close);
+    bar.low = Math.min(bar.low, bar.open, bar.close);
     data.candles.push(bar);
     if (item.quoteVolume !== null) {
       const volume = Number(item.quoteVolume);
@@ -131,24 +143,24 @@ export function CandleChart({ candles, gaps = NO_GAPS, legacy = false, symbol, r
       width: container.clientWidth,
       height: container.clientHeight || 360,
       layout: {
-        background: { type: ColorType.Solid, color: '#09080d' },
-        textColor: '#777481',
-        fontFamily: 'Geist Mono, SFMono-Regular, Menlo, monospace',
+        background: { type: ColorType.Solid, color: '#0f1011' },
+        textColor: '#8a8f98',
+        fontFamily: 'SFMono-Regular, Menlo, monospace',
         fontSize: 11,
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: '#18161f' },
-        horzLines: { color: '#18161f' },
+        vertLines: { color: '#191a1b' },
+        horzLines: { color: '#191a1b' },
       },
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: {
         autoScale: true,
-        borderColor: '#282531',
+        borderColor: '#24272b',
         scaleMargins: { top: 0.1, bottom: 0.18 },
       },
       timeScale: {
-        borderColor: '#282531',
+        borderColor: '#24272b',
         timeVisible: true,
         secondsVisible: true,
         rightOffset: 5,

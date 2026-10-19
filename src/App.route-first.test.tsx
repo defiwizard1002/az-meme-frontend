@@ -61,9 +61,9 @@ describe('route first, separate user confirmation', () => {
     expect(route).toHaveTextContent('UNISWAP V4');
     expect(within(route).getAllByRole('listitem')).toHaveLength(2);
     expect(route).toHaveTextContent('估计，未经模拟');
-    expect(route).toHaveTextContent(`最低得到${minimum} CAT`);
+    expect(route).toHaveTextContent('最低得到8 CAT');
     expect(route).toHaveTextContent('支付数量1 USDG');
-    expect(route).toHaveTextContent('预计得到≈ 10.000000000000000002 CAT');
+    expect(route).toHaveTextContent('预计得到≈ 10 CAT');
     expect(route.querySelector('time')).toHaveAttribute('dateTime');
     expect(route).toHaveTextContent(/剩余 1[45] 秒/);
     expect(prepare.mock.calls.at(-1)?.[0]).toMatchObject({ purpose: 'PREPARE_EXECUTION', amountIn: '1', minAmountOut: minimum });
@@ -133,12 +133,12 @@ it('defaults to exactly 20%, shows exact quote/minimum, and carries an edited 3%
  await waitFor(()=>expect(button).toBeEnabled());
  expect(screen.getByLabelText('滑点设置')).toHaveValue('2000');
  expect(prepare.mock.calls.at(-1)?.[0].slippageBps).toBe(2000);
- expect(document.querySelector('.quote-details')).toHaveTextContent('预计得到≈ 10.000000000000000002 CAT');
- expect(document.querySelector('.quote-details')).toHaveTextContent(`最低得到${minimum} CAT`);
+ expect(document.querySelector('.quote-details')).toHaveTextContent('预计得到≈ 10 CAT');
+ expect(document.querySelector('.quote-details')).toHaveTextContent('最低得到8 CAT');
  fireEvent.change(screen.getByLabelText('滑点设置'),{target:{value:'300'}});
  await waitFor(()=>expect(button).toBeEnabled());
  expect(prepare.mock.calls.at(-1)?.[0].slippageBps).toBe(300);
- expect(document.querySelector('.quote-details')).toHaveTextContent('最低得到9.700000000000000001 CAT');
+ expect(document.querySelector('.quote-details')).toHaveTextContent('最低得到9.7 CAT');
  fireEvent.click(button);
  await screen.findByRole('region',{name:'已选交易路径'});
  expect(prepare.mock.calls.at(-1)?.[0]).toMatchObject({purpose:'PREPARE_EXECUTION',slippageBps:300,minAmountOut:'9.700000000000000001'});
@@ -150,11 +150,70 @@ it('updates the visible minimum with refreshed estimates but keeps a prepared co
  prepare.mockImplementation(async request=>request.purpose==='PREPARE_EXECUTION'
   ?{...selectedRoute(),minAmountOut:request.minAmountOut!}
   :{...estimate,expectedAmountOut:'12.000000000000000002',expectedAmountOutAtomic:'12000000000000000002'});
- await act(async()=>vi.advanceTimersByTimeAsync(10001));
- expect(document.querySelector('.quote-details')).toHaveTextContent('最低得到9.600000000000000001 CAT');
+ await act(async()=>vi.advanceTimersByTimeAsync(15001));
+ expect(document.querySelector('.quote-details')).toHaveTextContent('最低得到9.6 CAT');
  fireEvent.click(screen.getByRole('button',{name:'准备交易'}));await act(async()=>{});
  expect(prepare.mock.calls.at(-1)?.[0].minAmountOut).toBe('9.600000000000000001');
- await act(async()=>vi.advanceTimersByTimeAsync(10001));
- expect(screen.getByRole('region',{name:'已选交易路径'})).toHaveTextContent('最低得到9.600000000000000001 CAT');
+ await act(async()=>vi.advanceTimersByTimeAsync(15001));
+ expect(screen.getByRole('region',{name:'已选交易路径'})).toHaveTextContent('最低得到9.6 CAT');
  expect(execute).not.toHaveBeenCalled();
+});
+
+it('puts history in an accessible modal, removes notes and shortens display while preserving the exact bound', async () => {
+ setup(); await act(async()=>{});
+ expect(document.querySelector('.transaction-history')).toBeNull();
+ expect(document.querySelectorAll('[role="note"]')).toHaveLength(0);
+ expect(document.querySelector('.quote-details')).toHaveTextContent('≈ 10 CAT');
+ screen.getByRole('button',{name:'交易记录'}).focus();
+ fireEvent.click(screen.getByRole('button',{name:'交易记录'}));
+ expect(screen.getByRole('dialog',{name:'交易记录'})).toHaveTextContent('暂无交易');
+ fireEvent.keyDown(screen.getByRole('dialog'),{key:'Escape'});
+ expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+ expect(screen.getByRole('button',{name:'交易记录'})).toHaveFocus();
+});
+it('refreshes stable drafts at 15 seconds without preparing transactions', async () => {
+ vi.useFakeTimers();const {prepare}=setup(); await act(async()=>{});
+ expect(prepare).toHaveBeenCalledTimes(1);
+ await act(async()=>vi.advanceTimersByTimeAsync(14999));expect(prepare).toHaveBeenCalledTimes(1);
+ await act(async()=>vi.advanceTimersByTimeAsync(1));expect(prepare).toHaveBeenCalledTimes(2);
+ await act(async()=>vi.advanceTimersByTimeAsync(15000));expect(prepare).toHaveBeenCalledTimes(3);
+ expect(prepare.mock.calls.every(([request])=>request.purpose==='ESTIMATE')).toBe(true);
+});
+it('turns an approval prerequisite into an explicit CTA without sending, then invalidates it on token-side input change',async()=>{
+ const {prepare,execute}=setup(); await act(async()=>{});
+ prepare.mockRejectedValueOnce(Object.assign(new ApiError('MEME_APPROVAL_REQUIRED','approval',409),{details:{status:'APPROVAL_REQUIRED',prerequisiteId:'prerequisite',account:inputAddress,prerequisites:[{token:inputAddress,spender:bridgeAddress,amount:'1000000000000000000'}],expiresAt:Date.now()+15000}}));
+ fireEvent.click(screen.getByRole('button',{name:'准备交易'}));
+ await screen.findByRole('button',{name:'授权 USDG'});
+ expect(screen.getByLabelText('代币授权')).toHaveTextContent('1 USDG');
+ expect(screen.getByLabelText('代币授权')).toHaveTextContent(shortForTest(bridgeAddress));
+ expect(execute).not.toHaveBeenCalled();
+ fireEvent.change(screen.getByLabelText('买入金额'),{target:{value:'2'}});await act(async()=>{});
+ expect(screen.queryByRole('button',{name:'授权 USDG'})).not.toBeInTheDocument();
+});
+function shortForTest(value:string){return `${value.slice(0,5)}...${value.slice(-4)}`;}
+it('sends approval only on click and shows a freshly prepared confirmation without swapping',async()=>{
+ const {prepare,execute}=setup();await act(async()=>{});
+ const details={status:'APPROVAL_REQUIRED',prerequisiteId:'prerequisite',account:inputAddress,prerequisites:[{token:inputAddress,spender:bridgeAddress,amount:'1000000000000000000'}],expiresAt:Date.now()+15000};
+ prepare.mockRejectedValueOnce(Object.assign(new ApiError('MEME_APPROVAL_REQUIRED','approval',200),{details}));
+ const approve=vi.spyOn(memeApi,'approveTrade').mockResolvedValue({status:'REQUOTE_REQUIRED',transactions:['0xreceipt']});
+ fireEvent.click(screen.getByRole('button',{name:'准备交易'}));await screen.findByRole('button',{name:'授权 USDG'});
+ expect(approve).not.toHaveBeenCalled();expect(execute).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'授权 USDG'}));
+ await screen.findByRole('button',{name:'确认提交'});
+ expect(approve).toHaveBeenCalledExactlyOnceWith('prerequisite');
+ expect(prepare.mock.calls.at(-1)?.[0]).toMatchObject({purpose:'PREPARE_EXECUTION',minAmountOut:minimum});
+ expect(execute).not.toHaveBeenCalled();
+});
+it('recovers a late allowance error and stops after rejected approval until another explicit preparation',async()=>{
+ const {prepare,execute}=setup();await act(async()=>{});
+ fireEvent.click(screen.getByRole('button',{name:'准备交易'}));await screen.findByRole('button',{name:'确认提交'});
+ const details={status:'APPROVAL_REQUIRED',prerequisiteId:'late',account:inputAddress,prerequisites:[{token:inputAddress,spender:bridgeAddress,amount:'1000000000000000000'}],expiresAt:Date.now()+15000};
+ execute.mockRejectedValueOnce(new ApiError('MEME_APPROVAL_REQUIRED','allowance changed',409));
+ prepare.mockImplementation(async request=>{if(request.purpose==='PREPARE_EXECUTION')throw Object.assign(new ApiError('MEME_APPROVAL_REQUIRED','approval',200),{details});return {...estimate,amountIn:request.amountIn};});
+ const approve=vi.spyOn(memeApi,'approveTrade').mockRejectedValue(new ApiError('MEME_APPROVAL_REJECTED','rejected',409));
+ fireEvent.click(screen.getByRole('button',{name:'确认提交'}));await screen.findByRole('button',{name:'授权 USDG'});
+ expect(approve).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'授权 USDG'}));await screen.findByRole('button',{name:'准备交易'});
+ expect(approve).toHaveBeenCalledTimes(1);expect(execute).toHaveBeenCalledTimes(1);
+ expect(screen.queryByRole('button',{name:'确认提交'})).not.toBeInTheDocument();
 });

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ApiError, azAuth, azFundApi, memeApi, setSessionToken, wsBaseUrl } from './api';
+import { ApiError, approvalDetails, azAuth, azFundApi, memeApi, setSessionToken, wsBaseUrl, type ApprovalRequired } from './api';
 import { CandleChart, type HistoryLoadResult } from './CandleChart';
 import { streamBatchItems, streamSequenceAction } from './stream-batches';
 import { pollOrderUntilTerminal } from './order-tracker';
@@ -7,7 +7,9 @@ import { pollTransactionUntilTerminal } from './transaction-tracker';
 import type { AccountSummary, AccountTransaction, Asset, Candle, CandleSnapshot, Interval, Quote, QuoteDisplay, Token, Trade } from './types';
 import './styles.css';
 import { preparationInput, requirePreparedQuote, withSlippageMinimum } from './quote-flow';
-import { TokenRiskLabels } from './TokenRiskLabels';
+import { TokenRiskLabels, TokenRiskGrid } from './TokenRiskLabels';
+import { displayAmount } from './decimal-display';
+import { HistoryModal } from './HistoryModal';
 
 const intervals: Interval[] = ['1s', '1m', '15m', '1h', '4h'];
 const ethPresets = ['0.05', '0.1', '0.25', '0.5'];
@@ -100,6 +102,11 @@ function CopyableAddress({ value, iconOnly = false }: { value: string; iconOnly?
   );
 }
 
+function launchpadLabel(value: string | null | undefined): string | null {
+  const label=value?.trim();
+  return label && !/^(unknown|undefined|null|none|n\/a|未知|协议未知)$/i.test(label) ? label : null;
+}
+
 function poolLabel(poolType: string): string {
   return poolType === 'UNSUPPORTED' ? '协议未知' : poolType.replaceAll('_', ' ');
 }
@@ -120,12 +127,12 @@ function PreparedRouteDetails({ quote, outputSymbol }: { quote: Quote; outputSym
       </li>) : quote.routePools?.map((pool, index) => <li key={`${index}:${pool.poolKey}`}>{poolLabel(pool.poolType)}</li>)}
     </ol>
     <dl className="quote-details">
-      <div><dt>支付数量</dt><dd>{quote.amountIn} {quote.side === 'BUY' ? quote.settlementAsset : assets[0]?.symbol}</dd></div>
-      <div><dt>预计得到</dt><dd>≈ {quote.expectedAmountOut} {outputSymbol}</dd></div>
-      <div><dt>最低得到</dt><dd>{quote.minAmountOut} {outputSymbol}</dd></div>
+      <div><dt>支付数量</dt><dd><span title={quote.amountIn}>{displayAmount(quote.amountIn)}</span> {quote.side === 'BUY' ? quote.settlementAsset : assets[0]?.symbol}</dd></div>
+      <div><dt>预计得到</dt><dd>≈ <span title={quote.expectedAmountOut}>{displayAmount(quote.expectedAmountOut)}</span> {outputSymbol}</dd></div>
+      <div><dt>最低得到</dt><dd><span title={quote.minAmountOut}>{displayAmount(quote.minAmountOut)}</span> {outputSymbol}</dd></div>
       <div><dt>确认期限</dt><dd><time dateTime={expires.toISOString()}>{expires.toISOString().replace('T', ' ').slice(0, 19)} UTC</time><br />{remaining > 0 ? `剩余 ${remaining} 秒` : '路径已过期，请重新准备'}</dd></div>
     </dl>
-    <p className="trade-risk" role="note">确认后、提交上链前才会模拟；模拟失败需重新准备并确认。</p>
+
   </section>;
 }
 
@@ -282,6 +289,8 @@ function friendlyError(cause: unknown, fallback: string): string {
     MEME_GMGN_RATE_LIMITED: '行情请求较多，请稍后再试',
     MEME_MARKET_MISMATCH: '池子已更新，正在刷新行情',
     MEME_QUOTE_EXPIRED: '报价已过期，请使用最新报价',
+    MEME_APPROVAL_REQUIRED: '请先授权代币，再重新准备并确认交易',
+    MEME_ATOMIC_APPROVAL_REQUIRED: '请先授权代币，再重新准备并确认交易',
     MEME_EXECUTION_DISABLED: '当前环境暂不开放交易',
     MEME_ROUTE_STALE: '报价已过期或路由已变化，请重新确认',
     MEME_ROUTING_DISCOVERY_UNAVAILABLE: '自有池目录暂不可用',
@@ -408,6 +417,9 @@ export default function App() {
   const [accountMode, setAccountMode] = useState<'AZ_ACCOUNT' | 'MAIN_ACCOUNT_POC' | null>(null);
   const [settlementAssets, setSettlementAssets] = useState<Asset[]>(['ETH', 'USDC', 'USDT']);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [historyOpen,setHistoryOpen] = useState(false);
+  const [approval,setApproval] = useState<{request: Parameters<typeof memeApi.createQuote>[0];value:ApprovalRequired}|null>(null);
+  const [approvalMessage,setApprovalMessage] = useState<string|null>(null);
   const [transferDirection, setTransferDirection] = useState<'SPOT_TO_MEME' | 'MEME_TO_SPOT'>('SPOT_TO_MEME');
   const [transferAsset, setTransferAsset] = useState<Asset>('ETH');
   const [transferAmount, setTransferAmount] = useState('0.1');
@@ -487,7 +499,7 @@ export default function App() {
   const prepared=preparedQuote?.request===quoteRequest?preparedQuote:null;
   const preparedExpired = Boolean(prepared && prepared.value.expiresAt <= Date.now());
   const quote = prepared?.value ?? (quoteState?.request === quoteRequest ? quoteState.value : null);
-  useEffect(()=>{setPreparedQuote(null);},[quoteRequest,accountAvailable]);
+  useEffect(()=>{setPreparedQuote(null);setApproval(null);setApprovalMessage(null);setOrderState(null);},[quoteRequest,accountAvailable]);
 
   const trackOrder = useCallback(async (orderId: string) => {
     const existing = orderPollsRef.current.get(orderId);
@@ -1019,7 +1031,7 @@ export default function App() {
           nextSocket.send(JSON.stringify({
             op: 'subscribe',
             channels,
-            ...(accountAvailable && quoteRequestRef.current ? { quote: quoteRequestRef.current } : {}),
+            
           }));
         });
         nextSocket.addEventListener('message', (event) => {
@@ -1051,16 +1063,6 @@ export default function App() {
             if (message.channel === marketChannel) {
               const refreshedToken = message.data as Token;
               setSelected(refreshedToken);
-              return;
-            }
-            if (message.channel.startsWith('quote:')) {
-              const liveQuote = message.data as Quote;
-              const expected = quoteRequestRef.current;
-              if (accountAvailable && expected && matchesQuoteRequest(liveQuote, expected)) {
-                quoteVersionRef.current += 1;
-                setQuoteState({ value: withSlippageMinimum(liveQuote, expected.slippageBps), request: expected });
-                setErrorState((current) => current?.owner === expected ? null : current);
-              }
               return;
             }
             if (message.channel === candleChannel) {
@@ -1161,7 +1163,7 @@ export default function App() {
       else recover(candleChannel, !recovery.get(candleChannel)?.flight);
       recover(tradeChannel, !recovery.get(tradeChannel)?.flight);
       if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ op: 'subscribe', channels,
-        ...(accountAvailable && quoteRequestRef.current ? { quote: quoteRequestRef.current } : {}) }));
+         }));
     };
     document.addEventListener('visibilitychange', resume);
     window.addEventListener('focus', resume);
@@ -1188,41 +1190,30 @@ export default function App() {
   useEffect(() => {
     const controller = new AbortController();
     const version = ++quoteVersionRef.current;
+    let inFlight = false;
     setQuoteState(null);
-    const socket = streamSocketRef.current;
-    if (accountAvailable && quoteRequest) {
-      void memeApi.createQuote(quoteRequest, controller.signal)
-        .then((freshQuote) => {
-          if (controller.signal.aborted || quoteRequestRef.current !== quoteRequest || quoteVersionRef.current !== version) return;
-          if (!matchesQuoteRequest(freshQuote, quoteRequest)) throw new Error('报价与当前请求不匹配');
-          setQuoteState({ value: withSlippageMinimum(freshQuote, quoteRequest.slippageBps), request: quoteRequest });
-          setErrorState((current) => current?.owner === quoteRequest ? null : current);
-        })
-        .catch((cause: unknown) => {
-          if (!controller.signal.aborted && quoteRequestRef.current === quoteRequest && quoteVersionRef.current === version) {
-            setErrorState({ message: friendlyError(cause, '报价暂时不可用'), owner: quoteRequest });
-          }
-        });
-    }
-    if (socket && socket.readyState === WebSocket.OPEN && selectedTokenAddress
-      && marketChannelsRef.current.some((channel) => channel.includes(selectedTokenAddress))) {
-      socket.send(JSON.stringify({
-        op: 'subscribe',
-        channels: marketChannelsRef.current,
-        ...(accountAvailable && quoteRequest ? { quote: quoteRequest } : {}),
-      }));
-    }
-    return () => {
-      controller.abort();
-      setErrorState((current) => current?.owner === quoteRequest ? null : current);
+    const refresh = async () => {
+      if (!accountAvailable || !quoteRequest || inFlight) return;
+      inFlight = true;
+      try {
+        const freshQuote = await memeApi.createQuote(quoteRequest, controller.signal);
+        if (controller.signal.aborted || quoteRequestRef.current !== quoteRequest || quoteVersionRef.current !== version) return;
+        if (!matchesQuoteRequest(freshQuote, quoteRequest)) throw new Error('报价与当前请求不匹配');
+        setQuoteState({ value: withSlippageMinimum(freshQuote, quoteRequest.slippageBps), request: quoteRequest });
+        setErrorState(current => current?.owner === quoteRequest ? null : current);
+      } catch (cause) {
+        if (!controller.signal.aborted && quoteRequestRef.current === quoteRequest && quoteVersionRef.current === version) {
+          setErrorState({ message: friendlyError(cause, '报价暂时不可用'), owner: quoteRequest });
+        }
+      } finally { inFlight = false; }
     };
-  }, [quoteRequest, selectedTokenAddress, accountAvailable, quoteRefreshNonce]);
-
-  useEffect(() => {
-    if (!accountAvailable || accountMode !== 'MAIN_ACCOUNT_POC' || !quoteRequest) return;
-    const timer = window.setInterval(() => setQuoteRefreshNonce((n) => n+1),10000);
-    return () => window.clearInterval(timer);
-  },[accountAvailable,accountMode,quoteRequest]);
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 15_000);
+    const socket = streamSocketRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN && selectedTokenAddress) socket.send(JSON.stringify({op:'subscribe',channels:marketChannelsRef.current,
+      }));
+    return () => { controller.abort(); window.clearInterval(timer); };
+  }, [quoteRequest, selectedTokenAddress, accountAvailable, accountMode, quoteRefreshNonce]);
 
   const selectedPosition = account?.positions.find((item) => item.tokenAddress.toLowerCase() === selected?.tokenAddress.toLowerCase());
   const currentBalance = side === 'BUY'
@@ -1436,11 +1427,54 @@ export default function App() {
         setError(friendlyError(cause, '订单状态同步失败'));
       });
     } catch (cause) {
+      if (quoteRequestRef.current !== quoteRequest) return;
       setOrderState(null);
-      if (prepared && cause instanceof ApiError && ['MEME_ROUTE_STALE', 'MEME_QUOTE_REQUEST_MISMATCH', 'MEME_QUOTE_EXPIRED'].includes(cause.code)) setPreparedQuote(null);
+      if (cause instanceof ApiError && ['MEME_APPROVAL_REQUIRED','MEME_ATOMIC_APPROVAL_REQUIRED'].includes(cause.code) && quoteRequest) {
+        setPreparedQuote(null);
+        let details = approvalDetails(cause);
+        if (!details) {
+          try {
+            const fresh = await memeApi.createQuote(quoteRequest);
+            if (quoteRequestRef.current !== quoteRequest) return;
+            setQuoteState({value:withSlippageMinimum(fresh,quoteRequest.slippageBps),request:quoteRequest});
+            await memeApi.createQuote(preparationInput(quoteRequest,fresh));
+          } catch (recovery) { details = approvalDetails(recovery); }
+        }
+        if (quoteRequestRef.current !== quoteRequest) return;
+        if (details) { setApproval({request:quoteRequest,value:details}); setError(null); return; }
+      }
+      if (prepared && cause instanceof ApiError && ['MEME_ROUTE_STALE', 'MEME_QUOTE_REQUEST_MISMATCH', 'MEME_QUOTE_EXPIRED'].includes(cause.code)) {
+        setPreparedQuote(null);setQuoteRefreshNonce(n=>n+1);
+      }
       setError(friendlyError(cause, '下单请求未完成'));
     }
   }, [accountAvailable, accountMode, asset, quote, quoteRequest, prepared, selected, side, slippageBps, trackMainAccountTransaction, trackOrder]);
+
+  const submitApproval = useCallback(async () => {
+    if (!approval || approval.request !== quoteRequest || !quoteRequest || orderState) return;
+    const request=quoteRequest;
+    if (approval.value.expiresAt <= Date.now()) {setApproval(null);setQuoteRefreshNonce(n=>n+1);setError('授权请求已过期，请重新准备');return;}
+    setOrderState('授权中');setError(null);
+    try {
+      const receipt=await memeApi.approveTrade(approval.value.prerequisiteId);
+      if (quoteRequestRef.current!==request) return;
+      setApproval(null);setApprovalMessage(`授权已完成 · ${receipt.transactions.length} 笔交易`);
+      setOrderState('重新准备中');
+      const fresh=await memeApi.createQuote(request);
+      if(quoteRequestRef.current!==request)return;
+      setQuoteState({value:withSlippageMinimum(fresh,request.slippageBps),request});
+      const input=preparationInput(request,fresh);
+      const response=await memeApi.createQuote(input);
+      if(quoteRequestRef.current!==request)return;
+      const value=requirePreparedQuote(response,input);
+      setPreparedQuote({value,request,minimum:input.minAmountOut!});
+    } catch(cause) {
+      if(quoteRequestRef.current!==request)return;
+      const details=approvalDetails(cause);
+      setApproval(details?{request,value:details}:null);
+      setError(friendlyError(cause,'授权未完成，请重新准备'));
+    } finally {if(quoteRequestRef.current===request)setOrderState(null);}
+  },[approval,quoteRequest,orderState,setError]);
 
   const submitTransfer = useCallback(async () => {
     if (!accountAvailable) return;
@@ -1490,6 +1524,7 @@ export default function App() {
         {accountMode === 'MAIN_ACCOUNT_POC'
           ? <div className="balances">{accountError ? '账户不可用' : balanceLabel}</div>
           : <button type="button" className="balances" aria-label="打开账户划转" disabled={!accountAvailable} onClick={() => setTransferOpen(true)}>{accountError ? '账户不可用' : balanceLabel}</button>}
+        <button type="button" className="icon-button history-trigger" aria-label="交易记录" title="交易记录" onClick={()=>setHistoryOpen(true)}><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2.6 7M3 5v6h6M12 7v5l3 2" /></svg></button>
         <div className="mock-badge" data-state={accountError ? 'failed' : accountAvailable ? 'connected' : 'pending'}><i aria-hidden="true" />{accountError ? '账户连接失败' : accountMode === 'MAIN_ACCOUNT_POC' ? sessionReady ? '主账户已连接' : '主账户连接中' : sessionReady ? '已登录' : '登录中'}</div>
       </header>
 
@@ -1521,7 +1556,7 @@ export default function App() {
                       <b>{token.symbol}</b>
                       <small>
                         <em className={token.stage === 'GRADUATED' ? 'badge graduated' : 'badge curve'}>{stageLabel(token)}</em>
-                        <em className="badge launchpad">{token.launchpad}</em>
+                        {launchpadLabel(token.launchpad) && <em className="badge launchpad">{launchpadLabel(token.launchpad)}</em>}
                         <span>{age(token.ageSeconds)}</span>
                       </small>
                       <small className="token-risk"><TokenRiskLabels security={token.security} /></small>
@@ -1545,7 +1580,7 @@ export default function App() {
               <div className="token-identity">
                 <TokenMark token={selected} />
                 <div>
-                  <div className="token-title"><strong>{selected.symbol}</strong><span className={selected.stage === 'GRADUATED' ? 'badge graduated' : 'badge curve'}>{stageLabel(selected)}</span><span className="badge launchpad">{selected.launchpad}</span><span className="badge pool">{poolLabel(selected.pool.poolType)}</span>{quote && <span className="badge executable">当前资产可报价</span>}</div>
+                  <div className="token-title"><strong>{selected.symbol}</strong><span className={selected.stage === 'GRADUATED' ? 'badge graduated' : 'badge curve'}>{stageLabel(selected)}</span>{launchpadLabel(selected.launchpad) && <span className="badge launchpad">{launchpadLabel(selected.launchpad)}</span>}<span className="badge pool">{poolLabel(selected.pool.poolType)}</span>{quote && <span className="badge executable">当前资产可报价</span>}</div>
                   <small>{selected.name} / <CopyableAddress value={selected.tokenAddress} /></small>
                 </div>
               </div>
@@ -1553,7 +1588,7 @@ export default function App() {
                 <div><span>价格</span><strong data-testid="current-price">{money(displayedPrice)}</strong></div>
                 <div><span>市值</span><strong>{money(selected.marketCapUsd)}</strong></div>
                 <div><span>24h 量</span><strong>{money(selected.volume24hUsd)}</strong></div>
-                <div><span>流动性</span><strong>{money(selected.pool.liquidityUsd)}</strong></div>
+                <div><span>流动性</span><strong>{money(selected.liquidityUsd ?? selected.pool.liquidityUsd)}</strong></div>
                 <div><span>持有人</span><strong>{compact(selected.holders)}</strong></div>
               </div>
             </div>
@@ -1613,6 +1648,7 @@ export default function App() {
         </section>
 
         <aside className="trade-panel">
+          {selected && <TokenRiskGrid token={selected}/>}
           <div className="side-tabs">
             <button type="button" className={side === 'BUY' ? 'active buy' : ''} onClick={() => selectSide('BUY')}>买入</button>
             <button type="button" className={side === 'SELL' ? 'active sell' : ''} onClick={() => selectSide('SELL')}>卖出</button>
@@ -1655,22 +1691,26 @@ export default function App() {
               >{preset.label}</button>)}
             </div>
             <dl className="quote-details">
-              <div><dt>预计得到</dt><dd>{quote ? `≈ ${quote.expectedAmountOut} ${side === 'BUY' ? selected?.symbol : asset}` : '等待报价'}</dd></div>
-              <div><dt>最低得到</dt><dd>{quote ? `${quote.minAmountOut} ${side === 'BUY' ? selected?.symbol : asset}` : '等待报价'}</dd></div>
+              <div><dt>预计得到</dt><dd>{quote ? <span title={quote.expectedAmountOut}>≈ {displayAmount(quote.expectedAmountOut)} {side === 'BUY' ? selected?.symbol : asset}</span> : '等待报价'}</dd></div>
+              <div><dt>最低得到</dt><dd>{quote ? <span title={quote.minAmountOut}>{displayAmount(quote.minAmountOut)} {side === 'BUY' ? selected?.symbol : asset}</span> : '等待报价'}</dd></div>
               {quote?.residualAssets?.map((a) => <div key={a.address}><dt>预计保留 {a.symbol}</dt><dd>{readableAmount(a.decimals ? `${a.expectedAmountAtomic.padStart(a.decimals+1,'0').slice(0,-a.decimals)}.${a.expectedAmountAtomic.padStart(a.decimals+1,'0').slice(-a.decimals)}` : a.expectedAmountAtomic)} {a.symbol}</dd></div>)}
+              <div><dt>预估 Gas</dt><dd title={quote?.gasEstimate ? '参考近期实际交易的用量估算，不含代币授权费用' : '暂无近期实际交易费用数据'}>{quote?.gasEstimate ? <>≈ {displayAmount(quote.gasEstimate.nativeAmount)} ETH{quote.gasEstimate.usdAmount ? ` (${money(quote.gasEstimate.usdAmount)})` : ''}</> : '—'}</dd></div>
               <div><dt>滑点设置</dt><dd><select aria-label="滑点设置" value={slippageBps} onChange={(event) => {
                 setSlippageBps(Number(event.target.value)); resetTradeDraft();
               }}>{[...new Set([50,100,300,500,1000,2000,3000,slippageBps])].sort((a,b)=>a-b).map((bps) =>
                 <option key={bps} value={bps}>{bps / 100}%</option>)}</select></dd></div>
               <div className="security-row"><dt>安全</dt><dd>{selected && <TokenRiskLabels security={selected.security} />}{safety.map((item) => <span className={`security-${item.tone}`} key={item.text}>{item.text}</span>)}</dd></div>
             </dl>
-            {accountMode==='MAIN_ACCOUNT_POC'&&!prepared&&quote&&<p className="trade-risk" role="note">预计得到来自本地可执行曲线报价，与图表最新成交价可能不同，不保证实际到账；先准备交易，再确认提交。</p>}
             {prepared&&<PreparedRouteDetails quote={prepared.value} outputSymbol={side === 'BUY' ? selected?.symbol ?? '' : asset} />}
             {prepared&&<button type="button" disabled={Boolean(orderState)} onClick={()=>setPreparedQuote(null)}>重新估计</button>}
-            {!prepared&&quote?.routePools && quote.routePools.length > 1 && <p className="trade-risk" role="note">交易可能分步完成；中途失败时，已成交部分不会撤销。</p>}
-            {!prepared&&<p className="trade-risk" role="note">拆分执行时，累计滑点可能高于所设值；最终以最低得到为准。</p>}
-            <button type="button" className="primary" disabled={!accountAvailable || !selected || !quoteRequest || !quote || Boolean(orderState) || preparedExpired || (side === 'SELL' && Number(currentBalance) <= 0)} onClick={submitOrder}>
-              {accountError ? '账户连接失败' : !sessionReady ? accountMode === 'MAIN_ACCOUNT_POC' ? '等待主账户' : '等待登录' : orderState ?? (accountMode==='MAIN_ACCOUNT_POC'?(prepared?(preparedExpired?'路径已过期':'确认提交'):'准备交易'):(side === 'BUY' ? '买入' : '卖出'))}
+            {approval && approval.request===quoteRequest && <section className="approval-panel" aria-label="代币授权">
+              <strong>授权 {side==='BUY'?asset:selected?.symbol}</strong>
+              <dl className="quote-details"><div><dt>授权数量</dt><dd title={approval.value.prerequisites[0]?.amount}>{displayAmount(approval.request.amountIn)} {side==='BUY'?asset:selected?.symbol}</dd></div>
+              {approval.value.prerequisites.map(item=><div className="approval-identity" key={`${item.token}:${item.spender}`}><dt>代币 / 授权给</dt><dd><CopyableAddress value={item.token}/><span> / </span><CopyableAddress value={item.spender}/></dd></div>)}</dl>
+            </section>}
+            {approvalMessage && <p className="approval-success" role="status">{approvalMessage}</p>}
+            <button type="button" className="primary" disabled={!accountAvailable || !selected || !quoteRequest || !quote || Boolean(orderState) || (!approval && preparedExpired) || (side === 'SELL' && Number(currentBalance) <= 0)} onClick={approval?submitApproval:submitOrder}>
+              {accountError ? '账户连接失败' : !sessionReady ? accountMode === 'MAIN_ACCOUNT_POC' ? '等待主账户' : '等待登录' : orderState ?? (approval ? `授权 ${side==='BUY'?asset:selected?.symbol}` : accountMode==='MAIN_ACCOUNT_POC'?(prepared?(preparedExpired?'路径已过期':'确认提交'):'准备交易'):(side === 'BUY' ? '买入' : '卖出'))}
             </button>
           </div>
 
@@ -1681,40 +1721,12 @@ export default function App() {
               const pnl = cost > 0 ? `${((Number(position.valueUsd) / cost - 1) * 100).toFixed(0)}%` : '-';
               return <div className="position" key={position.tokenAddress}><span><b>{position.symbol}</b><small>{compact(position.available)} 枚</small></span><span className={cost > 0 && Number(position.valueUsd) >= cost ? 'positive' : 'negative'}>{pnl}</span><button type="button" onClick={() => { setSelected(tokens.find((token) => token.tokenAddress.toLowerCase() === position.tokenAddress.toLowerCase()) ?? null); selectSide('SELL'); }}>卖</button></div>;
             })}
-            <div className="transaction-history">
-              <div className="positions-head"><strong>交易记录</strong>{transactionRefreshError && <span className="transaction-refresh-error" role="alert">{transactionRefreshError}</span>}<span>{accountTransactions.length} 笔</span></div>
-              {accountTransactions.length === 0
-                ? <div className="transaction-empty">暂无交易</div>
-                : accountTransactions.map((transaction) => <div className="account-transaction" key={transaction.executionId}>
-                    <span>
-                      <b className={transaction.side === 'BUY' ? 'positive' : 'negative'}>{transaction.side === 'BUY' ? '买入' : '卖出'} {transaction.tokenSymbol}</b>
-                      <small>
-                        {readableAmount(transaction.amountIn)} {transaction.side === 'BUY' ? transaction.settlementAsset : transaction.tokenSymbol}
-                        {transaction.amountOut
-                          ? ` → ${readableAmount(transaction.amountOut)} ${transaction.side === 'BUY' ? transaction.tokenSymbol : transaction.settlementAsset}`
-                          : ''}
-                      </small>
-                    </span>
-                    <span className={`transaction-status status-${transaction.status.toLowerCase()}`}>
-                      {transaction.status === 'CONFIRMED'
-                        ? '已完成'
-                        : transaction.status === 'PARTIAL'
-                          ? `部分完成（${transaction.confirmedSteps?.length ?? 0} 步）`
-                          : transaction.status === 'FAILED'
-                          ? '失败'
-                          : transaction.status === 'SUBMISSION_UNKNOWN'
-                            ? '待确认'
-                            : '处理中'}
-                    </span>
-                    <span className="transaction-links">{transaction.txHashes.map((hash, index) => {
-                      const url = transactionUrl(explorerBaseUrl, hash);
-                      return url ? <a href={url} target="_blank" rel="noreferrer" key={hash}>Tx{index + 1} ↗</a> : null;
-                    })}</span>
-                  </div>)}
-            </div>
+
           </div>
         </aside>
       </div>
+
+      {historyOpen && <HistoryModal items={accountTransactions} error={transactionRefreshError ?? accountError} loading={!sessionReady} onClose={()=>setHistoryOpen(false)} explorer={explorerBaseUrl}/>}
 
       {accountMode === 'AZ_ACCOUNT' && transferOpen && <div className="drawer-backdrop" role="presentation" onMouseDown={() => setTransferOpen(false)}>
         <section className="account-drawer" role="dialog" aria-modal="true" aria-labelledby="transfer-title" onMouseDown={(event) => event.stopPropagation()}>

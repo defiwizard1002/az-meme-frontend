@@ -12,6 +12,8 @@ export interface Token {
   priceQuote: string;
   priceUsd: string;
   marketCapUsd: string;
+  liquidityUsd?: string;
+  liquiditySource?: 'GMGN_TOKEN_AGGREGATE';
   volume1hUsd?: string;
   volume24hUsd: string;
   change5m: string;
@@ -29,6 +31,18 @@ export interface Token {
     liquidityLocked: boolean | null;
     liquidityLockedPct: string | null;
     liquidityBurnedPct: string | null;
+    /** Provider percentage points: 0.27 means 0.27%, never a fraction to multiply. */
+    top10HolderPct?: string | null;
+    devHoldingPct?: string | null;
+    sniperHoldingPct?: string | null;
+    sniperCount?: number | null;
+    sniperTotal?: number | null;
+    ratHoldingPct?: string | null;
+    phishingHoldingPct?: string | null;
+    bundlerHoldingPct?: string | null;
+    dexPaid?: boolean | null;
+    isOpenSource?: boolean | null;
+    isRenounced?: boolean | null;
   };
 }
 export interface Candle {
@@ -94,6 +108,18 @@ export interface AccountSummary {
   positions: Array<{ tokenAddress: string; symbol: string; available: string; costUsd: string; valueUsd: string }>;
 }
 
+export interface GasEstimate {
+  estimated: true;
+  source: 'RECENT_ATOMIC_RECEIPT';
+  gasUnits: string;
+  gasPriceWei: string;
+  estimatedFeeWei: string;
+  nativeAmount: string;
+  usdAmount?: string;
+  sampleTransactionHash: string;
+  observedAt: number;
+}
+
 export interface Quote {
   quoteId: string;
   status?: 'PREPARED_ROUTE';
@@ -113,6 +139,7 @@ export interface Quote {
   routeHops?: Array<{poolKey:string;poolType:string;venue:string;tokenIn:string;tokenOut:string}>;
   routeFingerprint?: string;
   fees: Array<{ type: string; asset: Asset; amount: string; estimated: boolean }>;
+  gasEstimate?: GasEstimate;
   expiresAt: number;
 }
 

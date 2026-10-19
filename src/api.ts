@@ -13,7 +13,7 @@ let sessionToken: string | null = null;
 const requestTimeoutMs = 15_000;
 
 export class ApiError extends Error {
-  constructor(readonly code: string, message: string, readonly status: number) {
+  constructor(readonly code: string, message: string, readonly status: number, readonly details?: unknown) {
     super(message);
   }
 }
@@ -45,7 +45,7 @@ async function readEnvelope<T>(response: Response, prefix: 'MEME' | 'AZ'): Promi
   }
   if (!response.ok || payload && typeof payload.rc === 'number' && payload.rc !== 0) {
     throw new ApiError(typeof payload?.mc === 'string' ? payload.mc : `${prefix}_REQUEST_FAILED`,
-      Array.isArray(payload?.ma) && typeof payload.ma[0] === 'string' ? payload.ma[0] : `HTTP ${response.status}: 请求失败`, response.status);
+      Array.isArray(payload?.ma) && typeof payload.ma[0] === 'string' ? payload.ma[0] : `HTTP ${response.status}: 请求失败`, response.status, payload?.result);
   }
   if (!payload || payload.rc !== 0 || !Object.hasOwn(payload, 'result')) {
     throw new ApiError(`${prefix}_INVALID_RESPONSE`, `HTTP ${response.status}: 服务响应格式无效`, response.status);
@@ -171,10 +171,12 @@ export const memeApi = {
     body: JSON.stringify(input),
   }),
   createQuote: (input: { side: 'BUY' | 'SELL'; tokenAddress: string; settlementAsset: Asset; amountIn: string; slippageBps: number; purpose?: 'ESTIMATE' | 'PREPARE_EXECUTION'; minAmountOut?: string }, signal?: AbortSignal) =>
-    request<QuoteDisplay | {status:'APPROVAL_REQUIRED'}>('/sapi/v1/meme/quotes', { method: 'POST', body: JSON.stringify(input), signal }).then((value):QuoteDisplay => {
-      if('status' in value&&value.status==='APPROVAL_REQUIRED')throw new ApiError('MEME_APPROVAL_REQUIRED','需要授权；完成授权后重新准备并确认交易',409);
+    request<QuoteDisplay | ApprovalRequired>('/sapi/v1/meme/quotes', { method: 'POST', body: JSON.stringify(input), signal }).then((value):QuoteDisplay => {
+      if('status' in value&&value.status==='APPROVAL_REQUIRED')throw new ApiError('MEME_APPROVAL_REQUIRED','需要授权；完成授权后重新准备并确认交易',200,value);
       return value as QuoteDisplay;
     }),
+  approveTrade: (prerequisiteId: string) => request<{status:'REQUOTE_REQUIRED';transactions:string[]}>(
+    '/sapi/v1/meme/transactions/approval', {method:'POST',body:JSON.stringify({prerequisiteId})}),
   createOrder: (input: { clientOrderId: string; quoteId: string; maxAmountIn: string; minAmountOut: string }) =>
     request<Order>('/sapi/v1/meme/orders', { method: 'POST', body: JSON.stringify(input) }),
   getOrders: (signal?: AbortSignal) => request<{ items: Order[]; nextCursor: string | null }>('/sapi/v1/meme/orders', { signal }),
@@ -186,6 +188,21 @@ export const memeApi = {
   planTrade: (input: { side: 'BUY' | 'SELL'; tokenAddress: string; quoteId?: string; settlementAsset?: 'USDG' | 'ETH' | 'WETH' | 'USDC'; amountIn: string; slippageBps: number; simulate: boolean }) =>
     request<TradePlan>('/sapi/v1/meme/transactions/plan', { method: 'POST', body: JSON.stringify(input) }),
 };
+
+export interface ApprovalRequired {
+  status: 'APPROVAL_REQUIRED';
+  prerequisiteId: string;
+  account: string;
+  prerequisites: Array<{token:string;spender:string;amount:string}>;
+  expiresAt: number;
+}
+
+export function approvalDetails(cause: unknown): ApprovalRequired | null {
+  if (!(cause instanceof ApiError) || !cause.details || typeof cause.details !== 'object') return null;
+  const value = cause.details as ApprovalRequired;
+  return value.status === 'APPROVAL_REQUIRED' && typeof value.prerequisiteId === 'string'
+    && Array.isArray(value.prerequisites) && value.prerequisites.length > 0 ? value : null;
+}
 
 export const wsBaseUrl = (import.meta.env.VITE_MEME_WS_URL as string | undefined)
   || `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/sapi/v1/meme/stream`;

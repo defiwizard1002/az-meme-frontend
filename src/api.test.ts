@@ -175,3 +175,10 @@ describe('bounded HTTP requests', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 });
+
+it('preserves structured approval identity from successful preparation without issuing an approval',async()=>{
+ const details={status:'APPROVAL_REQUIRED',prerequisiteId:'test-id',account:'0xaccount',prerequisites:[{token:'0xtoken',spender:'0xexecutor',amount:'123456789012345678901'}],expiresAt:Date.now()+15000};
+ const fetch=vi.fn().mockResolvedValue(new Response(JSON.stringify({rc:0,result:details})));vi.stubGlobal('fetch',fetch);
+ await expect(memeApi.createQuote({side:'SELL',tokenAddress:'0xtoken',settlementAsset:'ETH',amountIn:'123.456789012345678901',slippageBps:2000,purpose:'PREPARE_EXECUTION'})).rejects.toMatchObject({code:'MEME_APPROVAL_REQUIRED',status:200,details});
+ expect(fetch).toHaveBeenCalledTimes(1);expect(fetch.mock.calls[0][0]).toContain('/quotes');
+});
