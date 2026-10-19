@@ -151,71 +151,6 @@ function poolLabel(poolType: string): string {
   return poolType === "UNSUPPORTED" ? "协议未知" : poolType.replaceAll("_", " ");
 }
 
-function PreparedRouteDetails({ quote, outputSymbol }: { quote: Quote; outputSymbol: string }) {
-  const assets = quote.routeAssets ?? [];
-  const symbol = (address: string) =>
-    assets.find((asset) => asset.address.toLowerCase() === address.toLowerCase())?.symbol ??
-    shortAddress(address);
-  const expires = new Date(quote.expiresAt);
-  const remaining = Math.max(0, Math.ceil((quote.expiresAt - Date.now()) / 1000));
-  return (
-    <section className="prepared-route" aria-label="已选交易路径">
-      <strong>已选交易路径</strong>
-      <p className="route-estimate">估计，未经模拟</p>
-      <p className="route-assets">{assets.map((asset) => asset.symbol).join(" → ")}</p>
-      <ol className="route-venues">
-        {quote.routeHops?.length
-          ? quote.routeHops.map((hop, index) => (
-              <li key={`${index}:${hop.poolKey}`}>
-                <span>
-                  {symbol(hop.tokenIn)} → {symbol(hop.tokenOut)}
-                </span>
-                <span title={`${hop.venue} · ${hop.poolKey}`}>
-                  {poolLabel(hop.poolType)} · {shortAddress(hop.venue)}
-                </span>
-              </li>
-            ))
-          : quote.routePools?.map((pool, index) => (
-              <li key={`${index}:${pool.poolKey}`}>{poolLabel(pool.poolType)}</li>
-            ))}
-      </ol>
-      <dl className="quote-details">
-        <div>
-          <dt>支付数量</dt>
-          <dd>
-            <span title={quote.amountIn}>{displayAmount(quote.amountIn)}</span>{" "}
-            {quote.side === "BUY" ? quote.settlementAsset : assets[0]?.symbol}
-          </dd>
-        </div>
-        <div>
-          <dt>预计得到</dt>
-          <dd>
-            ≈ <span title={quote.expectedAmountOut}>{displayAmount(quote.expectedAmountOut)}</span>{" "}
-            {outputSymbol}
-          </dd>
-        </div>
-        <div>
-          <dt>最低得到</dt>
-          <dd>
-            <span title={quote.minAmountOut}>{displayAmount(quote.minAmountOut)}</span>{" "}
-            {outputSymbol}
-          </dd>
-        </div>
-        <div>
-          <dt>确认期限</dt>
-          <dd>
-            <time dateTime={expires.toISOString()}>
-              {expires.toISOString().replace("T", " ").slice(0, 19)} UTC
-            </time>
-            <br />
-            {remaining > 0 ? `剩余 ${remaining} 秒` : "路径已过期，请重新准备"}
-          </dd>
-        </div>
-      </dl>
-    </section>
-  );
-}
-
 function stageLabel(token: Token): string {
   return token.stage === "GRADUATED" ? "已毕业" : "内盘";
 }
@@ -231,52 +166,6 @@ function percentageOf(value: string, percent: number): string {
     .padStart(fraction.length, "0")
     .replace(/0+$/, "");
   return resultFraction ? `${resultWhole}.${resultFraction}` : resultWhole.toString();
-}
-
-interface SecurityLabel {
-  text: string;
-  tone: "safe" | "warning" | "danger" | "neutral";
-}
-
-function securityPercent(value: string): string {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return value;
-  return Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(number);
-}
-
-function securityLabels(token: Token): SecurityLabel[] {
-  const labels: SecurityLabel[] = [];
-  const { buyTaxPct, sellTaxPct, liquidityBurnedPct, liquidityLockedPct, liquidityLocked } =
-    token.security;
-  if (buyTaxPct !== null && sellTaxPct !== null && buyTaxPct === sellTaxPct) {
-    labels.push({
-      text: `税 ${securityPercent(buyTaxPct)}%`,
-      tone: Number(buyTaxPct) > 0 ? "warning" : "safe",
-    });
-  } else {
-    if (buyTaxPct !== null)
-      labels.push({
-        text: `买税 ${securityPercent(buyTaxPct)}%`,
-        tone: Number(buyTaxPct) > 0 ? "warning" : "safe",
-      });
-    if (sellTaxPct !== null)
-      labels.push({
-        text: `卖税 ${securityPercent(sellTaxPct)}%`,
-        tone: Number(sellTaxPct) > 0 ? "warning" : "safe",
-      });
-  }
-  if (liquidityBurnedPct !== null && Number(liquidityBurnedPct) > 0) {
-    labels.push({ text: `已燃烧 ${securityPercent(liquidityBurnedPct)}%`, tone: "safe" });
-  }
-  if (liquidityLockedPct !== null && Number(liquidityLockedPct) > 0) {
-    labels.push({ text: `已锁仓 ${securityPercent(liquidityLockedPct)}%`, tone: "safe" });
-  } else if (
-    liquidityLocked === true &&
-    !(liquidityBurnedPct !== null && Number(liquidityBurnedPct) > 0)
-  ) {
-    labels.push({ text: "已锁池", tone: "safe" });
-  }
-  return labels;
 }
 
 export function relativeAge(timestamp: number, nowSeconds = Math.floor(Date.now() / 1000)): string {
@@ -544,7 +433,6 @@ export default function App() {
   const [asset, setAsset] = useState<Asset>("ETH");
   const [amount, setAmount] = useState("0.1");
   const [activePreset, setActivePreset] = useState<string | null>("0.1");
-  const [quoteRefreshNonce, setQuoteRefreshNonce] = useState(0);
   const [quoteState, setQuoteState] = useState<{
     value: QuoteDisplay;
     request: Parameters<typeof memeApi.createQuote>[0];
@@ -576,8 +464,9 @@ export default function App() {
   );
   const [chainName, setChainName] = useState("Robinhood Chain");
   const [explorerBaseUrl, setExplorerBaseUrl] = useState("");
-  const [fallbackSlippageBps, setSlippageBps] = useState(2000);
-  const [manualSlippage, setManualSlippage] = useState<{ scope: string; bps: number } | null>(null);
+  const [fallbackSlippageBps] = useState(2000);
+  const [orderBusy, setOrderBusy] = useState(false);
+  const orderBusyRef = useRef(false);
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<Token[] | null>(null);
   const [discoveryTab, setDiscoveryTab] = useState<"hot" | "new">("hot");
@@ -690,12 +579,6 @@ export default function App() {
     [],
   );
 
-  const [preparedQuote, setPreparedQuote] = useState<{
-    value: Quote;
-    request: Parameters<typeof memeApi.createQuote>[0];
-    minimum: string;
-    slippageBps: number;
-  } | null>(null);
   const quoteRequest = useMemo(() => {
     if (
       !selectedTokenAddress ||
@@ -724,9 +607,6 @@ export default function App() {
   const quoteRequestRef = useRef(quoteRequest);
   quoteRequestRef.current = quoteRequest;
   const quoteVersionRef = useRef(0);
-  const prepared = preparedQuote?.request === quoteRequest ? preparedQuote : null;
-  const preparedExpired = Boolean(prepared && prepared.value.expiresAt <= Date.now());
-  const tradeScope = `${selected?.chainId}:${selectedTokenAddress?.toLowerCase()}:${side}:${asset}:${amount}`;
   const rawQuote = quoteState?.request === quoteRequest ? quoteState.value : null;
   const displayedPrice = activeSnapshot?.items.at(-1)?.c ?? selected?.priceUsd ?? "0";
   const slipCalculation =
@@ -741,14 +621,9 @@ export default function App() {
             : undefined) ?? settlementUsdPrice(asset, selected),
         )
       : null;
-  const slippageBps =
-    prepared?.slippageBps ??
-    (manualSlippage?.scope === tradeScope
-      ? manualSlippage.bps
-      : (slipCalculation?.suggestedBps ?? fallbackSlippageBps));
-  const quote = prepared?.value ?? (rawQuote ? withSlippageMinimum(rawQuote, slippageBps) : null);
+  const slippageBps = slipCalculation?.suggestedBps ?? fallbackSlippageBps;
+  const quote = rawQuote ? withSlippageMinimum(rawQuote, slippageBps) : null;
   useEffect(() => {
-    setPreparedQuote(null);
     setOrderState(null);
   }, [quoteRequest, accountAvailable]);
 
@@ -811,9 +686,8 @@ export default function App() {
             });
           } else if (latest.status === "FAILED" || latest.status === "PARTIAL") {
             if (latest.status === "FAILED" && latest.txHashes.length === 0) {
-              setPreparedQuote(null);
               setOrderState(null);
-              setError(`${latest.errorMessage ?? "所选路径执行失败"}；请重新准备并确认`);
+              setError(`${latest.errorMessage ?? "所选路径执行失败"}；请重试`);
             } else {
               setOrderState(latest.status === "PARTIAL" ? "部分完成，请检查交易记录" : "交易失败");
             }
@@ -1748,7 +1622,7 @@ export default function App() {
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [quoteRequest, selectedTokenAddress, accountAvailable, accountMode, quoteRefreshNonce]);
+  }, [quoteRequest, selectedTokenAddress, accountAvailable, accountMode]);
 
   const selectedPosition = account?.positions.find(
     (item) => item.tokenAddress.toLowerCase() === selected?.tokenAddress.toLowerCase(),
@@ -1972,42 +1846,32 @@ export default function App() {
   );
 
   const submitOrder = useCallback(async () => {
-    if (!accountAvailable) return;
+    if (!accountAvailable || orderBusyRef.current) return;
     if (!quote) {
       setError("报价更新中，请稍后再试");
       return;
     }
+    orderBusyRef.current = true;
+    setOrderBusy(true);
     setError(null);
     setOrderState("提交中");
     try {
       if (accountMode === "MAIN_ACCOUNT_POC") {
         if (!quoteRequest) throw new Error("请输入有效金额");
-        if (!prepared) {
-          setOrderState("准备中");
-          const input = preparationInput({ ...quoteRequest, slippageBps }, quote);
-          const response = await memeApi.createQuote(input);
-          if (quoteRequestRef.current !== quoteRequest) throw new Error("输入已变化，请重新准备");
-          const value = requirePreparedQuote(response, input);
-          setPreparedQuote({
-            value,
-            request: quoteRequest,
-            minimum: input.minAmountOut!,
-            slippageBps,
-          });
-          setOrderState(null);
-          return;
-        }
-        requirePreparedQuote(prepared.value, { ...quoteRequest, minAmountOut: prepared.minimum });
+        setOrderState("处理中");
+        const input = preparationInput({ ...quoteRequest, slippageBps }, quote);
+        const response = await memeApi.createQuote(input);
+        if (quoteRequestRef.current !== quoteRequest) return;
+        const prepared = requirePreparedQuote(response, input);
         if (!selected) throw new Error("请选择代币");
         if (asset === "USDT") throw new Error("当前主账户未配置 USDT");
-        if (quote.expiresAt <= Date.now()) throw new Error("报价已过期，请等待新报价并重新确认");
         const settlementAsset = asset;
         const requestKey = [
-          quote.quoteId,
+          prepared.quoteId,
           side,
           selected.tokenAddress.toLowerCase(),
           settlementAsset,
-          normalizedDecimal(quote.amountIn),
+          normalizedDecimal(input.amountIn),
           slippageBps,
         ].join(":");
         let clientExecutionId = mainAccountIdempotencyRef.current.get(requestKey);
@@ -2020,18 +1884,15 @@ export default function App() {
           side,
           tokenAddress: selected.tokenAddress,
           settlementAsset,
-          quoteId: quote.quoteId!,
-          routeFingerprint: prepared.value.routeFingerprint!,
-          minAmountOut: prepared.minimum,
-          amountIn: quote.amountIn,
+          quoteId: prepared.quoteId!,
+          routeFingerprint: prepared.routeFingerprint!,
+          minAmountOut: input.minAmountOut!,
+          amountIn: input.amountIn,
           slippageBps,
         });
         setAccountTransactions((current) => upsertAccountTransaction(current, transaction));
         setOrderState("处理中");
-        void trackMainAccountTransaction(transaction.executionId).catch((cause: unknown) => {
-          setOrderState(null);
-          setError(friendlyError(cause, "交易状态同步失败"));
-        });
+        await trackMainAccountTransaction(transaction.executionId);
         return;
       }
       if (!quote.quoteId) throw new Error("估计不能提交订单，请先准备交易");
@@ -2047,24 +1908,14 @@ export default function App() {
         minAmountOut: quote.minAmountOut,
       });
       setOrderState("处理中");
-      void trackOrder(order.orderId).catch((cause: unknown) => {
-        setOrderState(null);
-        setError(friendlyError(cause, "订单状态同步失败"));
-      });
+      await trackOrder(order.orderId);
     } catch (cause) {
       if (quoteRequestRef.current !== quoteRequest) return;
       setOrderState(null);
-      if (
-        prepared &&
-        cause instanceof ApiError &&
-        ["MEME_ROUTE_STALE", "MEME_QUOTE_REQUEST_MISMATCH", "MEME_QUOTE_EXPIRED"].includes(
-          cause.code,
-        )
-      ) {
-        setPreparedQuote(null);
-        setQuoteRefreshNonce((n) => n + 1);
-      }
       setError(friendlyError(cause, "下单请求未完成"));
+    } finally {
+      orderBusyRef.current = false;
+      setOrderBusy(false);
     }
   }, [
     accountAvailable,
@@ -2072,7 +1923,6 @@ export default function App() {
     asset,
     quote,
     quoteRequest,
-    prepared,
     selected,
     side,
     slippageBps,
@@ -2113,8 +1963,6 @@ export default function App() {
   if (loading) return <main className="full-state">正在加载</main>;
   if (bootstrapError)
     return <main className="full-state error-state">启动失败：{bootstrapError}</main>;
-
-  const safety = selected ? securityLabels(selected) : [];
 
   return (
     <main className="app-shell">
@@ -2527,7 +2375,13 @@ export default function App() {
               卖出
             </button>
           </div>
-          <div className="trade-form">
+          <form
+            className="trade-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitOrder();
+            }}
+          >
             <label>
               <span>{side === "BUY" ? "金额" : "数量"}</span>
               <span>
@@ -2618,134 +2472,18 @@ export default function App() {
                   )}
                 </dd>
               </div>
-              <div>
-                <dt>最低得到</dt>
-                <dd>
-                  {quote ? (
-                    <span title={quote.minAmountOut}>
-                      {displayAmount(quote.minAmountOut)}{" "}
-                      {side === "BUY" ? selected?.symbol : asset}
-                    </span>
-                  ) : (
-                    "等待报价"
-                  )}
-                </dd>
-              </div>
-              {quote?.residualAssets?.map((a) => (
-                <div key={a.address}>
-                  <dt>预计保留 {a.symbol}</dt>
-                  <dd>
-                    {readableAmount(
-                      a.decimals
-                        ? `${a.expectedAmountAtomic.padStart(a.decimals + 1, "0").slice(0, -a.decimals)}.${a.expectedAmountAtomic.padStart(a.decimals + 1, "0").slice(-a.decimals)}`
-                        : a.expectedAmountAtomic,
-                    )}{" "}
-                    {a.symbol}
-                  </dd>
-                </div>
-              ))}
-              <div>
-                <dt>预估 Gas</dt>
-                <dd
-                  title={
-                    quote?.gasEstimate
-                      ? "参考近期实际交易的用量估算，不含代币授权费用"
-                      : "暂无近期实际交易费用数据"
-                  }
-                >
-                  {quote?.gasEstimate ? (
-                    <>
-                      ≈ {displayAmount(quote.gasEstimate.nativeAmount)} ETH
-                      {quote.gasEstimate.usdAmount
-                        ? ` (${money(quote.gasEstimate.usdAmount)})`
-                        : ""}
-                    </>
-                  ) : (
-                    "—"
-                  )}
-                </dd>
-              </div>
-              <div>
-                <dt>滑点设置</dt>
-                <dd>
-                  <input
-                    aria-label="滑点设置"
-                    type="number"
-                    min="0.01"
-                    max="99.99"
-                    step="0.01"
-                    value={slippageBps / 100}
-                    onChange={(event) => {
-                      const bps = Math.round(Number(event.target.value) * 100);
-                      if (bps < 1 || bps > 9999) return;
-                      setManualSlippage({ scope: tradeScope, bps });
-                      setSlippageBps(bps);
-                      resetTradeDraft();
-                    }}
-                  />
-                  %
-                </dd>
-              </div>
-              <div>
-                <dt>价格影响</dt>
-                <dd>
-                  {slipCalculation ? `${slipCalculation.impactBps / 100}%` : "当前价格不可用"}
-                </dd>
-              </div>
-              <div>
-                <dt>建议滑点</dt>
-                <dd>
-                  {slipCalculation?.suggestedBps != null
-                    ? `${slipCalculation.suggestedBps / 100}%（价格影响 + 5 个百分点）`
-                    : slipCalculation
-                      ? "建议达到 100%，请手动设置"
-                      : "价格不足，沿用当前设置"}
-                </dd>
-              </div>
-              <div>
-                <dt>容忍度依据</dt>
-                <dd>相对报价输出</dd>
-              </div>
-              <div className="security-row">
-                <dt>安全</dt>
-                <dd>
-                  {selected && <TokenRiskLabels security={selected.security} />}
-                  {safety.map((item) => (
-                    <span className={`security-${item.tone}`} key={item.text}>
-                      {item.text}
-                    </span>
-                  ))}
-                </dd>
-              </div>
             </dl>
-            {prepared && (
-              <PreparedRouteDetails
-                quote={prepared.value}
-                outputSymbol={side === "BUY" ? (selected?.symbol ?? "") : asset}
-              />
-            )}
-            {prepared && (
-              <button
-                type="button"
-                disabled={Boolean(orderState)}
-                onClick={() => setPreparedQuote(null)}
-              >
-                重新估计
-              </button>
-            )}
             <button
-              type="button"
+              type="submit"
               className="primary"
               disabled={
                 !accountAvailable ||
                 !selected ||
                 !quoteRequest ||
                 !quote ||
-                Boolean(orderState) ||
-                preparedExpired ||
+                orderBusy ||
                 (side === "SELL" && Number(currentBalance) <= 0)
               }
-              onClick={submitOrder}
             >
               {accountError
                 ? "账户连接失败"
@@ -2753,18 +2491,14 @@ export default function App() {
                   ? accountMode === "MAIN_ACCOUNT_POC"
                     ? "等待主账户"
                     : "等待登录"
-                  : (orderState ??
-                    (accountMode === "MAIN_ACCOUNT_POC"
-                      ? prepared
-                        ? preparedExpired
-                          ? "路径已过期"
-                          : "确认提交"
-                        : "准备交易"
-                      : side === "BUY"
-                        ? "买入"
-                        : "卖出"))}
+                  : orderBusy
+                    ? "处理中"
+                    : side === "BUY"
+                      ? "买入"
+                      : "卖出"}
             </button>
-          </div>
+            {orderState && <p role="status">{orderState}</p>}
+          </form>
 
           <div className="positions">
             <div className="positions-head">

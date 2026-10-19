@@ -596,10 +596,8 @@ function holdStage(stage: (typeof stages)[number]["stage"]) {
           : memeApi.getOrders;
   return { ...gate, started: () => vi.mocked(method).mock.calls.length > 0 };
 }
-function expectClosed(mode: (typeof stages)[number]["mode"]) {
+function expectClosed() {
   expect(document.querySelector("button.primary")).toBeDisabled();
-  if (mode === "AZ_ACCOUNT")
-    expect(screen.getByRole("button", { name: "打开账户划转" })).toBeDisabled();
   expect(memeApi.createQuote).not.toHaveBeenCalled();
   expect(memeApi.createOrder).not.toHaveBeenCalled();
   expect(memeApi.executeMainAccountTrade).not.toHaveBeenCalled();
@@ -637,7 +635,7 @@ async function exercisePending(mode: (typeof stages)[number]["mode"]) {
     });
   });
   fireEvent.click(document.querySelector("button.primary")!);
-  expectClosed(mode);
+  expectClosed();
   expect(document.querySelector(".quote-details")).toHaveTextContent("等待报价");
 }
 async function select(token: Token) {
@@ -669,8 +667,6 @@ describe("account bootstrap and selection-scoped pagination", () => {
       await waitFor(() => expect(document.querySelector("button.primary")).toBeEnabled());
       expect(memeApi.createQuote).toHaveBeenCalledTimes(1);
       fireEvent.click(document.querySelector("button.primary")!);
-      if (mode === "MAIN_ACCOUNT_POC")
-        fireEvent.click(await screen.findByRole("button", { name: "确认提交" }));
       await waitFor(() =>
         expect(
           mode === "MAIN_ACCOUNT_POC" ? memeApi.executeMainAccountTrade : memeApi.createOrder,
@@ -689,10 +685,10 @@ describe("account bootstrap and selection-scoped pagination", () => {
       await exercisePending(mode);
       await act(async () => gate.reject(new ApiError("ACCOUNT_UNAVAILABLE", "unavailable", 503)));
       expect(await screen.findByRole("alert")).toHaveTextContent(`账户请求失败：${message}`);
-      expectClosed(mode);
+      expectClosed();
       fireEvent.change(screen.getByLabelText("买入金额"), { target: { value: "3" } });
       await select(tokenB);
-      expectClosed(mode);
+      expectClosed();
     },
   );
 
@@ -712,7 +708,7 @@ describe("account bootstrap and selection-scoped pagination", () => {
       summaryGate.resolve();
       transactionsGate.resolve();
     });
-    expectClosed("MAIN_ACCOUNT_POC");
+    expectClosed();
     expect(screen.getByRole("alert")).toHaveTextContent("订单状态恢复失败");
   });
 

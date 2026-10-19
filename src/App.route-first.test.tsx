@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { ApiError, memeApi } from "./api";
@@ -98,7 +98,7 @@ function setup() {
     if (u.pathname.endsWith("/summary"))
       return envelope({
         quoteBalances: [{ asset: "USDG", available: "10", frozen: "0" }],
-        positions: [],
+        positions: [{ tokenAddress, symbol: "CAT", available: "10", valueUsd: "1", costUsd: "1" }],
       });
     if (/\/(orders|transactions|trades)$/.test(u.pathname))
       return envelope({ items: [], nextCursor: null });
@@ -119,14 +119,38 @@ function setup() {
       });
     return envelope(token);
   });
-  const prepare = vi
-    .spyOn(memeApi, "createQuote")
-    .mockImplementation(async (request) =>
-      request.purpose === "PREPARE_EXECUTION"
-        ? { ...selectedRoute(), amountIn: request.amountIn, minAmountOut: request.minAmountOut! }
-        : { ...estimate, amountIn: request.amountIn },
-    );
-  const execute = vi.spyOn(memeApi, "executeMainAccountTrade");
+  const prepare = vi.spyOn(memeApi, "createQuote").mockImplementation(async (request) =>
+    request.purpose === "PREPARE_EXECUTION"
+      ? {
+          ...selectedRoute(),
+          side: request.side,
+          settlementAsset: request.settlementAsset,
+          amountIn: request.amountIn,
+          minAmountOut: request.minAmountOut!,
+        }
+      : {
+          ...estimate,
+          side: request.side,
+          settlementAsset: request.settlementAsset,
+          amountIn: request.amountIn,
+        },
+  );
+  const transaction = {
+    executionId: "mock-only",
+    tokenAddress,
+    tokenSymbol: "CAT",
+    side: "BUY" as const,
+    settlementAsset: "USDG" as const,
+    amountIn: "1",
+    amountOut: "10",
+    status: "CONFIRMED" as const,
+    txHashes: ["mock-hash"],
+    createdAt: 1,
+    updatedAt: 1,
+    errorMessage: null,
+  };
+  const execute = vi.spyOn(memeApi, "executeMainAccountTrade").mockResolvedValue(transaction);
+  vi.spyOn(memeApi, "getAccountTransaction").mockResolvedValue(transaction);
   const order = vi.spyOn(memeApi, "createOrder");
   render(<App />);
   return { prepare, execute, order };
@@ -138,222 +162,120 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("route first, separate user confirmation", () => {
-  it("shows the selected actual paths, exact limits and expiry as unverified before any execution", async () => {
-    const { prepare, execute, order } = setup();
-    const button = await screen.findByRole("button", { name: "准备交易" });
-    await waitFor(() => expect(button).toBeEnabled());
-    expect(screen.queryByRole("region", { name: "已选交易路径" })).not.toBeInTheDocument();
-    fireEvent.click(button);
-    const route = await screen.findByRole("region", { name: "已选交易路径" });
-    expect(route).toHaveTextContent("USDG → WETH → CAT");
-    expect(route).toHaveTextContent("UNISWAP V3");
-    expect(route).toHaveTextContent("UNISWAP V4");
-    expect(within(route).getAllByRole("listitem")).toHaveLength(2);
-    expect(route).toHaveTextContent("估计，未经模拟");
-    expect(route).toHaveTextContent("最低得到9.5 CAT");
-    expect(route).toHaveTextContent("支付数量1 USDG");
-    expect(route).toHaveTextContent("预计得到≈ 10 CAT");
-    expect(route.querySelector("time")).toHaveAttribute("dateTime");
-    expect(route).toHaveTextContent(/剩余 1[45] 秒/);
-    expect(prepare.mock.calls.at(-1)?.[0]).toMatchObject({
-      purpose: "PREPARE_EXECUTION",
-      amountIn: "1",
-      minAmountOut: minimum,
-    });
-    expect(screen.getByRole("button", { name: "确认提交" })).toBeEnabled();
-    expect(execute).not.toHaveBeenCalled();
-    expect(order).not.toHaveBeenCalled();
-    expect(document.body).not.toHaveTextContent("display-source");
-    expect(document.body).not.toHaveTextContent("已成交部分不会撤销");
-  });
-
-  it("does not retry or submit after preparation fails; a new explicit preparation is required", async () => {
-    const { prepare, execute, order } = setup();
-    const button = await screen.findByRole("button", { name: "准备交易" });
-    await waitFor(() => expect(button).toBeEnabled());
-    prepare.mockRejectedValueOnce(new ApiError("MEME_NO_EXECUTABLE_ROUTE", "no route", 409));
-    fireEvent.click(button);
-    await screen.findByRole("alert");
-    await act(async () => {});
-    expect(screen.queryByRole("button", { name: "确认提交" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "已选交易路径" })).not.toBeInTheDocument();
-    expect(
-      prepare.mock.calls.filter(([input]) => input.purpose === "PREPARE_EXECUTION"),
-    ).toHaveLength(1);
-    expect(execute).not.toHaveBeenCalled();
-    expect(order).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "准备交易" }));
-    await screen.findByRole("region", { name: "已选交易路径" });
-    expect(
-      prepare.mock.calls.filter(([input]) => input.purpose === "PREPARE_EXECUTION"),
-    ).toHaveLength(2);
-    expect(execute).not.toHaveBeenCalled();
-  });
-
-  it("invalidates the shown selection when amount changes and disables confirmation at expiry", async () => {
-    vi.useFakeTimers();
+describe("single action trading", () => {
+  it("shows the current estimate and one Buy action without technical details", async () => {
     setup();
-    await act(async () => {});
-    fireEvent.click(screen.getByRole("button", { name: "准备交易" }));
-    await act(async () => {});
-    expect(screen.getByRole("region", { name: "已选交易路径" })).toBeInTheDocument();
-    await act(async () => vi.advanceTimersByTimeAsync(15_001));
-    expect(screen.getByRole("button", { name: "路径已过期" })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("买入金额"), { target: { value: "2" } });
-    expect(screen.queryByRole("region", { name: "已选交易路径" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText("买入", { selector: "button.primary" })).toBeEnabled(),
+    );
+    const form = document.querySelector(".trade-form")!;
+    expect(form).toHaveTextContent("预计得到≈ 10 CAT");
+    expect(form).not.toHaveTextContent(
+      /最低得到|价格影响|建议滑点|滑点设置|容忍度依据|确认期限|已选交易路径|未经模拟|预估 Gas|准备交易|确认提交|重新估计/,
+    );
   });
-
-  it("submits only the separately confirmed route binding and requires a new preparation after simulation failure", async () => {
-    const { execute, order, prepare } = setup();
-    const failed = {
-      executionId: "mock-only",
-      tokenAddress,
-      tokenSymbol: "CAT",
-      side: "BUY" as const,
-      settlementAsset: "USDG" as const,
-      amountIn: "1",
-      amountOut: null,
-      status: "FAILED" as const,
-      txHashes: [],
-      errorMessage: "所选路径模拟失败",
-      createdAt: 1,
-      updatedAt: 1,
-    };
-    execute.mockResolvedValue({ ...failed, status: "PENDING" });
-    vi.spyOn(memeApi, "getAccountTransaction").mockResolvedValue(failed);
-    const button = await screen.findByRole("button", { name: "准备交易" });
-    await waitFor(() => expect(button).toBeEnabled());
-    fireEvent.click(button);
-    fireEvent.click(await screen.findByRole("button", { name: "确认提交" }));
+  it.each(["BUY", "SELL"] as const)(
+    "one %s action prepares then executes exactly once",
+    async (side) => {
+      const { prepare, execute, order } = setup();
+      const approve = vi.spyOn(memeApi, "approveTrade");
+      await waitFor(() => expect(document.querySelector("button.primary")).toBeEnabled());
+      if (side === "SELL") {
+        fireEvent.click(screen.getByRole("button", { name: "卖出" }));
+        fireEvent.change(screen.getByLabelText("卖出数量"), { target: { value: "1" } });
+        await waitFor(() => expect(document.querySelector("button.primary")).toBeEnabled());
+      }
+      fireEvent.click(document.querySelector("button.primary")!);
+      fireEvent.click(document.querySelector("button.primary")!);
+      await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+      const inputs = prepare.mock.calls.filter(([r]) => r.purpose === "PREPARE_EXECUTION");
+      expect(inputs).toHaveLength(1);
+      expect(execute.mock.calls[0]![0]).toMatchObject({
+        side,
+        amountIn: "1",
+        quoteId: "chosen-route",
+        routeFingerprint: "bound-route",
+        minAmountOut: inputs[0]![0].minAmountOut,
+        slippageBps: inputs[0]![0].slippageBps,
+      });
+      expect(order).not.toHaveBeenCalled();
+      expect(approve).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: /^授权|确认提交/ })).not.toBeInTheDocument();
+      await screen.findByText("交易成功");
+    },
+  );
+  it("keeps preparation errors and waits for another user action", async () => {
+    const { prepare, execute } = setup();
+    await waitFor(() => expect(document.querySelector("button.primary")).toBeEnabled());
+    prepare.mockRejectedValueOnce(new ApiError("MEME_NO_EXECUTABLE_ROUTE", "no route", 409));
+    fireEvent.click(document.querySelector("button.primary")!);
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBeTruthy();
+    await act(async () => {});
+    expect(execute).not.toHaveBeenCalled();
+    expect(prepare.mock.calls.filter(([r]) => r.purpose === "PREPARE_EXECUTION")).toHaveLength(1);
+    fireEvent.click(screen.getByText("买入", { selector: "button.primary" }));
     await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
-    expect(execute.mock.calls[0]?.[0]).toMatchObject({
-      quoteId: "chosen-route",
-      routeFingerprint: "bound-route",
-      minAmountOut: minimum,
-      amountIn: "1",
-    });
-    await waitFor(() => expect(screen.getByRole("button", { name: "准备交易" })).toBeEnabled());
-    expect(screen.queryByRole("region", { name: "已选交易路径" })).not.toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("重新准备并确认");
-    expect(
-      prepare.mock.calls.filter(([input]) => input.purpose === "PREPARE_EXECUTION"),
-    ).toHaveLength(1);
+  });
+  it.each(["amount", "side", "asset"])(
+    "discards a preparation after changing %s and keeps busy until it ends",
+    async (change) => {
+      const { prepare, execute } = setup();
+      await waitFor(() => expect(document.querySelector("button.primary")).toBeEnabled());
+      let resolve!: (q: Quote) => void;
+      prepare.mockImplementationOnce(
+        () =>
+          new Promise<Quote>((r) => {
+            resolve = r;
+          }),
+      );
+      fireEvent.click(document.querySelector("button.primary")!);
+      expect(document.querySelector("button.primary")).toBeDisabled();
+      if (change === "amount")
+        fireEvent.change(screen.getByLabelText("买入金额"), { target: { value: "2" } });
+      if (change === "side") fireEvent.click(screen.getByRole("button", { name: "卖出" }));
+      if (change === "asset")
+        fireEvent.change(screen.getByLabelText("支付资产"), { target: { value: "ETH" } });
+      expect(document.querySelector("button.primary")).toBeDisabled();
+      await act(async () => resolve(selectedRoute()));
+      expect(execute).not.toHaveBeenCalled();
+      if (change === "amount") {
+        await waitFor(() => expect(document.querySelector("button.primary")).toBeEnabled());
+        fireEvent.click(document.querySelector("button.primary")!);
+        await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+        expect(execute.mock.calls[0]![0].amountIn).toBe("2");
+      }
+    },
+  );
+  it("does not automatically resend after execution fails", async () => {
+    const { execute, prepare } = setup();
+    await waitFor(() => expect(document.querySelector("button.primary")).toBeEnabled());
+    execute.mockRejectedValueOnce(new ApiError("MEME_ROUTE_STALE", "stale route", 409));
+    fireEvent.click(document.querySelector("button.primary")!);
+    await screen.findByRole("alert");
+    await waitFor(() => expect(document.querySelector("button.primary")).toBeEnabled());
     expect(execute).toHaveBeenCalledTimes(1);
-    expect(order).not.toHaveBeenCalled();
+    expect(prepare.mock.calls.filter(([r]) => r.purpose === "PREPARE_EXECUTION")).toHaveLength(1);
   });
-});
-
-it("calculates 5pp from current price, shows exact minimum, and carries edited 3% through preparation", async () => {
-  const { prepare, execute } = setup();
-  const button = await screen.findByRole("button", { name: "准备交易" });
-  await waitFor(() => expect(button).toBeEnabled());
-  expect(screen.getByLabelText("滑点设置")).toHaveValue(5);
-  expect(document.querySelector(".quote-details")).toHaveTextContent("价格影响0%");
-  expect(document.querySelector(".quote-details")).toHaveTextContent("预计得到≈ 10 CAT");
-  expect(document.querySelector(".quote-details")).toHaveTextContent("最低得到9.5 CAT");
-  fireEvent.change(screen.getByLabelText("滑点设置"), { target: { value: "3" } });
-  await waitFor(() => expect(button).toBeEnabled());
-  expect(prepare.mock.calls.at(-1)?.[0].slippageBps).toBe(300);
-  expect(document.querySelector(".quote-details")).toHaveTextContent("最低得到9.7 CAT");
-  fireEvent.click(button);
-  await screen.findByRole("region", { name: "已选交易路径" });
-  expect(prepare.mock.calls.at(-1)?.[0]).toMatchObject({
-    purpose: "PREPARE_EXECUTION",
-    slippageBps: 300,
-    minAmountOut: "9.700000000000000001",
-  });
-  expect(execute).not.toHaveBeenCalled();
-});
-
-it("updates the visible minimum with refreshed estimates but keeps a prepared commitment unchanged", async () => {
-  vi.useFakeTimers();
-  const { prepare, execute } = setup();
-  await act(async () => {});
-  prepare.mockImplementation(async (request) =>
-    request.purpose === "PREPARE_EXECUTION"
-      ? { ...selectedRoute(), minAmountOut: request.minAmountOut! }
-      : {
-          ...estimate,
-          expectedAmountOut: "12.000000000000000002",
-          expectedAmountOutAtomic: "12000000000000000002",
-        },
-  );
-  await act(async () => vi.advanceTimersByTimeAsync(15001));
-  expect(document.querySelector(".quote-details")).toHaveTextContent("最低得到11.4 CAT");
-  fireEvent.click(screen.getByRole("button", { name: "准备交易" }));
-  await act(async () => {});
-  expect(prepare.mock.calls.at(-1)?.[0].minAmountOut).toBe("11.400000000000000001");
-  await act(async () => vi.advanceTimersByTimeAsync(15001));
-  expect(screen.getByRole("region", { name: "已选交易路径" })).toHaveTextContent(
-    "最低得到11.4 CAT",
-  );
-  expect(execute).not.toHaveBeenCalled();
-});
-
-it("puts history in an accessible modal, removes notes and shortens display while preserving the exact bound", async () => {
-  setup();
-  await act(async () => {});
-  expect(document.querySelector(".transaction-history")).toBeNull();
-  expect(document.querySelectorAll('[role="note"]')).toHaveLength(0);
-  expect(document.querySelector(".quote-details")).toHaveTextContent("≈ 10 CAT");
-  screen.getByRole("button", { name: "交易记录" }).focus();
-  fireEvent.click(screen.getByRole("button", { name: "交易记录" }));
-  expect(screen.getByRole("dialog", { name: "交易记录" })).toHaveTextContent("暂无交易");
-  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
-  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "交易记录" })).toHaveFocus();
-});
-it("refreshes stable drafts at 15 seconds without preparing transactions", async () => {
-  vi.useFakeTimers();
-  const { prepare } = setup();
-  await act(async () => {});
-  expect(prepare).toHaveBeenCalledTimes(1);
-  await act(async () => vi.advanceTimersByTimeAsync(14999));
-  expect(prepare).toHaveBeenCalledTimes(1);
-  await act(async () => vi.advanceTimersByTimeAsync(1));
-  expect(prepare).toHaveBeenCalledTimes(2);
-  await act(async () => vi.advanceTimersByTimeAsync(15000));
-  expect(prepare).toHaveBeenCalledTimes(3);
-  expect(prepare.mock.calls.every(([request]) => request.purpose === "ESTIMATE")).toBe(true);
-});
-it("shows one ordinary confirmation and no separate approval CTA", async () => {
-  const { execute } = setup();
-  const approve = vi.spyOn(memeApi, "approveTrade");
-  const button = await screen.findByRole("button", { name: "准备交易" });
-  await waitFor(() => expect(button).toBeEnabled());
-  fireEvent.click(button);
-  await screen.findByRole("button", { name: "确认提交" });
-  expect(screen.queryByLabelText("代币授权")).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /^授权/ })).not.toBeInTheDocument();
-  expect(approve).not.toHaveBeenCalled();
-  expect(execute).not.toHaveBeenCalled();
-});
-it("keeps manual 45% through 15s refresh and ignores a stale pending response", async () => {
-  vi.useFakeTimers();
-  const { prepare } = setup();
-  await act(async () => {});
-  fireEvent.change(screen.getByLabelText("滑点设置"), { target: { value: "45" } });
-  await act(async () => {});
-  let resolve!: (value: LocalEstimate) => void;
-  prepare.mockImplementationOnce(
-    () =>
-      new Promise<LocalEstimate>((r) => {
-        resolve = r;
-      }),
-  );
-  await act(async () => vi.advanceTimersByTimeAsync(15000));
-  fireEvent.change(screen.getByLabelText("买入金额"), { target: { value: "2" } });
-  fireEvent.change(screen.getByLabelText("滑点设置"), { target: { value: "35" } });
-  await act(async () => {});
-  await act(async () =>
-    resolve({
+  it("refreshes the visible estimate every 15 seconds without executing", async () => {
+    vi.useFakeTimers();
+    const { prepare, execute } = setup();
+    await act(async () => {});
+    prepare.mockImplementation(async (request) => ({
       ...estimate,
-      expectedAmountOut: "1",
-      expectedAmountOutAtomic: "1000000000000000000",
-    }),
-  );
-  expect(screen.getByLabelText("滑点设置")).toHaveValue(35);
-  await act(async () => vi.advanceTimersByTimeAsync(15000));
-  expect(screen.getByLabelText("滑点设置")).toHaveValue(35);
+      amountIn: request.amountIn,
+      expectedAmountOut: "12.000000000000000002",
+      expectedAmountOutAtomic: "12000000000000000002",
+    }));
+    await act(async () => vi.advanceTimersByTimeAsync(15000));
+    expect(document.querySelector(".quote-details")).toHaveTextContent("预计得到≈ 12 CAT");
+    expect(prepare.mock.calls.every(([r]) => r.purpose === "ESTIMATE")).toBe(true);
+    expect(execute).not.toHaveBeenCalled();
+  });
+  it("submits the same single action from the form", async () => {
+    const { execute } = setup();
+    await waitFor(() => expect(document.querySelector("button.primary")).toBeEnabled());
+    fireEvent.submit(document.querySelector(".trade-form")!);
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+  });
 });

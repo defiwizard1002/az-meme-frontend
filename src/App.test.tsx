@@ -240,12 +240,12 @@ describe("App", () => {
       );
     });
     await waitFor(() =>
-      expect(document.querySelector(".quote-details")).toHaveTextContent("最低得到"),
+      expect(document.querySelector(".quote-details")).toHaveTextContent("预计得到"),
     );
     expect(document.querySelector(".quote-details")).not.toHaveTextContent(/BRIDGE|→|路由/);
     expect(document.querySelector(".quote-details")).not.toHaveTextContent("pool-alpha");
     expect(document.querySelector(".quote-details")).not.toHaveTextContent("pool-beta");
-    expect(document.querySelector(".quote-details")).toHaveTextContent("最低得到");
+    expect(document.querySelector(".quote-details")).toHaveTextContent("预计得到");
     const fetch = vi.mocked(globalThis.fetch);
     const fallback = fetch.getMockImplementation()!;
     fetch.mockImplementation((input, init) =>
@@ -272,7 +272,6 @@ describe("App", () => {
     await waitFor(() => expect(quotes.at(-1)?.input.purpose).toBe("PREPARE_EXECUTION"));
     const preparation = quotes.at(-1)!;
     await act(async () => preparation.resolve(await response({ ...preparation.input })));
-    fireEvent.click(await screen.findByRole("button", { name: "确认提交" }));
     await waitFor(() =>
       expect(
         fetch.mock.calls.some(
@@ -284,7 +283,7 @@ describe("App", () => {
       ).toBe(true),
     );
   });
-  it("shows the converted ETH quote amount and explicitly retained WETH", async () => {
+  it("shows the converted ETH output without residual technical details", async () => {
     const { quotes } = renderWithDeferredQuotes({ settlementAssets: ["USDG", "ETH", "WETH"] });
     await screen.findByRole("button", { name: "查看 CASHCAT" });
     fireEvent.click(screen.getByRole("button", { name: "卖出" }));
@@ -312,8 +311,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(document.querySelector(".quote-details")).toHaveTextContent("1.94 ETH"),
     );
-    expect(document.querySelector(".quote-details")).toHaveTextContent("预计保留 WETH");
-    expect(document.querySelector(".quote-details")).toHaveTextContent("0.06 WETH");
+    expect(document.querySelector(".quote-details")).not.toHaveTextContent("预计保留 WETH");
   });
   it("shows 1h search volume and keeps the hot/new 24h change column", async () => {
     renderWithDeferredQuotes();
@@ -1312,7 +1310,7 @@ describe("App", () => {
     expect(azRequests).toBe(0);
   });
 
-  it("submits a real local main-account trade from the button and refreshes its result", async () => {
+  it("submits a mocked main-account trade with one action and refreshes its result", async () => {
     const sent: string[] = [];
     let submittedBody: Record<string, unknown> | null = null;
     let accountLoads = 0;
@@ -1458,32 +1456,9 @@ describe("App", () => {
     });
 
     render(<App />);
-    await waitFor(() =>
-      expect(sent.some((payload) => (JSON.parse(payload) as { quote?: unknown }).quote)).toBe(true),
-    );
-    act(() => {
-      TradeWebSocket.latest?.receive({
-        channel: `quote:${token.tokenAddress.toLowerCase()}`,
-        epoch: "trade-epoch",
-        sequence: 1,
-        data: {
-          quoteId: "live-quote-1",
-          tokenAddress: token.tokenAddress,
-          side: "BUY",
-          settlementAsset: "USDG",
-          amountIn: "1",
-          expectedAmountOut: "123",
-          minAmountOut: "120",
-          fees: [],
-          expiresAt: Date.now() + 10_000,
-        },
-      });
-    });
-
-    const buy = await screen.findByRole("button", { name: "准备交易" });
+    const buy = await screen.findByText("买入", { selector: "button.primary" });
     await waitFor(() => expect(buy).toBeEnabled());
     fireEvent.click(buy);
-    fireEvent.click(await screen.findByRole("button", { name: "确认提交" }));
 
     await waitFor(() =>
       expect(submittedBody).toMatchObject({
@@ -1492,10 +1467,11 @@ describe("App", () => {
         tokenAddress: token.tokenAddress,
         settlementAsset: "USDG",
         amountIn: "1",
-        slippageBps: 300,
+        slippageBps: 500,
       }),
     );
     expect(await screen.findByText("交易成功")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "交易记录" }));
     expect(await screen.findByText("1 USDG → 123 CASHCAT")).toBeInTheDocument();
     expect(await screen.findByText("123 枚")).toBeInTheDocument();
   });

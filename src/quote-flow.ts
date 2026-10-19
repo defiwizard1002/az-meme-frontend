@@ -116,16 +116,16 @@ export function requirePreparedQuote(
   now = Date.now(),
 ): Quote {
   if (value.status === "LOCAL_ESTIMATE" || !value.quoteId)
-    throw Error("准备未完成：估计不能提交交易，请重新准备并确认");
+    throw Error("准备未完成：估计不能提交交易，请重试");
   if (!matchesDraft(value, request)) throw Error("准备结果与当前输入不匹配");
-  if (value.expiresAt <= now) throw Error("准备结果已过期，请重新准备并确认");
+  if (value.expiresAt <= now) throw Error("准备结果已过期，请重试");
   if (
     request.minAmountOut === undefined ||
     compareAmounts(value.minAmountOut, request.minAmountOut) < 0
   )
     throw Error("准备结果不能降低最低得到");
   if (compareAmounts(value.minAmountOut, request.minAmountOut) !== 0)
-    throw Error("最低得到与确认值不一致，请重新准备并确认");
+    throw Error("最低得到与请求值不一致，请重试");
   if (
     !value.routeFingerprint ||
     !value.routePools?.length ||

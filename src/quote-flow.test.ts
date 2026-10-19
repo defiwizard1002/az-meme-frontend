@@ -46,7 +46,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-describe("estimate → explicit preparation → separate confirmation helpers", () => {
+describe("estimate → internal preparation → execution binding", () => {
   it("preserves the exact draft amount and minimum in the preparation POST; no execution POST", async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ rc: 0, result: ready })));
     vi.stubGlobal("fetch", fetch);
@@ -61,7 +61,7 @@ describe("estimate → explicit preparation → separate confirmation helpers", 
     expect(String(fetch.mock.calls[0]![0])).toContain("/quotes");
     expect(JSON.parse(fetch.mock.calls[0]![1].body)).toEqual(input);
   });
-  it("an estimate cannot pass confirmation; prepared result can only pass with the preserved minimum", () => {
+  it("an estimate cannot pass execution validation; prepared result can only pass with the preserved minimum", () => {
     const input = preparationInput(request, estimate);
     expect(() => requirePreparedQuote(estimate, input, 1000)).toThrow("估计不能提交");
     expect(requirePreparedQuote(ready, input, 1000).quoteId).toBe("prepared-id");
@@ -78,13 +78,13 @@ describe("estimate → explicit preparation → separate confirmation helpers", 
     expect(() => requirePreparedQuote(ready, input, 2000)).toThrow("过期");
     expect(() => preparationInput({ ...request, amountIn: "2" }, estimate)).toThrow("不匹配");
   });
-  it("requires the displayed chosen route and preserves the exact confirmed minimum", () => {
+  it("requires the prepared route and preserves the exact requested minimum", () => {
     const input = preparationInput(request, estimate);
     expect(() => requirePreparedQuote({ ...ready, routeAssets: [] }, input, 1000)).toThrow(
       "缺少路径",
     );
     expect(() => requirePreparedQuote({ ...ready, minAmountOut: "9.99" }, input, 1000)).toThrow(
-      "最低得到与确认值不一致",
+      "最低得到与请求值不一致",
     );
   });
   it("handles approval-required preparation explicitly without executing or approving", async () => {
