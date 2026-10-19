@@ -279,3 +279,62 @@ describe("single action trading", () => {
     await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
   });
 });
+
+it("silently disables and refreshes at estimate expiry, then waits for a new action", async () => {
+  vi.useFakeTimers();
+  const { prepare, execute } = setup();
+  prepare.mockResolvedValueOnce({ ...estimate, expiresAt: Date.now() + 1000 });
+  await act(async () => {});
+  expect(document.querySelector("button.primary")).toBeEnabled();
+  let resolve!: (q: LocalEstimate) => void;
+  prepare.mockImplementationOnce(
+    () =>
+      new Promise<LocalEstimate>((r) => {
+        resolve = r;
+      }),
+  );
+  await act(async () => vi.advanceTimersByTimeAsync(1000));
+  expect(document.querySelector("button.primary")).toBeDisabled();
+  expect(document.querySelector("button.primary")).toHaveTextContent("更新报价中");
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(prepare).toHaveBeenCalledTimes(2);
+  await act(async () => resolve({ ...estimate, expiresAt: Date.now() + 15000 }));
+  expect(document.querySelector("button.primary")).toBeEnabled();
+  expect(execute).not.toHaveBeenCalled();
+  expect(prepare.mock.calls.every(([r]) => r.purpose === "ESTIMATE")).toBe(true);
+});
+it("silently refreshes a click at the expiry boundary without preparing or executing", async () => {
+  vi.useFakeTimers();
+  const { prepare, execute } = setup();
+  const expiresAt = Date.now() + 1000;
+  prepare.mockResolvedValueOnce({ ...estimate, expiresAt });
+  await act(async () => {});
+  prepare.mockResolvedValue({ ...estimate, expiresAt: expiresAt + 15000 });
+  vi.setSystemTime(expiresAt);
+  fireEvent.click(document.querySelector("button.primary")!);
+  await act(async () => {});
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(prepare).toHaveBeenCalledTimes(2);
+  expect(prepare.mock.calls.every(([r]) => r.purpose === "ESTIMATE")).toBe(true);
+  expect(execute).not.toHaveBeenCalled();
+  expect(document.querySelector("button.primary")).toBeEnabled();
+});
+it("silently refreshes an expired preparation without automatically resubmitting", async () => {
+  const { prepare, execute } = setup();
+  await waitFor(() => expect(document.querySelector("button.primary")).toBeEnabled());
+  prepare.mockRejectedValueOnce(new ApiError("MEME_QUOTE_EXPIRED", "expired", 409));
+  fireEvent.click(document.querySelector("button.primary")!);
+  await waitFor(() => expect(prepare).toHaveBeenCalledTimes(3));
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(execute).not.toHaveBeenCalled();
+  expect(prepare.mock.calls.filter(([r]) => r.purpose === "PREPARE_EXECUTION")).toHaveLength(1);
+});
+it("keeps an expiry error after execute was sent visible and never resends", async () => {
+  const { prepare, execute } = setup();
+  await waitFor(() => expect(document.querySelector("button.primary")).toBeEnabled());
+  execute.mockRejectedValueOnce(new ApiError("MEME_QUOTE_EXPIRED", "expired", 409));
+  fireEvent.click(document.querySelector("button.primary")!);
+  await screen.findByRole("alert");
+  expect(execute).toHaveBeenCalledTimes(1);
+  expect(prepare).toHaveBeenCalledTimes(2);
+});

@@ -100,9 +100,11 @@ export function settlementUsdPrice(
   const digits = value.toString().padStart(37, "0");
   return `${digits.slice(0, -36)}.${digits.slice(-36)}`;
 }
+export class QuoteExpiredError extends Error {}
+
 export function preparationInput(request: QuoteRequest, estimate: QuoteDisplay): QuoteRequest {
   if (!matchesDraft(estimate, request)) throw Error("估计与当前输入不匹配");
-  if (estimate.expiresAt <= Date.now()) throw Error("报价已过期，请等待新报价后重新准备");
+  if (estimate.expiresAt <= Date.now()) throw new QuoteExpiredError("报价已过期");
   return {
     ...request,
     purpose: "PREPARE_EXECUTION",
@@ -118,7 +120,7 @@ export function requirePreparedQuote(
   if (value.status === "LOCAL_ESTIMATE" || !value.quoteId)
     throw Error("准备未完成：估计不能提交交易，请重试");
   if (!matchesDraft(value, request)) throw Error("准备结果与当前输入不匹配");
-  if (value.expiresAt <= now) throw Error("准备结果已过期，请重试");
+  if (value.expiresAt <= now) throw new QuoteExpiredError("准备结果已过期");
   if (
     request.minAmountOut === undefined ||
     compareAmounts(value.minAmountOut, request.minAmountOut) < 0

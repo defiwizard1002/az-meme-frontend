@@ -20,6 +20,7 @@ import type {
 import "./styles.css";
 import {
   preparationInput,
+  QuoteExpiredError,
   requirePreparedQuote,
   withSlippageMinimum,
   calculatedSlippage,
@@ -607,6 +608,7 @@ export default function App() {
   const quoteRequestRef = useRef(quoteRequest);
   quoteRequestRef.current = quoteRequest;
   const quoteVersionRef = useRef(0);
+  const refreshExpiredQuoteRef = useRef<() => void>(() => {});
   const rawQuote = quoteState?.request === quoteRequest ? quoteState.value : null;
   const displayedPrice = activeSnapshot?.items.at(-1)?.c ?? selected?.priceUsd ?? "0";
   const slipCalculation =
@@ -1583,6 +1585,7 @@ export default function App() {
     const controller = new AbortController();
     const version = ++quoteVersionRef.current;
     let inFlight = false;
+    let expiryTimer: number | undefined;
     setQuoteState(null);
     const refresh = async () => {
       if (!accountAvailable || !quoteRequest || inFlight) return;
@@ -1601,6 +1604,14 @@ export default function App() {
           request: quoteRequest,
         });
         setErrorState((current) => (current?.owner === quoteRequest ? null : current));
+        window.clearTimeout(expiryTimer);
+        expiryTimer = window.setTimeout(
+          () => {
+            setQuoteState(null);
+            void refresh();
+          },
+          Math.max(0, freshQuote.expiresAt - Date.now()),
+        );
       } catch (cause) {
         if (
           !controller.signal.aborted &&
@@ -1613,6 +1624,11 @@ export default function App() {
         inFlight = false;
       }
     };
+    const refreshExpired = () => {
+      setQuoteState(null);
+      void refresh();
+    };
+    refreshExpiredQuoteRef.current = refreshExpired;
     void refresh();
     const timer = window.setInterval(() => void refresh(), 15_000);
     const socket = streamSocketRef.current;
@@ -1621,6 +1637,8 @@ export default function App() {
     return () => {
       controller.abort();
       window.clearInterval(timer);
+      window.clearTimeout(expiryTimer);
+      refreshExpiredQuoteRef.current = () => {};
     };
   }, [quoteRequest, selectedTokenAddress, accountAvailable, accountMode]);
 
@@ -1847,10 +1865,11 @@ export default function App() {
 
   const submitOrder = useCallback(async () => {
     if (!accountAvailable || orderBusyRef.current) return;
-    if (!quote) {
-      setError("报价更新中，请稍后再试");
+    if (!quote || quote.expiresAt <= Date.now()) {
+      refreshExpiredQuoteRef.current();
       return;
     }
+    let executionSent = false;
     orderBusyRef.current = true;
     setOrderBusy(true);
     setError(null);
@@ -1879,6 +1898,7 @@ export default function App() {
           clientExecutionId = crypto.randomUUID();
           mainAccountIdempotencyRef.current.set(requestKey, clientExecutionId);
         }
+        executionSent = true;
         const transaction = await memeApi.executeMainAccountTrade({
           clientExecutionId,
           side,
@@ -1901,6 +1921,7 @@ export default function App() {
         clientOrderId = crypto.randomUUID();
         orderIdempotencyRef.current.set(quote.quoteId, clientOrderId);
       }
+      executionSent = true;
       const order = await memeApi.createOrder({
         clientOrderId,
         quoteId: quote.quoteId!,
@@ -1912,6 +1933,14 @@ export default function App() {
     } catch (cause) {
       if (quoteRequestRef.current !== quoteRequest) return;
       setOrderState(null);
+      if (
+        !executionSent &&
+        (cause instanceof QuoteExpiredError ||
+          (cause instanceof ApiError && cause.code === "MEME_QUOTE_EXPIRED"))
+      ) {
+        refreshExpiredQuoteRef.current();
+        return;
+      }
       setError(friendlyError(cause, "下单请求未完成"));
     } finally {
       orderBusyRef.current = false;
@@ -2476,11 +2505,13 @@ export default function App() {
             <button
               type="submit"
               className="primary"
+              aria-busy={orderBusy || !quote || quote.expiresAt <= Date.now()}
               disabled={
                 !accountAvailable ||
                 !selected ||
                 !quoteRequest ||
                 !quote ||
+                quote.expiresAt <= Date.now() ||
                 orderBusy ||
                 (side === "SELL" && Number(currentBalance) <= 0)
               }
@@ -2493,9 +2524,11 @@ export default function App() {
                     : "等待登录"
                   : orderBusy
                     ? "处理中"
-                    : side === "BUY"
-                      ? "买入"
-                      : "卖出"}
+                    : !quote || quote.expiresAt <= Date.now()
+                      ? "更新报价中"
+                      : side === "BUY"
+                        ? "买入"
+                        : "卖出"}
             </button>
             {orderState && <p role="status">{orderState}</p>}
           </form>
