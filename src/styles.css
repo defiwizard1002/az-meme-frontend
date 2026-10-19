@@ -207,9 +207,11 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .security-row dd { display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
 .security-row dd span { white-space: nowrap; }
 .security-row dd .security-safe { color: var(--positive); }
-.security-row dd .security-warning { color: #f2b75e; }
-.security-row dd .security-danger { color: var(--negative); }
-.security-row dd .security-neutral { color: var(--muted); }
+.security-warning { color: #f2b75e; }
+.security-danger { color: var(--negative); }
+.security-neutral { color: var(--muted); }
+.token-row .token-risk { flex-wrap: wrap; gap: 2px 6px; }
+.token-risk span { white-space: nowrap; }
 .primary { width: 100%; min-height: 42px; border: 0; border-radius: var(--radius); background: var(--accent); color: #092422; font-weight: 800; cursor: pointer; }
 .primary:hover { background: #7fe1dc; }
 .primary:disabled { cursor: wait; opacity: .5; }

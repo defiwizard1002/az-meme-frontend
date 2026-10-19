@@ -7,6 +7,7 @@ import { pollTransactionUntilTerminal } from './transaction-tracker';
 import type { AccountSummary, AccountTransaction, Asset, Candle, CandleSnapshot, Interval, Quote, QuoteDisplay, Token, Trade } from './types';
 import './styles.css';
 import { preparationInput, requirePreparedQuote, withSlippageMinimum } from './quote-flow';
+import { TokenRiskLabels } from './TokenRiskLabels';
 
 const intervals: Interval[] = ['1s', '1m', '15m', '1h', '4h'];
 const ethPresets = ['0.05', '0.1', '0.25', '0.5'];
@@ -155,7 +156,7 @@ function securityPercent(value: string): string {
 
 function securityLabels(token: Token): SecurityLabel[] {
   const labels: SecurityLabel[] = [];
-  const { buyTaxPct, sellTaxPct, liquidityBurnedPct, liquidityLockedPct, liquidityLocked, isHoneypot } = token.security;
+  const { buyTaxPct, sellTaxPct, liquidityBurnedPct, liquidityLockedPct, liquidityLocked } = token.security;
   if (buyTaxPct !== null && sellTaxPct !== null && buyTaxPct === sellTaxPct) {
     labels.push({ text: `税 ${securityPercent(buyTaxPct)}%`, tone: Number(buyTaxPct) > 0 ? 'warning' : 'safe' });
   } else {
@@ -170,9 +171,7 @@ function securityLabels(token: Token): SecurityLabel[] {
   } else if (liquidityLocked === true && !(liquidityBurnedPct !== null && Number(liquidityBurnedPct) > 0)) {
     labels.push({ text: '已锁池', tone: 'safe' });
   }
-  if (isHoneypot === false) labels.push({ text: '非蜜罐', tone: 'safe' });
-  if (isHoneypot === true) labels.push({ text: '蜜罐风险', tone: 'danger' });
-  return labels.length > 0 ? labels : [{ text: '安全数据待确认', tone: 'neutral' }];
+  return labels;
 }
 
 export function relativeAge(timestamp: number, nowSeconds = Math.floor(Date.now() / 1000)): string {
@@ -1525,6 +1524,7 @@ export default function App() {
                         <em className="badge launchpad">{token.launchpad}</em>
                         <span>{age(token.ageSeconds)}</span>
                       </small>
+                      <small className="token-risk"><TokenRiskLabels security={token.security} /></small>
                     </span>
                   </span>
                   <span>{money(token.marketCapUsd)}</span>
@@ -1662,7 +1662,7 @@ export default function App() {
                 setSlippageBps(Number(event.target.value)); resetTradeDraft();
               }}>{[...new Set([50,100,300,500,1000,2000,3000,slippageBps])].sort((a,b)=>a-b).map((bps) =>
                 <option key={bps} value={bps}>{bps / 100}%</option>)}</select></dd></div>
-              <div className="security-row"><dt>安全</dt><dd>{safety.map((item) => <span className={`security-${item.tone}`} key={item.text}>{item.text}</span>)}</dd></div>
+              <div className="security-row"><dt>安全</dt><dd>{selected && <TokenRiskLabels security={selected.security} />}{safety.map((item) => <span className={`security-${item.tone}`} key={item.text}>{item.text}</span>)}</dd></div>
             </dl>
             {accountMode==='MAIN_ACCOUNT_POC'&&!prepared&&quote&&<p className="trade-risk" role="note">预计得到来自本地可执行曲线报价，与图表最新成交价可能不同，不保证实际到账；先准备交易，再确认提交。</p>}
             {prepared&&<PreparedRouteDetails quote={prepared.value} outputSymbol={side === 'BUY' ? selected?.symbol ?? '' : asset} />}

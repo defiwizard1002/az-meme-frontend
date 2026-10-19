@@ -560,7 +560,8 @@ describe('App', () => {
     await waitFor(() => expect(screen.getAllByText('UNISWAP V4').length).toBeGreaterThan(0));
     expect(screen.getByText('税 1%')).toBeInTheDocument();
     expect(screen.getByText('已燃烧 95%')).toBeInTheDocument();
-    expect(screen.getByText('非蜜罐')).toBeInTheDocument();
+    expect(screen.getAllByText('貔貅：否')).toHaveLength(2);
+    expect(screen.getAllByText('风险提示：未知')).toHaveLength(2);
     expect(screen.getByRole('button', { name: '买入 CASHCAT' })).toBeEnabled();
     expect(screen.queryByText('预览交易')).not.toBeInTheDocument();
     expect(screen.queryByText('下单无需再次签名')).not.toBeInTheDocument();

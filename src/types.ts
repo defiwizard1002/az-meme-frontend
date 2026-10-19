@@ -23,6 +23,7 @@ export interface Token {
   riskFlags: string[];
   security: {
     isHoneypot: boolean | null;
+    isShowAlert?: boolean | null;
     buyTaxPct: string | null;
     sellTaxPct: string | null;
     liquidityLocked: boolean | null;
