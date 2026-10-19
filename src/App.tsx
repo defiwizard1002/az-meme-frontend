@@ -29,7 +29,7 @@ import type {
 import "./styles.css";
 import { preparationInput, requirePreparedQuote, withSlippageMinimum } from "./quote-flow";
 import { TokenRiskLabels, TokenRiskGrid } from "./TokenRiskLabels";
-import { displayAmount } from "./decimal-display";
+import { displayAmount, positionQuantity } from "./decimal-display";
 import { HistoryModal } from "./HistoryModal";
 
 const intervals: Interval[] = ["1s", "1m", "15m", "1h", "4h"];
@@ -2845,7 +2845,7 @@ export default function App() {
                 <div className="position" key={position.tokenAddress}>
                   <span>
                     <b>{position.symbol}</b>
-                    <small>{compact(position.available)} 枚</small>
+                    <small>{positionQuantity(position.available)} 枚</small>
                   </span>
                   <span
                     className={

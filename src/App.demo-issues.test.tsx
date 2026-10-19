@@ -368,3 +368,33 @@ describe("demo issues regression", () => {
     expect(document.querySelector(".quote-details")).toHaveTextContent("94.09");
   });
 });
+
+it("holds positive small quantities in the UI and keeps the exact 100% sell input", async () => {
+  setup();
+  vi.spyOn(memeApi, "getAccount").mockResolvedValue({
+    quoteBalances: [{ asset: "USDG", available: "10", frozen: "0" }],
+    positions: [
+      {
+        tokenAddress: token.tokenAddress,
+        symbol: "PONS",
+        available: "0.003860795207337225",
+        costUsd: "0",
+        valueUsd: "0.001",
+      },
+      {
+        tokenAddress: `0x${"2".repeat(40)}`,
+        symbol: "DUST",
+        available: "0.000006486365974824",
+        costUsd: "0",
+        valueUsd: "0.0009",
+      },
+    ],
+  });
+  render(<App />);
+  await screen.findByText("主账户已连接");
+  expect(screen.getByText("0.003 枚")).toBeInTheDocument();
+  expect(screen.getByText("<0.001 枚")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "卖出" }));
+  fireEvent.click(screen.getByRole("button", { name: "100%" }));
+  expect(screen.getByRole("textbox", { name: "卖出数量" })).toHaveValue("0.003860795207337225");
+});
