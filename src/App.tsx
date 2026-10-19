@@ -31,6 +31,7 @@ import { preparationInput, requirePreparedQuote, withSlippageMinimum } from "./q
 import { TokenRiskLabels, TokenRiskGrid } from "./TokenRiskLabels";
 import { displayAmount, positionQuantity } from "./decimal-display";
 import { HistoryModal } from "./HistoryModal";
+import { WalletAssets } from "./WalletAssets";
 
 const intervals: Interval[] = ["1s", "1m", "15m", "1h", "4h"];
 const ethPresets = ["0.05", "0.1", "0.25", "0.5"];
@@ -1811,18 +1812,6 @@ export default function App() {
     () => account?.positions.reduce((sum, item) => sum + Number(item.valueUsd), 0) ?? 0,
     [account],
   );
-  const balanceLabel =
-    account?.quoteBalances
-      .filter(
-        (item) =>
-          item.asset === "WETH" ||
-          item.asset === "ETH" ||
-          item.asset === "USDC" ||
-          item.asset === "USDT" ||
-          item.asset === "USDG",
-      )
-      .map((item) => `${readableAmount(item.available)} ${item.asset}`)
-      .join(" / ") ?? "余额加载中";
   const visibleTokens = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return tokens;
@@ -2185,19 +2174,13 @@ export default function App() {
             placeholder="搜索代币或粘贴合约地址"
           />
         </label>
-        {accountMode === "MAIN_ACCOUNT_POC" ? (
-          <div className="balances">{accountError ? "账户不可用" : balanceLabel}</div>
-        ) : (
-          <button
-            type="button"
-            className="balances"
-            aria-label="打开账户划转"
-            disabled={!accountAvailable}
-            onClick={() => setTransferOpen(true)}
-          >
-            {accountError ? "账户不可用" : balanceLabel}
-          </button>
-        )}
+        <WalletAssets
+          balances={account?.quoteBalances}
+          error={accountError ? "账户不可用" : null}
+          {...(accountMode === "MAIN_ACCOUNT_POC"
+            ? {}
+            : { onTransfer: () => setTransferOpen(true) })}
+        />
         <button
           type="button"
           className="icon-button history-trigger"

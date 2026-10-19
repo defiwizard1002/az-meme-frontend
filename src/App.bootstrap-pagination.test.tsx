@@ -395,7 +395,8 @@ describe("urgent live trade and account origin regressions through App", () => {
     });
     expect(document.querySelector(".mock-badge")).toHaveAttribute("data-state", "connected");
     expect(document.querySelector(".mock-badge")).toHaveTextContent("主账户已连接");
-    expect(document.querySelector(".balances")).toHaveTextContent("10 USDG");
+    fireEvent.click(screen.getByRole("button", { name: "钱包资产" }));
+    expect(screen.getByRole("dialog", { name: "钱包资产" })).toHaveTextContent("USDG10");
     expect(azAuth.loginMock).not.toHaveBeenCalled();
   });
 
@@ -1123,7 +1124,8 @@ describe("hotfix: bounded account bootstrap and empty demand", () => {
       });
       expect(screen.getByRole("alert")).toHaveTextContent("超时");
       expect(screen.getByRole("button", { name: "重试账户连接" })).toBeEnabled();
-      expect(document.querySelector(".balances")).toHaveTextContent("账户不可用");
+      fireEvent.click(screen.getByRole("button", { name: "钱包资产" }));
+      expect(screen.getByRole("dialog", { name: "钱包资产" })).toHaveTextContent("账户不可用");
       expect(document.querySelector("button.primary")).toBeDisabled();
     },
   );
@@ -1143,7 +1145,8 @@ describe("hotfix: bounded account bootstrap and empty demand", () => {
       fireEvent.click(screen.getByRole("button", { name: "重试账户连接" }));
       await act(async () => {});
       expect(signal?.aborted).toBe(true);
-      expect(document.querySelector(".balances")).toHaveTextContent("10 ETH");
+      fireEvent.click(screen.getByRole("button", { name: "钱包资产" }));
+      expect(screen.getByRole("dialog", { name: "钱包资产" })).toHaveTextContent("ETH10");
       await act(async () => {
         if (outcome === "success")
           old.resolve({
@@ -1152,8 +1155,8 @@ describe("hotfix: bounded account bootstrap and empty demand", () => {
           });
         else old.reject(new SyntaxError("Unexpected end of JSON input"));
       });
-      expect(document.querySelector(".balances")).toHaveTextContent("10 ETH");
-      expect(document.querySelector(".balances")).not.toHaveTextContent("999");
+      expect(screen.getByRole("dialog", { name: "钱包资产" })).toHaveTextContent("ETH10");
+      expect(screen.getByRole("dialog", { name: "钱包资产" })).not.toHaveTextContent("999");
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
       expect(azAuth.loginMock).not.toHaveBeenCalled();
     },

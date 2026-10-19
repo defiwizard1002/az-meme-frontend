@@ -2011,3 +2011,48 @@ button:active:not(:disabled) {
     flex-shrink: 1;
   }
 }
+
+.wallet-assets {
+  position: relative;
+  justify-self: end;
+}
+.wallet-panel {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(340px, calc(100vw - 24px));
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel, #151718);
+  box-shadow: 0 12px 36px #0008;
+  font-size: 13px;
+}
+.wallet-panel dl {
+  margin: 12px 0 0;
+}
+.wallet-panel dl > div {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 12px;
+  padding: 8px 0;
+}
+.wallet-panel dt {
+  color: var(--muted);
+}
+.wallet-panel dd {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 760px) {
+  .wallet-assets {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .wallet-panel {
+    right: -46px;
+  }
+}
