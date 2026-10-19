@@ -1,3 +1,4 @@
+import { TokenLiquidity } from "./TokenLiquidity.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
@@ -1505,7 +1506,14 @@ export default function App() {
             }
             if (message.channel === marketChannel) {
               const refreshedToken = message.data as Token;
-              setSelected(refreshedToken);
+              setSelected((current) => ({
+                ...refreshedToken,
+                localLiquidity:
+                  refreshedToken.localLiquidity ??
+                  (current?.tokenAddress.toLowerCase() === refreshedToken.tokenAddress.toLowerCase()
+                    ? current.localLiquidity
+                    : undefined),
+              }));
               return;
             }
             if (message.channel === candleChannel) {
@@ -2387,10 +2395,7 @@ export default function App() {
                     <span>24h 量</span>
                     <strong>{money(selected.volume24hUsd)}</strong>
                   </div>
-                  <div>
-                    <span>流动性</span>
-                    <strong>{money(selected.liquidityUsd ?? selected.pool.liquidityUsd)}</strong>
-                  </div>
+                  <TokenLiquidity token={selected} money={money} />
                   <div>
                     <span>持有人</span>
                     <strong>{compact(selected.holders)}</strong>

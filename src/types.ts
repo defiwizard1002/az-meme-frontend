@@ -2,6 +2,14 @@ export type Interval = "1s" | "1m" | "15m" | "1h" | "4h";
 export type Asset = "WETH" | "ETH" | "USDC" | "USDT" | "USDG";
 
 export interface Token {
+  localLiquidity?: {
+    status: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
+    totalUsd: string | null;
+    knownSubtotalUsd: string | null;
+    knownPoolCount: number | null;
+    valuedPoolCount: number | null;
+    asOfBlock?: number;
+  };
   chainId: number;
   tokenAddress: string;
   symbol: string;
