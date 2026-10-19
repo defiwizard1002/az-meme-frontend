@@ -16,7 +16,10 @@
     "format": "prettier --write \"**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,html,css,json,jsonc,yaml,yml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,html,css,json,jsonc,yaml,yml}\"",
     "lint": "eslint . --max-warnings 0",
-    "lint:fix": "eslint . --fix --max-warnings 0"
+    "lint:fix": "eslint . --fix --max-warnings 0",
+    "check:push": "pnpm run format:check && pnpm run lint",
+    "hooks:install": "node .githooks/install.mjs",
+    "prepare": "pnpm run hooks:install"
   },
   "dependencies": {
     "lightweight-charts": "5.2.1",
