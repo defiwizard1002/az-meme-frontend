@@ -16,7 +16,7 @@ const token = {
   launchpad: "PONS",
   stage: "GRADUATED",
   quoteAssetKey: "NATIVE",
-  priceUsd: "1",
+  priceUsd: "0.1",
   marketCapUsd: "1",
   volume24hUsd: "1",
   change5m: "0",
@@ -28,7 +28,7 @@ const token = {
   riskFlags: [],
   security: {},
 };
-const minimum = "8.000000000000000001";
+const minimum = "9.500000000000000001";
 const estimate: LocalEstimate = {
   tokenAddress,
   side: "BUY",
@@ -151,7 +151,7 @@ describe("route first, separate user confirmation", () => {
     expect(route).toHaveTextContent("UNISWAP V4");
     expect(within(route).getAllByRole("listitem")).toHaveLength(2);
     expect(route).toHaveTextContent("估计，未经模拟");
-    expect(route).toHaveTextContent("最低得到8 CAT");
+    expect(route).toHaveTextContent("最低得到9.5 CAT");
     expect(route).toHaveTextContent("支付数量1 USDG");
     expect(route).toHaveTextContent("预计得到≈ 10 CAT");
     expect(route.querySelector("time")).toHaveAttribute("dateTime");
@@ -244,15 +244,15 @@ describe("route first, separate user confirmation", () => {
   });
 });
 
-it("defaults to exactly 20%, shows exact quote/minimum, and carries an edited 3% through refresh and preparation", async () => {
+it("calculates 5pp from current price, shows exact minimum, and carries edited 3% through preparation", async () => {
   const { prepare, execute } = setup();
   const button = await screen.findByRole("button", { name: "准备交易" });
   await waitFor(() => expect(button).toBeEnabled());
-  expect(screen.getByLabelText("滑点设置")).toHaveValue("2000");
-  expect(prepare.mock.calls.at(-1)?.[0].slippageBps).toBe(2000);
+  expect(screen.getByLabelText("滑点设置")).toHaveValue(5);
+  expect(document.querySelector(".quote-details")).toHaveTextContent("价格影响0%");
   expect(document.querySelector(".quote-details")).toHaveTextContent("预计得到≈ 10 CAT");
-  expect(document.querySelector(".quote-details")).toHaveTextContent("最低得到8 CAT");
-  fireEvent.change(screen.getByLabelText("滑点设置"), { target: { value: "300" } });
+  expect(document.querySelector(".quote-details")).toHaveTextContent("最低得到9.5 CAT");
+  fireEvent.change(screen.getByLabelText("滑点设置"), { target: { value: "3" } });
   await waitFor(() => expect(button).toBeEnabled());
   expect(prepare.mock.calls.at(-1)?.[0].slippageBps).toBe(300);
   expect(document.querySelector(".quote-details")).toHaveTextContent("最低得到9.7 CAT");
@@ -280,12 +280,14 @@ it("updates the visible minimum with refreshed estimates but keeps a prepared co
         },
   );
   await act(async () => vi.advanceTimersByTimeAsync(15001));
-  expect(document.querySelector(".quote-details")).toHaveTextContent("最低得到9.6 CAT");
+  expect(document.querySelector(".quote-details")).toHaveTextContent("最低得到11.4 CAT");
   fireEvent.click(screen.getByRole("button", { name: "准备交易" }));
   await act(async () => {});
-  expect(prepare.mock.calls.at(-1)?.[0].minAmountOut).toBe("9.600000000000000001");
+  expect(prepare.mock.calls.at(-1)?.[0].minAmountOut).toBe("11.400000000000000001");
   await act(async () => vi.advanceTimersByTimeAsync(15001));
-  expect(screen.getByRole("region", { name: "已选交易路径" })).toHaveTextContent("最低得到9.6 CAT");
+  expect(screen.getByRole("region", { name: "已选交易路径" })).toHaveTextContent(
+    "最低得到11.4 CAT",
+  );
   expect(execute).not.toHaveBeenCalled();
 });
 
@@ -315,90 +317,43 @@ it("refreshes stable drafts at 15 seconds without preparing transactions", async
   expect(prepare).toHaveBeenCalledTimes(3);
   expect(prepare.mock.calls.every(([request]) => request.purpose === "ESTIMATE")).toBe(true);
 });
-it("turns an approval prerequisite into an explicit CTA without sending, then invalidates it on token-side input change", async () => {
-  const { prepare, execute } = setup();
+it("shows one ordinary confirmation and no separate approval CTA", async () => {
+  const { execute } = setup();
+  const approve = vi.spyOn(memeApi, "approveTrade");
+  const button = await screen.findByRole("button", { name: "准备交易" });
+  await waitFor(() => expect(button).toBeEnabled());
+  fireEvent.click(button);
+  await screen.findByRole("button", { name: "确认提交" });
+  expect(screen.queryByLabelText("代币授权")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^授权/ })).not.toBeInTheDocument();
+  expect(approve).not.toHaveBeenCalled();
+  expect(execute).not.toHaveBeenCalled();
+});
+it("keeps manual 45% through 15s refresh and ignores a stale pending response", async () => {
+  vi.useFakeTimers();
+  const { prepare } = setup();
   await act(async () => {});
-  prepare.mockRejectedValueOnce(
-    Object.assign(new ApiError("MEME_APPROVAL_REQUIRED", "approval", 409), {
-      details: {
-        status: "APPROVAL_REQUIRED",
-        prerequisiteId: "prerequisite",
-        account: inputAddress,
-        prerequisites: [
-          { token: inputAddress, spender: bridgeAddress, amount: "1000000000000000000" },
-        ],
-        expiresAt: Date.now() + 15000,
-      },
+  fireEvent.change(screen.getByLabelText("滑点设置"), { target: { value: "45" } });
+  await act(async () => {});
+  let resolve!: (value: LocalEstimate) => void;
+  prepare.mockImplementationOnce(
+    () =>
+      new Promise<LocalEstimate>((r) => {
+        resolve = r;
+      }),
+  );
+  await act(async () => vi.advanceTimersByTimeAsync(15000));
+  fireEvent.change(screen.getByLabelText("买入金额"), { target: { value: "2" } });
+  fireEvent.change(screen.getByLabelText("滑点设置"), { target: { value: "35" } });
+  await act(async () => {});
+  await act(async () =>
+    resolve({
+      ...estimate,
+      expectedAmountOut: "1",
+      expectedAmountOutAtomic: "1000000000000000000",
     }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "准备交易" }));
-  await screen.findByRole("button", { name: "授权 USDG" });
-  expect(screen.getByLabelText("代币授权")).toHaveTextContent("1 USDG");
-  expect(screen.getByLabelText("代币授权")).toHaveTextContent(shortForTest(bridgeAddress));
-  expect(execute).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText("买入金额"), { target: { value: "2" } });
-  await act(async () => {});
-  expect(screen.queryByRole("button", { name: "授权 USDG" })).not.toBeInTheDocument();
-});
-function shortForTest(value: string) {
-  return `${value.slice(0, 5)}...${value.slice(-4)}`;
-}
-it("sends approval only on click and shows a freshly prepared confirmation without swapping", async () => {
-  const { prepare, execute } = setup();
-  await act(async () => {});
-  const details = {
-    status: "APPROVAL_REQUIRED",
-    prerequisiteId: "prerequisite",
-    account: inputAddress,
-    prerequisites: [{ token: inputAddress, spender: bridgeAddress, amount: "1000000000000000000" }],
-    expiresAt: Date.now() + 15000,
-  };
-  prepare.mockRejectedValueOnce(
-    Object.assign(new ApiError("MEME_APPROVAL_REQUIRED", "approval", 200), { details }),
-  );
-  const approve = vi
-    .spyOn(memeApi, "approveTrade")
-    .mockResolvedValue({ status: "REQUOTE_REQUIRED", transactions: ["0xreceipt"] });
-  fireEvent.click(screen.getByRole("button", { name: "准备交易" }));
-  await screen.findByRole("button", { name: "授权 USDG" });
-  expect(approve).not.toHaveBeenCalled();
-  expect(execute).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "授权 USDG" }));
-  await screen.findByRole("button", { name: "确认提交" });
-  expect(approve).toHaveBeenCalledExactlyOnceWith("prerequisite");
-  expect(prepare.mock.calls.at(-1)?.[0]).toMatchObject({
-    purpose: "PREPARE_EXECUTION",
-    minAmountOut: minimum,
-  });
-  expect(execute).not.toHaveBeenCalled();
-});
-it("recovers a late allowance error and stops after rejected approval until another explicit preparation", async () => {
-  const { prepare, execute } = setup();
-  await act(async () => {});
-  fireEvent.click(screen.getByRole("button", { name: "准备交易" }));
-  await screen.findByRole("button", { name: "确认提交" });
-  const details = {
-    status: "APPROVAL_REQUIRED",
-    prerequisiteId: "late",
-    account: inputAddress,
-    prerequisites: [{ token: inputAddress, spender: bridgeAddress, amount: "1000000000000000000" }],
-    expiresAt: Date.now() + 15000,
-  };
-  execute.mockRejectedValueOnce(new ApiError("MEME_APPROVAL_REQUIRED", "allowance changed", 409));
-  prepare.mockImplementation(async (request) => {
-    if (request.purpose === "PREPARE_EXECUTION")
-      throw Object.assign(new ApiError("MEME_APPROVAL_REQUIRED", "approval", 200), { details });
-    return { ...estimate, amountIn: request.amountIn };
-  });
-  const approve = vi
-    .spyOn(memeApi, "approveTrade")
-    .mockRejectedValue(new ApiError("MEME_APPROVAL_REJECTED", "rejected", 409));
-  fireEvent.click(screen.getByRole("button", { name: "确认提交" }));
-  await screen.findByRole("button", { name: "授权 USDG" });
-  expect(approve).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "授权 USDG" }));
-  await screen.findByRole("button", { name: "准备交易" });
-  expect(approve).toHaveBeenCalledTimes(1);
-  expect(execute).toHaveBeenCalledTimes(1);
-  expect(screen.queryByRole("button", { name: "确认提交" })).not.toBeInTheDocument();
+  expect(screen.getByLabelText("滑点设置")).toHaveValue(35);
+  await act(async () => vi.advanceTimersByTimeAsync(15000));
+  expect(screen.getByLabelText("滑点设置")).toHaveValue(35);
 });

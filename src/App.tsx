@@ -1,15 +1,6 @@
 import { TokenLiquidity } from "./TokenLiquidity.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  ApiError,
-  approvalDetails,
-  azAuth,
-  azFundApi,
-  memeApi,
-  setSessionToken,
-  wsBaseUrl,
-  type ApprovalRequired,
-} from "./api";
+import { ApiError, azAuth, azFundApi, memeApi, setSessionToken, wsBaseUrl } from "./api";
 import { CandleChart, type HistoryLoadResult } from "./CandleChart";
 import { streamBatchItems, streamSequenceAction } from "./stream-batches";
 import { pollOrderUntilTerminal } from "./order-tracker";
@@ -27,7 +18,13 @@ import type {
   Trade,
 } from "./types";
 import "./styles.css";
-import { preparationInput, requirePreparedQuote, withSlippageMinimum } from "./quote-flow";
+import {
+  preparationInput,
+  requirePreparedQuote,
+  withSlippageMinimum,
+  calculatedSlippage,
+  settlementUsdPrice,
+} from "./quote-flow";
 import { TokenRiskLabels, TokenRiskGrid } from "./TokenRiskLabels";
 import { displayAmount, positionQuantity } from "./decimal-display";
 import { HistoryModal } from "./HistoryModal";
@@ -415,8 +412,8 @@ function friendlyError(cause: unknown, fallback: string): string {
     MEME_GMGN_RATE_LIMITED: "行情请求较多，请稍后再试",
     MEME_MARKET_MISMATCH: "池子已更新，正在刷新行情",
     MEME_QUOTE_EXPIRED: "报价已过期，请使用最新报价",
-    MEME_APPROVAL_REQUIRED: "请先授权代币，再重新准备并确认交易",
-    MEME_ATOMIC_APPROVAL_REQUIRED: "请先授权代币，再重新准备并确认交易",
+    MEME_APPROVAL_REQUIRED: "自动授权未完成，请重新准备并确认交易",
+    MEME_ATOMIC_APPROVAL_REQUIRED: "自动授权未完成，请重新准备并确认交易",
     MEME_EXECUTION_DISABLED: "当前环境暂不开放交易",
     MEME_ROUTE_STALE: "报价已过期或路由已变化，请重新确认",
     MEME_ROUTING_DISCOVERY_UNAVAILABLE: "自有池目录暂不可用",
@@ -579,7 +576,8 @@ export default function App() {
   );
   const [chainName, setChainName] = useState("Robinhood Chain");
   const [explorerBaseUrl, setExplorerBaseUrl] = useState("");
-  const [slippageBps, setSlippageBps] = useState(2000);
+  const [fallbackSlippageBps, setSlippageBps] = useState(2000);
+  const [manualSlippage, setManualSlippage] = useState<{ scope: string; bps: number } | null>(null);
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<Token[] | null>(null);
   const [discoveryTab, setDiscoveryTab] = useState<"hot" | "new">("hot");
@@ -590,11 +588,6 @@ export default function App() {
   const [settlementAssets, setSettlementAssets] = useState<Asset[]>(["ETH", "USDC", "USDT"]);
   const [transferOpen, setTransferOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [approval, setApproval] = useState<{
-    request: Parameters<typeof memeApi.createQuote>[0];
-    value: ApprovalRequired;
-  } | null>(null);
-  const [approvalMessage, setApprovalMessage] = useState<string | null>(null);
   const [transferDirection, setTransferDirection] = useState<"SPOT_TO_MEME" | "MEME_TO_SPOT">(
     "SPOT_TO_MEME",
   );
@@ -701,6 +694,7 @@ export default function App() {
     value: Quote;
     request: Parameters<typeof memeApi.createQuote>[0];
     minimum: string;
+    slippageBps: number;
   } | null>(null);
   const quoteRequest = useMemo(() => {
     if (
@@ -715,20 +709,46 @@ export default function App() {
       tokenAddress: selectedTokenAddress,
       settlementAsset: asset,
       amountIn: amount,
-      slippageBps,
+      slippageBps: fallbackSlippageBps,
       ...(accountMode === "MAIN_ACCOUNT_POC" ? { purpose: "ESTIMATE" as const } : {}),
     } as const;
-  }, [accountMode, amount, asset, selectedTokenAddress, selectedTradeStatus, side, slippageBps]);
+  }, [
+    accountMode,
+    amount,
+    asset,
+    selectedTokenAddress,
+    selectedTradeStatus,
+    side,
+    fallbackSlippageBps,
+  ]);
   const quoteRequestRef = useRef(quoteRequest);
   quoteRequestRef.current = quoteRequest;
   const quoteVersionRef = useRef(0);
   const prepared = preparedQuote?.request === quoteRequest ? preparedQuote : null;
   const preparedExpired = Boolean(prepared && prepared.value.expiresAt <= Date.now());
-  const quote = prepared?.value ?? (quoteState?.request === quoteRequest ? quoteState.value : null);
+  const tradeScope = `${selected?.chainId}:${selectedTokenAddress?.toLowerCase()}:${side}:${asset}:${amount}`;
+  const rawQuote = quoteState?.request === quoteRequest ? quoteState.value : null;
+  const displayedPrice = activeSnapshot?.items.at(-1)?.c ?? selected?.priceUsd ?? "0";
+  const slipCalculation =
+    rawQuote && selected
+      ? calculatedSlippage(
+          rawQuote,
+          displayedPrice,
+          (rawQuote.status === "LOCAL_ESTIMATE"
+            ? side === "BUY"
+              ? rawQuote.inputPriceUsd
+              : rawQuote.outputPriceUsd
+            : undefined) ?? settlementUsdPrice(asset, selected),
+        )
+      : null;
+  const slippageBps =
+    prepared?.slippageBps ??
+    (manualSlippage?.scope === tradeScope
+      ? manualSlippage.bps
+      : (slipCalculation?.suggestedBps ?? fallbackSlippageBps));
+  const quote = prepared?.value ?? (rawQuote ? withSlippageMinimum(rawQuote, slippageBps) : null);
   useEffect(() => {
     setPreparedQuote(null);
-    setApproval(null);
-    setApprovalMessage(null);
     setOrderState(null);
   }, [quoteRequest, accountAvailable]);
 
@@ -1737,7 +1757,6 @@ export default function App() {
     side === "BUY"
       ? (account?.quoteBalances.find((item) => item.asset === asset)?.available ?? "0")
       : (selectedPosition?.available ?? "0");
-  const displayedPrice = activeSnapshot?.items.at(-1)?.c ?? selected?.priceUsd ?? "0";
   const loadMoreTrades = useCallback(
     (element: HTMLDivElement) => {
       if (tradesPausedRef.current) return;
@@ -1965,11 +1984,16 @@ export default function App() {
         if (!quoteRequest) throw new Error("请输入有效金额");
         if (!prepared) {
           setOrderState("准备中");
-          const input = preparationInput(quoteRequest, quote);
+          const input = preparationInput({ ...quoteRequest, slippageBps }, quote);
           const response = await memeApi.createQuote(input);
           if (quoteRequestRef.current !== quoteRequest) throw new Error("输入已变化，请重新准备");
           const value = requirePreparedQuote(response, input);
-          setPreparedQuote({ value, request: quoteRequest, minimum: input.minAmountOut! });
+          setPreparedQuote({
+            value,
+            request: quoteRequest,
+            minimum: input.minAmountOut!,
+            slippageBps,
+          });
           setOrderState(null);
           return;
         }
@@ -2031,33 +2055,6 @@ export default function App() {
       if (quoteRequestRef.current !== quoteRequest) return;
       setOrderState(null);
       if (
-        cause instanceof ApiError &&
-        ["MEME_APPROVAL_REQUIRED", "MEME_ATOMIC_APPROVAL_REQUIRED"].includes(cause.code) &&
-        quoteRequest
-      ) {
-        setPreparedQuote(null);
-        let details = approvalDetails(cause);
-        if (!details) {
-          try {
-            const fresh = await memeApi.createQuote(quoteRequest);
-            if (quoteRequestRef.current !== quoteRequest) return;
-            setQuoteState({
-              value: withSlippageMinimum(fresh, quoteRequest.slippageBps),
-              request: quoteRequest,
-            });
-            await memeApi.createQuote(preparationInput(quoteRequest, fresh));
-          } catch (recovery) {
-            details = approvalDetails(recovery);
-          }
-        }
-        if (quoteRequestRef.current !== quoteRequest) return;
-        if (details) {
-          setApproval({ request: quoteRequest, value: details });
-          setError(null);
-          return;
-        }
-      }
-      if (
         prepared &&
         cause instanceof ApiError &&
         ["MEME_ROUTE_STALE", "MEME_QUOTE_REQUEST_MISMATCH", "MEME_QUOTE_EXPIRED"].includes(
@@ -2083,41 +2080,6 @@ export default function App() {
     trackOrder,
     setError,
   ]);
-
-  const submitApproval = useCallback(async () => {
-    if (!approval || approval.request !== quoteRequest || !quoteRequest || orderState) return;
-    const request = quoteRequest;
-    if (approval.value.expiresAt <= Date.now()) {
-      setApproval(null);
-      setQuoteRefreshNonce((n) => n + 1);
-      setError("授权请求已过期，请重新准备");
-      return;
-    }
-    setOrderState("授权中");
-    setError(null);
-    try {
-      const receipt = await memeApi.approveTrade(approval.value.prerequisiteId);
-      if (quoteRequestRef.current !== request) return;
-      setApproval(null);
-      setApprovalMessage(`授权已完成 · ${receipt.transactions.length} 笔交易`);
-      setOrderState("重新准备中");
-      const fresh = await memeApi.createQuote(request);
-      if (quoteRequestRef.current !== request) return;
-      setQuoteState({ value: withSlippageMinimum(fresh, request.slippageBps), request });
-      const input = preparationInput(request, fresh);
-      const response = await memeApi.createQuote(input);
-      if (quoteRequestRef.current !== request) return;
-      const value = requirePreparedQuote(response, input);
-      setPreparedQuote({ value, request, minimum: input.minAmountOut! });
-    } catch (cause) {
-      if (quoteRequestRef.current !== request) return;
-      const details = approvalDetails(cause);
-      setApproval(details ? { request, value: details } : null);
-      setError(friendlyError(cause, "授权未完成，请重新准备"));
-    } finally {
-      if (quoteRequestRef.current === request) setOrderState(null);
-    }
-  }, [approval, quoteRequest, orderState, setError]);
 
   const submitTransfer = useCallback(async () => {
     if (!accountAvailable) return;
@@ -2706,23 +2668,43 @@ export default function App() {
               <div>
                 <dt>滑点设置</dt>
                 <dd>
-                  <select
+                  <input
                     aria-label="滑点设置"
-                    value={slippageBps}
+                    type="number"
+                    min="0.01"
+                    max="99.99"
+                    step="0.01"
+                    value={slippageBps / 100}
                     onChange={(event) => {
-                      setSlippageBps(Number(event.target.value));
+                      const bps = Math.round(Number(event.target.value) * 100);
+                      if (bps < 1 || bps > 9999) return;
+                      setManualSlippage({ scope: tradeScope, bps });
+                      setSlippageBps(bps);
                       resetTradeDraft();
                     }}
-                  >
-                    {[...new Set([50, 100, 300, 500, 1000, 2000, 3000, slippageBps])]
-                      .sort((a, b) => a - b)
-                      .map((bps) => (
-                        <option key={bps} value={bps}>
-                          {bps / 100}%
-                        </option>
-                      ))}
-                  </select>
+                  />
+                  %
                 </dd>
+              </div>
+              <div>
+                <dt>价格影响</dt>
+                <dd>
+                  {slipCalculation ? `${slipCalculation.impactBps / 100}%` : "当前价格不可用"}
+                </dd>
+              </div>
+              <div>
+                <dt>建议滑点</dt>
+                <dd>
+                  {slipCalculation?.suggestedBps != null
+                    ? `${slipCalculation.suggestedBps / 100}%（价格影响 + 5 个百分点）`
+                    : slipCalculation
+                      ? "建议达到 100%，请手动设置"
+                      : "价格不足，沿用当前设置"}
+                </dd>
+              </div>
+              <div>
+                <dt>容忍度依据</dt>
+                <dd>相对报价输出</dd>
               </div>
               <div className="security-row">
                 <dt>安全</dt>
@@ -2751,35 +2733,6 @@ export default function App() {
                 重新估计
               </button>
             )}
-            {approval && approval.request === quoteRequest && (
-              <section className="approval-panel" aria-label="代币授权">
-                <strong>授权 {side === "BUY" ? asset : selected?.symbol}</strong>
-                <dl className="quote-details">
-                  <div>
-                    <dt>授权数量</dt>
-                    <dd title={approval.value.prerequisites[0]?.amount}>
-                      {displayAmount(approval.request.amountIn)}{" "}
-                      {side === "BUY" ? asset : selected?.symbol}
-                    </dd>
-                  </div>
-                  {approval.value.prerequisites.map((item) => (
-                    <div className="approval-identity" key={`${item.token}:${item.spender}`}>
-                      <dt>代币 / 授权给</dt>
-                      <dd>
-                        <CopyableAddress value={item.token} />
-                        <span> / </span>
-                        <CopyableAddress value={item.spender} />
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              </section>
-            )}
-            {approvalMessage && (
-              <p className="approval-success" role="status">
-                {approvalMessage}
-              </p>
-            )}
             <button
               type="button"
               className="primary"
@@ -2789,10 +2742,10 @@ export default function App() {
                 !quoteRequest ||
                 !quote ||
                 Boolean(orderState) ||
-                (!approval && preparedExpired) ||
+                preparedExpired ||
                 (side === "SELL" && Number(currentBalance) <= 0)
               }
-              onClick={approval ? submitApproval : submitOrder}
+              onClick={submitOrder}
             >
               {accountError
                 ? "账户连接失败"
@@ -2801,17 +2754,15 @@ export default function App() {
                     ? "等待主账户"
                     : "等待登录"
                   : (orderState ??
-                    (approval
-                      ? `授权 ${side === "BUY" ? asset : selected?.symbol}`
-                      : accountMode === "MAIN_ACCOUNT_POC"
-                        ? prepared
-                          ? preparedExpired
-                            ? "路径已过期"
-                            : "确认提交"
-                          : "准备交易"
-                        : side === "BUY"
-                          ? "买入"
-                          : "卖出"))}
+                    (accountMode === "MAIN_ACCOUNT_POC"
+                      ? prepared
+                        ? preparedExpired
+                          ? "路径已过期"
+                          : "确认提交"
+                        : "准备交易"
+                      : side === "BUY"
+                        ? "买入"
+                        : "卖出"))}
             </button>
           </div>
 

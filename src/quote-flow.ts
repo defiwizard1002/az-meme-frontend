@@ -35,7 +35,7 @@ export function withSlippageMinimum(quote: QuoteDisplay, slippageBps: number): Q
   if (
     !Number.isInteger(slippageBps) ||
     slippageBps < 1 ||
-    slippageBps > 3000 ||
+    slippageBps > 9999 ||
     !Number.isInteger(decimals) ||
     decimals < 0 ||
     decimals > 255 ||
@@ -53,6 +53,53 @@ export function withSlippageMinimum(quote: QuoteDisplay, slippageBps: number): Q
     : digits;
   return { ...quote, minAmountOut };
 }
+/** Prices are USD per unit. The quote is already the first selected path; never rerank it. */
+export function calculatedSlippage(
+  quote: QuoteDisplay,
+  tokenPriceUsd: string,
+  settlementPriceUsd: string,
+) {
+  if (
+    ![tokenPriceUsd, settlementPriceUsd, quote.amountIn, quote.expectedAmountOut].every((v) =>
+      /^\d+(?:\.\d+)?$/.test(v),
+    )
+  )
+    return null;
+  const [amount, ad] = decimal(quote.amountIn),
+    [out, od] = decimal(quote.expectedAmountOut);
+  const [token, td] = decimal(tokenPriceUsd),
+    [settlement, sd] = decimal(settlementPriceUsd);
+  if (amount <= 0n || token <= 0n || settlement <= 0n) return null;
+  const [ip, id, op, opd] =
+    quote.side === "BUY" ? [settlement, sd, token, td] : [token, td, settlement, sd];
+  const idealNumerator = amount * ip * 10n ** BigInt(opd);
+  const idealDenominator = op * 10n ** BigInt(ad + id);
+  const denominator = idealNumerator * 10n ** BigInt(od);
+  const gap = (denominator - out * idealDenominator) * 10000n;
+  const rounded = gap > 0n ? (gap + denominator - 1n) / denominator : gap / denominator;
+  const impactBps = Number(rounded);
+  const suggested = (rounded > 0n ? rounded : 0n) + 500n;
+  return { impactBps, suggestedBps: suggested < 10000n ? Number(suggested) : null };
+}
+/** Use the same-chain native quote and USD price already supplied for the selected asset. */
+export function settlementUsdPrice(
+  asset: Asset,
+  token: { quoteAssetKey: string; priceUsd: string; priceQuote: string },
+): string {
+  if (asset !== "ETH" && asset !== "WETH") return "1";
+  if (
+    token.quoteAssetKey !== "NATIVE" ||
+    !/^\d+(?:\.\d+)?$/.test(token.priceUsd ?? "") ||
+    !/^\d+(?:\.\d+)?$/.test(token.priceQuote ?? "")
+  )
+    return "0";
+  const [usd, ud] = decimal(token.priceUsd),
+    [native, nd] = decimal(token.priceQuote);
+  if (native <= 0n) return "0";
+  const value = (usd * 10n ** BigInt(nd + 36)) / (native * 10n ** BigInt(ud));
+  const digits = value.toString().padStart(37, "0");
+  return `${digits.slice(0, -36)}.${digits.slice(-36)}`;
+}
 export function preparationInput(request: QuoteRequest, estimate: QuoteDisplay): QuoteRequest {
   if (!matchesDraft(estimate, request)) throw Error("估计与当前输入不匹配");
   if (estimate.expiresAt <= Date.now()) throw Error("报价已过期，请等待新报价后重新准备");
@@ -69,7 +116,7 @@ export function requirePreparedQuote(
   now = Date.now(),
 ): Quote {
   if (value.status === "LOCAL_ESTIMATE" || !value.quoteId)
-    throw Error("准备未完成：估计不能提交交易；如需授权，请授权后重新准备并确认");
+    throw Error("准备未完成：估计不能提交交易，请重新准备并确认");
   if (!matchesDraft(value, request)) throw Error("准备结果与当前输入不匹配");
   if (value.expiresAt <= now) throw Error("准备结果已过期，请重新准备并确认");
   if (

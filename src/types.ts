@@ -184,6 +184,8 @@ export interface LocalEstimate extends Omit<
 > {
   expectedAmountOutAtomic: string;
   outputDecimals: number;
+  inputPriceUsd?: string;
+  outputPriceUsd?: string;
   quoteId?: never;
   status: "LOCAL_ESTIMATE";
   requiresExecutionPreparation: true;
