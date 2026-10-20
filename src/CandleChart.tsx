@@ -496,6 +496,7 @@ export function CandleChart({
         className="chart-canvas"
         data-testid="tradingview-chart"
         data-candle-count={data.candles.length}
+        data-excluded-candle-count={data.excludedCount}
         data-first-candle-time={data.candles[0]?.time}
         data-history-loading={historyLoading ? "true" : "false"}
       />
@@ -503,11 +504,6 @@ export function CandleChart({
         <div className="chart-empty">
           {candles.length === 0 ? "暂无成交 K 线" : "暂无可渲染 K 线"}
         </div>
-      )}
-      {data.excludedCount > 0 && (
-        <figcaption className="chart-availability" role="status">
-          部分 K 线点无法渲染，已排除 {data.excludedCount} 个
-        </figcaption>
       )}
       {gaps.some((gap) => gap.reason === "PRICING_SUPPRESSED") && (
         <figcaption className="chart-availability" role="status">

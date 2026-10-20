@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { Candle } from "./types";
@@ -119,27 +119,30 @@ describe("App candle renderability", () => {
     chart.setData.mockClear();
   });
 
-  it("keeps renderability feedback while hiding historical coverage internals", async () => {
+  it("filters unrenderable candles without render or partial-history warnings", async () => {
     renderMarket([huge, { ...huge, t: 160, o: "1", h: "2", l: "0.5", c: "1.5" }], true);
 
-    const excluded = await screen.findByText("部分 K 线点无法渲染，已排除 1 个");
-    const partial = screen.queryByText(/历史 K 线部分缺失/);
-    expect(excluded).toBeVisible();
-    expect(partial).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId("tradingview-chart")).toHaveAttribute("data-candle-count", "1"),
+    );
+    expect(screen.queryByText(/无法渲染|已排除|部分历史行情|最后可用行情/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "行情状态" })).not.toBeInTheDocument();
     expect(screen.getByTestId("tradingview-chart")).toHaveAttribute("data-candle-count", "1");
   });
 
   it("keeps the detail, markets, and interval controls usable when no candles can render", async () => {
     renderMarket([huge, { ...huge, t: 160, c: "1e309" }], false);
 
-    expect(await screen.findByText("部分 K 线点无法渲染，已排除 2 个")).toBeVisible();
+    expect(await screen.findByText("暂无可渲染 K 线")).toBeVisible();
+    expect(screen.queryByText(/已排除/)).not.toBeInTheDocument();
     expect(screen.getByText("暂无可渲染 K 线")).toBeVisible();
     expect(screen.getByTestId("current-price")).toBeVisible();
     expect(screen.getByRole("button", { name: "查看 HUGE" })).toBeEnabled();
     expect(screen.getByRole("region", { name: "实时成交" })).toBeVisible();
     expect(chart.setData.mock.calls.every(([bars]) => bars.length === 0)).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "15m" }));
-    expect(await screen.findByText("部分 K 线点无法渲染，已排除 2 个")).toBeVisible();
+    expect(await screen.findByText("暂无可渲染 K 线")).toBeVisible();
+    expect(screen.queryByText(/已排除/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "15m" })).toHaveClass("active");
   });
 });

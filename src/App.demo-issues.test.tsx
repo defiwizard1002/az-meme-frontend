@@ -148,10 +148,7 @@ describe("demo issues regression", () => {
     render(<App />);
     await screen.findByText("主账户已连接");
     await act(async () => {});
-    expect(screen.getByRole("status", { name: "行情状态" })).toHaveTextContent("行情追赶中");
-    expect(screen.getByRole("status", { name: "行情状态" })).toHaveTextContent(
-      "最新成交：2026-10-11 10:00:14 UTC",
-    );
+    expect(screen.queryByRole("status", { name: "行情状态" })).not.toBeInTheDocument();
     expect(screen.getByRole("figure")).toHaveAttribute("aria-busy", "true");
     expect(document.body).not.toHaveTextContent(/BACKFILLING|cursor|raw/);
   });

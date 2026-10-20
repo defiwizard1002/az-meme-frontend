@@ -1205,7 +1205,7 @@ describe("hotfix: bounded account bootstrap and empty demand", () => {
         });
         expect(screen.getByLabelText("AAA K 线图")).toBe(canvas);
         expect(chart.current!.candles).toEqual(items);
-        expect(screen.getByRole("status", { name: "行情状态" })).toHaveTextContent("行情追赶中");
+        expect(screen.queryByRole("status", { name: "行情状态" })).not.toBeInTheDocument();
         expect(document.body).not.toHaveTextContent(/BACKFILLING|CATCHING_UP|历史 K 线部分缺失/);
         expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
       }
@@ -1217,7 +1217,7 @@ describe("hotfix: bounded account bootstrap and empty demand", () => {
     },
   );
 
-  it("discloses partial fresh history even when processing is READY", async () => {
+  it("keeps partial fresh history visible without the removed status paragraph", async () => {
     setup("MAIN_ACCOUNT_POC");
     vi.mocked(memeApi.getCandles).mockResolvedValue({
       ...snapshot(tokenA),
@@ -1225,7 +1225,7 @@ describe("hotfix: bounded account bootstrap and empty demand", () => {
       availability: "PARTIAL",
     });
     await mount();
-    expect(screen.getByRole("status", { name: "行情状态" })).toHaveTextContent("部分历史行情");
+    expect(screen.queryByRole("status", { name: "行情状态" })).not.toBeInTheDocument();
     expect(chart.current!.candles).toEqual([candle(100, "11")]);
   });
 
@@ -1239,7 +1239,7 @@ describe("hotfix: bounded account bootstrap and empty demand", () => {
       gaps: [],
     });
     await mount();
-    expect(screen.getByRole("status", { name: "行情状态" })).toHaveTextContent("行情追赶中");
+    expect(screen.queryByRole("status", { name: "行情状态" })).not.toBeInTheDocument();
     expect(screen.queryByText("暂无成交 K 线")).not.toBeInTheDocument();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2_000);
@@ -1264,9 +1264,7 @@ describe("hotfix: bounded account bootstrap and empty demand", () => {
         availability: "PARTIAL",
       });
       await mount();
-      expect(screen.getByRole("status", { name: "行情状态" })).toHaveTextContent(
-        syncStatus === "BACKFILLING" ? "行情追赶中" : "暂无可用行情",
-      );
+      expect(screen.queryByRole("status", { name: "行情状态" })).not.toBeInTheDocument();
       await act(async () => {
         await vi.advanceTimersByTimeAsync(60_000);
       });

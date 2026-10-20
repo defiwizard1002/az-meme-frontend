@@ -472,7 +472,8 @@ export default function App() {
   const [searchResults, setSearchResults] = useState<Token[] | null>(null);
   const [discoveryTab, setDiscoveryTab] = useState<"hot" | "new">("hot");
   const [marketRefreshMs, setMarketRefreshMs] = useState({ hot: 14_400_000, new: 300_000 });
-  const [marketLoading, setMarketLoading] = useState(false);
+  const discoveryIntentRef = useRef<"hot" | "new">("hot");
+  const discoveryRequestRef = useRef(0);
   const [sessionReady, setSessionReady] = useState(false);
   const [accountMode, setAccountMode] = useState<"AZ_ACCOUNT" | "MAIN_ACCOUNT_POC" | null>(null);
   const [settlementAssets, setSettlementAssets] = useState<Asset[]>(["ETH", "USDC", "USDT"]);
@@ -779,10 +780,11 @@ export default function App() {
         setTokens(markets.items);
         setSelected(first ?? null);
         if (first) {
+          const requestId = selectionRequestRef.current;
           void memeApi
             .getToken(first.tokenAddress)
             .then((detail) => {
-              if (!active) return;
+              if (!active || requestId !== selectionRequestRef.current) return;
               setTokens((current) =>
                 current.map((item) => (item.tokenAddress === detail.tokenAddress ? detail : item)),
               );
@@ -791,7 +793,8 @@ export default function App() {
               );
             })
             .catch((cause: unknown) => {
-              if (active) setMarketError(friendlyError(cause, "代币信息暂不可用"));
+              if (active && requestId === selectionRequestRef.current)
+                setMarketError(friendlyError(cause, "代币信息暂不可用"));
             });
         }
       })
@@ -808,14 +811,24 @@ export default function App() {
     const refresh = async () => {
       if (refreshing || document.visibilityState === "hidden") return;
       refreshing = true;
+      const requestId = discoveryRequestRef.current;
       try {
         const result = await memeApi.getMarkets(discoveryTab);
-        if (active) {
+        if (
+          active &&
+          requestId === discoveryRequestRef.current &&
+          discoveryIntentRef.current === discoveryTab
+        ) {
           setTokens(result.items);
           setSelected((current) => current ?? result.items[0] ?? null);
         }
       } catch (cause) {
-        if (active) setError(friendlyError(cause, "市场刷新失败"));
+        if (
+          active &&
+          requestId === discoveryRequestRef.current &&
+          discoveryIntentRef.current === discoveryTab
+        )
+          setError(friendlyError(cause, "市场刷新失败"));
       } finally {
         refreshing = false;
       }
@@ -892,7 +905,6 @@ export default function App() {
     }
     setSearchResults(null);
     const timer = window.setTimeout(() => {
-      setMarketLoading(true);
       void memeApi
         .searchMarkets(query)
         .then((result) => {
@@ -900,9 +912,6 @@ export default function App() {
         })
         .catch((cause: unknown) => {
           if (active) setError(friendlyError(cause, "搜索失败"));
-        })
-        .finally(() => {
-          if (active) setMarketLoading(false);
         });
     }, 300);
     return () => {
@@ -1737,24 +1746,28 @@ export default function App() {
 
   const selectDiscoveryTab = useCallback(
     async (tab: "hot" | "new") => {
-      if (tab === discoveryTab || marketLoading) return;
-      setMarketLoading(true);
+      if (tab === discoveryIntentRef.current) return;
+      discoveryIntentRef.current = tab;
+      const requestId = ++discoveryRequestRef.current;
+      // A new tab intent immediately invalidates any outstanding token detail.
+      ++selectionRequestRef.current;
       setError(null);
       try {
         const result = await memeApi.getMarkets(tab);
+        if (requestId !== discoveryRequestRef.current) return;
         setTokens(result.items);
         setDiscoveryTab(tab);
         const candidate =
           result.items.find((item) => item.tokenAddress === selected?.tokenAddress) ??
           result.items[0];
-        if (candidate) await selectToken(candidate);
+        if (candidate) void selectToken(candidate);
       } catch (cause) {
+        if (requestId !== discoveryRequestRef.current) return;
+        discoveryIntentRef.current = discoveryTab;
         setError(friendlyError(cause, "市场加载失败"));
-      } finally {
-        setMarketLoading(false);
       }
     },
-    [discoveryTab, marketLoading, selectToken, selected?.tokenAddress, setError],
+    [discoveryTab, selectToken, selected?.tokenAddress, setError],
   );
   const tradePresets = useMemo(() => {
     if (side === "BUY") {
@@ -2092,7 +2105,6 @@ export default function App() {
               <button
                 type="button"
                 className={discoveryTab === "hot" ? "active" : ""}
-                disabled={marketLoading}
                 onClick={() => void selectDiscoveryTab("hot")}
               >
                 热榜
@@ -2100,7 +2112,6 @@ export default function App() {
               <button
                 type="button"
                 className={discoveryTab === "new" ? "active" : ""}
-                disabled={marketLoading}
                 onClick={() => void selectDiscoveryTab("new")}
               >
                 新币
@@ -2265,24 +2276,6 @@ export default function App() {
                   <button type="button" onClick={() => setMarketRetry((value) => value + 1)}>
                     重试
                   </button>
-                </div>
-              )}
-              {activeSnapshot && !marketError && (
-                <div className="chart-availability" role="status" aria-label="行情状态">
-                  {["STALE", "FAILED"].includes(activeSnapshot.syncStatus)
-                    ? "行情暂时不可用，请稍后重试"
-                    : ["BACKFILLING", "CATCHING_UP"].includes(activeSnapshot.syncStatus)
-                      ? "行情追赶中，仅显示已处理数据；缺少价格证据时暂不显示成交价格或 K 线"
-                      : activeSnapshot.items.length === 0
-                        ? "暂无可用行情"
-                        : activeSnapshot.availability === "PARTIAL"
-                          ? "当前仅显示可用的部分历史行情"
-                          : null}
-                  {activeSnapshot.items.length > 0
-                    ? ` 最后可用行情：${new Date(activeSnapshot.items.at(-1)!.t * 1000).toISOString().replace("T", " ").replace(".000Z", " UTC")}`
-                    : trades.length > 0
-                      ? ` 最新成交：${new Date(trades[0]!.t * 1000).toISOString().replace("T", " ").replace(".000Z", " UTC")}`
-                      : null}
                 </div>
               )}
               <section className="trade-tape" aria-label="实时成交">

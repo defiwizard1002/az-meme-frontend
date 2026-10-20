@@ -105,8 +105,11 @@ describe("CandleChart renderability", () => {
       100, 220,
     ]);
     expect(candles).toEqual(original);
-    expect(screen.getByRole("status")).toHaveTextContent("部分 K 线点无法渲染，已排除 1 个");
-    expect(screen.getByRole("status")).toBeVisible();
+    expect(screen.queryByText(/无法渲染|已排除/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("tradingview-chart")).toHaveAttribute(
+      "data-excluded-candle-count",
+      "1",
+    );
   });
 
   it.each(["o", "h", "l", "c"] as const)(
@@ -131,11 +134,15 @@ describe("CandleChart renderability", () => {
       expect(() => render(<CandleChart symbol="HUGE" candles={candles} />)).not.toThrow();
 
       expect(engine.setCandles.mock.lastCall?.[0]).toHaveLength(1);
-      expect(screen.getByRole("status")).toHaveTextContent(`已排除 ${invalid.length} 个`);
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      expect(screen.getByTestId("tradingview-chart")).toHaveAttribute(
+        "data-excluded-candle-count",
+        String(invalid.length),
+      );
     },
   );
 
-  it("keeps an empty chart and an explicit notice when every candle is huge or non-finite", () => {
+  it("keeps an empty chart when every candle is huge or non-finite", () => {
     const candles = [
       candle(100, { o: hugePrice }),
       candle(160, { h: "1e309" }),
@@ -149,7 +156,11 @@ describe("CandleChart renderability", () => {
     expect(engine.setVolumes).toHaveBeenLastCalledWith([]);
     expect(screen.getByLabelText("HUGE K 线图")).toBeInTheDocument();
     expect(screen.getByText("暂无可渲染 K 线")).toBeVisible();
-    expect(screen.getByRole("status")).toHaveTextContent("已排除 4 个");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByTestId("tradingview-chart")).toHaveAttribute(
+      "data-excluded-candle-count",
+      "4",
+    );
   });
 
   it("preserves boundary prices and small positive prices exactly, with no notice for valid bars", () => {
@@ -212,7 +223,11 @@ describe("CandleChart renderability", () => {
         <CandleChart symbol="LIVE" candles={[candle(100), candle(160, { o: hugePrice })]} />,
       ),
     ).not.toThrow();
-    expect(screen.getByRole("status")).toHaveTextContent("已排除 1 个");
+    expect(screen.getByTestId("tradingview-chart")).toHaveAttribute(
+      "data-excluded-candle-count",
+      "1",
+    );
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(engine.updateCandle.mock.calls.every(([bar]) => bar.time === 100)).toBe(true);
 
     rerender(<CandleChart symbol="LIVE" candles={[candle(100), candle(160)]} />);
@@ -246,7 +261,11 @@ describe("CandleChart renderability", () => {
     expect(engine.setVolumes.mock.lastCall?.[0].map((bar: ChartVolume) => bar.time)).toEqual([
       160, 220,
     ]);
-    expect(screen.getByRole("status")).toHaveTextContent("已排除 1 个");
+    expect(screen.getByTestId("tradingview-chart")).toHaveAttribute(
+      "data-excluded-candle-count",
+      "1",
+    );
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("clears previously visible bars if all become non-renderable, then recovers", () => {
@@ -329,6 +348,10 @@ describe("CandleChart renderability", () => {
       40, 160, 220,
     ]);
     expect(engine.setVisibleRange).toHaveBeenLastCalledWith({ from: 1, to: 3 });
-    expect(screen.getByRole("status")).toHaveTextContent("已排除 2 个");
+    expect(screen.getByTestId("tradingview-chart")).toHaveAttribute(
+      "data-excluded-candle-count",
+      "2",
+    );
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });
