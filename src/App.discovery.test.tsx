@@ -111,6 +111,20 @@ async function setup() {
       });
     throw new Error(`Unexpected discovery test request: ${url.pathname}`);
   });
+  // Discovery assertions must not race an unrelated 300ms quote refresh.
+  vi.spyOn(memeApi, "createQuote").mockImplementation(async (request) => ({
+    ...request,
+    status: "LOCAL_ESTIMATE",
+    requiresExecutionPreparation: true,
+    precision: "CORE_CURVE_ESTIMATE",
+    netRecipientGuaranteed: false,
+    expectedAmountOut: "1",
+    expectedAmountOutAtomic: "1000000000000000000",
+    outputDecimals: 18,
+    minAmountOut: "0.8",
+    fees: [],
+    expiresAt: Date.now() + 30_000,
+  }));
   const markets = vi
     .spyOn(memeApi, "getMarkets")
     .mockImplementation(async (tab = "hot") => ({ items: lists[tab], stale: false }));
