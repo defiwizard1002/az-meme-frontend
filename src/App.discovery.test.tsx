@@ -202,7 +202,11 @@ describe("discovery hot/new switching", () => {
     const held = deferred<{ items: Token[]; stale: boolean }>();
     markets.mockImplementationOnce(() => held.promise);
     fireEvent.click(tabButton("new"));
-    await expectList("hot");
+    expect(tabButton("new")).toHaveClass("active");
+    expect(rows()).toEqual(lists.hot.map(identity));
+    expect(screen.getByRole("status", { name: "列表加载状态" })).toHaveTextContent(
+      "新币列表加载中",
+    );
     expect(screen.queryByText("没有匹配的代币")).not.toBeInTheDocument();
     await act(async () => held.reject(new Error("Discovery list unavailable")));
     expect(await screen.findByRole("alert")).toHaveTextContent("Discovery list unavailable");
@@ -212,4 +216,39 @@ describe("discovery hot/new switching", () => {
     await expectList("new");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
+});
+
+it("shows current token detail loading, then success clears it", async () => {
+  const { detail } = await setup();
+  const held = deferred<Token>();
+  detail.mockImplementationOnce(() => held.promise);
+  fireEvent.click(document.querySelectorAll(".token-select")[1]!);
+  expect(screen.getByRole("status", { name: "详情加载状态" })).toHaveTextContent("SAME 详情加载中");
+  await act(async () => held.resolve(lists.hot[1]!));
+  expect(screen.queryByRole("status", { name: "详情加载状态" })).not.toBeInTheDocument();
+});
+it("separates detail failure from loading and retries the selected token", async () => {
+  const { detail } = await setup();
+  detail.mockRejectedValueOnce(new Error("Details unavailable"));
+  fireEvent.click(document.querySelectorAll(".token-select")[1]!);
+  expect(await screen.findByText("Details unavailable")).toBeInTheDocument();
+  expect(screen.queryByRole("status", { name: "详情加载状态" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "重试详情" }));
+  await waitFor(() => expect(screen.queryByText("Details unavailable")).not.toBeInTheDocument());
+  expect(detail).toHaveBeenLastCalledWith(lists.hot[1]!.tokenAddress, true);
+});
+it("a late previous detail cannot clear the current token spinner or overwrite its identity", async () => {
+  const { detail } = await setup();
+  const old = deferred<Token>();
+  const current = deferred<Token>();
+  detail.mockImplementationOnce(() => old.promise).mockImplementationOnce(() => current.promise);
+  fireEvent.click(document.querySelectorAll(".token-select")[1]!);
+  fireEvent.click(document.querySelectorAll(".token-select")[0]!);
+  await act(async () => old.resolve(lists.hot[1]!));
+  expect(screen.getByRole("status", { name: "详情加载状态" })).toBeInTheDocument();
+  expect(document.querySelector(".token-row.selected")).toBe(
+    document.querySelectorAll(".token-row")[0],
+  );
+  await act(async () => current.resolve(lists.hot[0]!));
+  expect(screen.queryByRole("status", { name: "详情加载状态" })).not.toBeInTheDocument();
 });

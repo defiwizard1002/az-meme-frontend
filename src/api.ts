@@ -237,8 +237,8 @@ export const memeApi = {
     requestPublicMarket<{ items: Token[]; stale: boolean }>(
       `/sapi/v1/meme/markets?query=${encodeURIComponent(query)}&limit=50`,
     ),
-  getToken: (tokenAddress: string) =>
-    requestPublicMarket<Token>(`/sapi/v1/meme/tokens/${tokenAddress}`),
+  getToken: (tokenAddress: string, retry = false) =>
+    requestPublicMarket<Token>(`/sapi/v1/meme/tokens/${tokenAddress}${retry ? "?retry=1" : ""}`),
   getCandles: (
     tokenAddress: string,
     interval: Interval,

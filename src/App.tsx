@@ -447,6 +447,13 @@ export default function App() {
     const timer = window.setTimeout(() => setOrderState(null), delay);
     return () => window.clearTimeout(timer);
   }, [orderState]);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const detailPollRef = useRef<number | undefined>(undefined);
+  const [listLoading, setListLoading] = useState(false);
+  const listRetryTabRef = useRef<"hot" | "new">("hot");
+  const [listFailed, setListFailed] = useState(false);
+  const [requestedDiscoveryTab, setRequestedDiscoveryTab] = useState<"hot" | "new">("hot");
   const [loading, setLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(false);
   const [marketError, setMarketError] = useState<string | null>(null);
@@ -724,35 +731,61 @@ export default function App() {
   );
 
   const selectToken = useCallback(
-    async (summary: Token) => {
+    async (summary: Token, retry = false) => {
       const requestId = ++selectionRequestRef.current;
+      window.clearTimeout(detailPollRef.current);
       setError(null);
       setMarketError(null);
+      setDetailError(null);
+      setDetailLoading(true);
       tradesPausedRef.current = false;
       setTradesPaused(false);
       setSelected(summary);
-      try {
-        const detail = await memeApi.getToken(summary.tokenAddress);
-        if (requestId !== selectionRequestRef.current) return;
-        setTokens((current) =>
-          current.map((item) => (item.tokenAddress === detail.tokenAddress ? detail : item)),
-        );
-        setSearchResults(
-          (current) =>
-            current?.map((item) =>
-              item.tokenAddress === detail.tokenAddress
-                ? { ...detail, volume1hUsd: item.volume1hUsd }
-                : item,
-            ) ?? null,
-        );
-        setSelected(detail);
-      } catch (cause) {
-        if (requestId === selectionRequestRef.current) {
-          setMarketError(friendlyError(cause, "该代币行情暂不可用"));
+      let polls = 0;
+      const load = async (retryRequest = false) => {
+        try {
+          const detail = retryRequest
+            ? await memeApi.getToken(summary.tokenAddress, true)
+            : await memeApi.getToken(summary.tokenAddress);
+          if (requestId !== selectionRequestRef.current) return;
+          setTokens((current) =>
+            current.map((item) => (item.tokenAddress === detail.tokenAddress ? detail : item)),
+          );
+          setSearchResults(
+            (current) =>
+              current?.map((item) =>
+                item.tokenAddress === detail.tokenAddress
+                  ? { ...detail, volume1hUsd: item.volume1hUsd }
+                  : item,
+              ) ?? null,
+          );
+          setSelected(detail);
+          if (detail.detailStatus === "FAILED") {
+            setDetailLoading(false);
+            setDetailError("详情加载失败，已保留可用数据");
+          } else if (detail.detailStatus === "PENDING" || detail.detailStatus === "UPDATING") {
+            if (++polls >= 60) {
+              setDetailLoading(false);
+              setDetailError("后台仍在补齐详情，请稍后重试");
+            } else detailPollRef.current = window.setTimeout(() => void load(), 5000);
+          } else setDetailLoading(false);
+        } catch (cause) {
+          if (requestId !== selectionRequestRef.current) return;
+          setDetailLoading(false);
+          setDetailError(friendlyError(cause, "详情加载失败"));
         }
-      }
+      };
+      await load(retry);
     },
     [setError],
+  );
+  useEffect(
+    () => () => {
+      ++selectionRequestRef.current;
+      ++discoveryRequestRef.current;
+      window.clearTimeout(detailPollRef.current);
+    },
+    [],
   );
 
   useEffect(() => {
@@ -778,32 +811,15 @@ export default function App() {
           setActivePreset(null);
         }
         setTokens(markets.items);
-        setSelected(first ?? null);
-        if (first) {
-          const requestId = selectionRequestRef.current;
-          void memeApi
-            .getToken(first.tokenAddress)
-            .then((detail) => {
-              if (!active || requestId !== selectionRequestRef.current) return;
-              setTokens((current) =>
-                current.map((item) => (item.tokenAddress === detail.tokenAddress ? detail : item)),
-              );
-              setSelected((current) =>
-                current?.tokenAddress === detail.tokenAddress ? detail : current,
-              );
-            })
-            .catch((cause: unknown) => {
-              if (active && requestId === selectionRequestRef.current)
-                setMarketError(friendlyError(cause, "代币信息暂不可用"));
-            });
-        }
+        if (first) void selectToken(first);
+        else setSelected(null);
       })
       .catch((cause: unknown) => active && setBootstrapError(friendlyError(cause, "加载失败")))
       .finally(() => active && setLoading(false));
     return () => {
       active = false;
     };
-  }, []);
+  }, [selectToken]);
 
   useEffect(() => {
     let active = true;
@@ -1745,12 +1761,19 @@ export default function App() {
   }, [search, searchResults, tokens]);
 
   const selectDiscoveryTab = useCallback(
-    async (tab: "hot" | "new") => {
-      if (tab === discoveryIntentRef.current) return;
+    async (tab: "hot" | "new", retry = false) => {
+      if (tab === discoveryIntentRef.current && !retry) return;
       discoveryIntentRef.current = tab;
+      setRequestedDiscoveryTab(tab);
+      listRetryTabRef.current = tab;
+      setListLoading(true);
+      setListFailed(false);
       const requestId = ++discoveryRequestRef.current;
       // A new tab intent immediately invalidates any outstanding token detail.
       ++selectionRequestRef.current;
+      window.clearTimeout(detailPollRef.current);
+      setDetailLoading(false);
+      setDetailError(null);
       setError(null);
       try {
         const result = await memeApi.getMarkets(tab);
@@ -1764,7 +1787,11 @@ export default function App() {
       } catch (cause) {
         if (requestId !== discoveryRequestRef.current) return;
         discoveryIntentRef.current = discoveryTab;
+        setRequestedDiscoveryTab(discoveryTab);
+        setListFailed(true);
         setError(friendlyError(cause, "市场加载失败"));
+      } finally {
+        if (requestId === discoveryRequestRef.current) setListLoading(false);
       }
     },
     [discoveryTab, selectToken, selected?.tokenAddress, setError],
@@ -2098,26 +2125,43 @@ export default function App() {
       )}
 
       <div className="workspace">
-        <aside className="market-panel">
+        <aside className="market-panel" aria-busy={listLoading}>
           <div className="panel-title">
             <strong>发现</strong>
             <div className="discovery-tabs">
               <button
                 type="button"
-                className={discoveryTab === "hot" ? "active" : ""}
+                className={requestedDiscoveryTab === "hot" ? "active" : ""}
                 onClick={() => void selectDiscoveryTab("hot")}
               >
                 热榜
               </button>
               <button
                 type="button"
-                className={discoveryTab === "new" ? "active" : ""}
+                className={requestedDiscoveryTab === "new" ? "active" : ""}
                 onClick={() => void selectDiscoveryTab("new")}
               >
                 新币
               </button>
             </div>
           </div>
+          {listLoading && (
+            <div className="loading-note" role="status" aria-label="列表加载状态">
+              {requestedDiscoveryTab === "hot" ? "热榜" : "新币"}列表加载中…
+              {tokens.length > 0 && ` 暂显示${discoveryTab === "hot" ? "热榜" : "新币"}`}
+            </div>
+          )}
+          {listFailed && (
+            <div className="loading-note">
+              列表加载失败{" "}
+              <button
+                type="button"
+                onClick={() => void selectDiscoveryTab(listRetryTabRef.current, true)}
+              >
+                重试列表
+              </button>
+            </div>
+          )}
           <div className="token-head">
             <span>代币</span>
             <span>市值</span>
@@ -2126,7 +2170,9 @@ export default function App() {
             <span />
           </div>
           <div className="token-list">
-            {visibleTokens.length === 0 && <div className="empty">没有匹配的代币</div>}
+            {!listLoading && !listFailed && visibleTokens.length === 0 && (
+              <div className="empty">没有匹配的代币</div>
+            )}
             {visibleTokens.map((token) => (
               <div
                 key={token.tokenAddress}
@@ -2186,7 +2232,26 @@ export default function App() {
           </div>
         </aside>
 
-        <section className="chart-panel">
+        <section className="chart-panel" aria-busy={detailLoading}>
+          {selected && detailLoading && (
+            <div
+              className="loading-note"
+              role="status"
+              aria-label="详情加载状态"
+              data-token-address={selected.tokenAddress}
+            >
+              {selected.symbol}{" "}
+              {selected.detailStatus === "UPDATING" ? "详情更新中，显示已有数据" : "详情加载中…"}
+            </div>
+          )}
+          {selected && detailError && (
+            <div className="loading-note" role="alert">
+              {detailError}{" "}
+              <button type="button" onClick={() => void selectToken(selected, true)}>
+                重试详情
+              </button>
+            </div>
+          )}
           {selected ? (
             <>
               <div className="instrument">

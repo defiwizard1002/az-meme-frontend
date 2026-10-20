@@ -2,6 +2,8 @@ export type Interval = "1s" | "1m" | "15m" | "1h" | "4h";
 export type Asset = "WETH" | "ETH" | "USDC" | "USDT" | "USDG";
 
 export interface Token {
+  detailStatus?: "READY" | "PENDING" | "UPDATING" | "FAILED";
+  metadataObservedAtMs?: number;
   localLiquidity?: {
     status: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
     totalUsd: string | null;
