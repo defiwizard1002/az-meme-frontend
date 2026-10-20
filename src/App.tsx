@@ -414,7 +414,7 @@ function TokenMark({ token }: { token: Token }) {
   );
 }
 
-export default function App() {
+export default function App({ privyWallet }: { privyWallet?: string } = {}) {
   const [tokens, setTokens] = useState<Token[]>([]);
   const [selected, setSelected] = useState<Token | null>(null);
   const [account, setAccount] = useState<AccountSummary | null>(null);
@@ -2088,7 +2088,9 @@ export default function App() {
             ? "账户连接失败"
             : accountMode === "MAIN_ACCOUNT_POC"
               ? sessionReady
-                ? "主账户已连接"
+                ? privyWallet
+                  ? "Privy 钱包已连接"
+                  : "主账户已连接"
                 : "主账户连接中"
               : sessionReady
                 ? "已登录"

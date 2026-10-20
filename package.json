@@ -22,9 +22,11 @@
     "prepare": "pnpm run hooks:install"
   },
   "dependencies": {
+    "@privy-io/react-auth": "^3.50.0",
     "lightweight-charts": "5.2.1",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "viem": "^2.57.7"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

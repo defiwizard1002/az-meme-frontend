@@ -22,6 +22,22 @@ interface Envelope<T> {
 const apiBaseUrl = (import.meta.env.VITE_MEME_API_BASE_URL as string | undefined) ?? "";
 const azApiBaseUrl = (import.meta.env.VITE_AZ_API_BASE_URL as string | undefined) ?? "";
 let sessionToken: string | null = null;
+export interface SponsoredTransaction {
+  from: string;
+  to: string;
+  data: `0x${string}`;
+  value: string;
+}
+interface PrivyTransport {
+  getAccessToken: () => Promise<string | null>;
+  send: (tx: SponsoredTransaction) => Promise<`0x${string}`>;
+}
+let privyTransport: PrivyTransport | null = null;
+export function configurePrivyTransport(value: PrivyTransport | null) {
+  privyTransport = value;
+  sessionToken = null;
+}
+
 const requestTimeoutMs = 15_000;
 
 export class ApiError extends Error {
@@ -82,7 +98,7 @@ async function readEnvelope<T>(response: Response, prefix: "MEME" | "AZ"): Promi
         ? payload.ma[0]
         : `HTTP ${response.status}: 请求失败`,
       response.status,
-      payload?.result,
+      payload?.result ?? undefined,
     );
   }
   if (!payload || payload.rc !== 0 || !Object.hasOwn(payload, "result")) {
@@ -105,7 +121,11 @@ async function send<T>(
   const headers = new Headers(init?.headers);
   if (init?.body) headers.set("content-type", "application/json");
   if (publicMarket) headers.delete("authorization");
-  else if (sessionToken && !headers.has("authorization"))
+  else if (privyTransport) {
+    const token = await privyTransport.getAccessToken();
+    if (!token) throw new ApiError("MEME_UNAUTHORIZED", "请先登录 Privy", 401);
+    headers.set("authorization", `Bearer ${token}`);
+  } else if (sessionToken && !headers.has("authorization"))
     headers.set("authorization", `Bearer ${sessionToken}`);
   const controller = new AbortController();
   const cancel = () => controller.abort(init?.signal?.reason);
@@ -220,6 +240,7 @@ export const azFundApi = {
 export const memeApi = {
   getConfig: () =>
     requestPublicMarket<{
+      privy?: { appId: string; clientId: string | null } | null;
       chainId: number;
       chainName: string;
       explorerBaseUrl: string;
@@ -285,11 +306,7 @@ export const memeApi = {
     minAmountOut?: string;
     amountIn: string;
     slippageBps: number;
-  }) =>
-    request<AccountTransaction>("/sapi/v1/meme/account/transactions", {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
+  }) => executeAccountTrade(input),
   createQuote: (
     input: {
       side: "BUY" | "SELL";
@@ -384,3 +401,66 @@ export function approvalDetails(cause: unknown): ApprovalRequired | null {
 export const wsBaseUrl =
   (import.meta.env.VITE_MEME_WS_URL as string | undefined) ||
   `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/sapi/v1/meme/stream`;
+
+type AccountTradeInput = Parameters<typeof memeApi.executeMainAccountTrade>[0];
+async function executeAccountTrade(input: AccountTradeInput): Promise<AccountTransaction> {
+  if (!privyTransport)
+    return request<AccountTransaction>("/sapi/v1/meme/account/transactions", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  const transport = privyTransport;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const prepared = await request<{
+      record: AccountTransaction | null;
+      transaction: SponsoredTransaction | null;
+      approvals: SponsoredTransaction[];
+    }>("/sapi/v1/meme/privy/transactions", { method: "POST", body: JSON.stringify(input) });
+    if (prepared.approvals.length) {
+      for (const tx of prepared.approvals) {
+        const hash = await transport.send(tx);
+        let confirmed = false;
+        for (let poll = 0; poll < 120; poll++) {
+          const receipt = await request<{ status: "PENDING" | "CONFIRMED" | "FAILED" }>(
+            `/sapi/v1/meme/privy/approvals/${hash}?token=${encodeURIComponent(tx.to)}`,
+          );
+          if (receipt.status === "FAILED") throw new Error("代币授权已回滚");
+          if (receipt.status === "CONFIRMED") {
+            confirmed = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        if (!confirmed) throw new Error(`授权结果待确认：${hash}`);
+      }
+      const quote = await memeApi.createQuote({
+        ...input,
+        settlementAsset: "USDG",
+        purpose: "PREPARE_EXECUTION",
+      });
+      if (!quote.quoteId || !quote.routeFingerprint) throw new Error("授权后未能重新准备交易");
+      input = {
+        ...input,
+        quoteId: quote.quoteId,
+        routeFingerprint: quote.routeFingerprint,
+        clientExecutionId: crypto.randomUUID(),
+      };
+      continue;
+    }
+    if (!prepared.record) throw new Error("交易记录缺失");
+    if (!prepared.transaction) return prepared.record;
+    const hash = await transport.send(prepared.transaction);
+    // Retain the real hash if recording fails; never silently resend an uncertain transaction.
+    try {
+      return await request<AccountTransaction>(
+        `/sapi/v1/meme/privy/transactions/${prepared.record.executionId}/submitted`,
+        { method: "POST", body: JSON.stringify({ txHash: hash }) },
+      );
+    } catch (cause) {
+      throw new Error(
+        `交易已发送 ${hash}，记录尚未确认：${cause instanceof Error ? cause.message : String(cause)}`,
+      );
+    }
+  }
+  throw new Error("授权状态已变化，请重新确认交易");
+}
