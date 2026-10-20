@@ -252,3 +252,26 @@ it("a late previous detail cannot clear the current token spinner or overwrite i
   await act(async () => current.resolve(lists.hot[0]!));
   expect(screen.queryByRole("status", { name: "详情加载状态" })).not.toBeInTheDocument();
 });
+
+it("keeps loading for a pending background result, polls to completion, and stops on unmount", async () => {
+  const { detail } = await setup();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    detail.mockResolvedValueOnce({ ...lists.hot[1]!, detailStatus: "PENDING" });
+    fireEvent.click(document.querySelectorAll(".token-select")[1]!);
+    await act(async () => {});
+    expect(screen.getByRole("status", { name: "详情加载状态" })).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(screen.queryByRole("status", { name: "详情加载状态" })).not.toBeInTheDocument();
+    const calls = detail.mock.calls.length;
+    cleanup();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+    expect(detail).toHaveBeenCalledTimes(calls);
+  } finally {
+    vi.useRealTimers();
+  }
+});
