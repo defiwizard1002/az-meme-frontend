@@ -9,18 +9,21 @@ afterEach(() => {
   configurePrivyTransport(null);
   vi.unstubAllGlobals();
 });
-it("requires the selected embedded wallet and sponsors every transaction", async () => {
-  const send = vi.fn(async () => ({ hash }));
-  expect(await sendSponsoredTransaction(swap, user, send)).toBe(hash);
-  expect(send).toHaveBeenCalledWith(
-    { to: router, data: "0x1234", value: 0n, chainId: 4663 },
-    { sponsor: true, address: user },
-  );
-  await expect(sendSponsoredTransaction({ ...swap, from: router }, user, send)).rejects.toThrow(
-    "不匹配",
-  );
-  expect(send).toHaveBeenCalledTimes(1);
-});
+it.each([421614, 4663])(
+  "uses chain %s, selected embedded wallet, and sponsorship",
+  async (chainId) => {
+    const send = vi.fn(async () => ({ hash }));
+    expect(await sendSponsoredTransaction(swap, user, chainId, send)).toBe(hash);
+    expect(send).toHaveBeenCalledWith(
+      { to: router, data: "0x1234", value: 0n, chainId },
+      { sponsor: true, address: user },
+    );
+    await expect(
+      sendSponsoredTransaction({ ...swap, from: router }, user, chainId, send),
+    ).rejects.toThrow("不匹配");
+    expect(send).toHaveBeenCalledTimes(1);
+  },
+);
 it("sends approval then requotes with the same minimum, sends user swap and records actual hash", async () => {
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);

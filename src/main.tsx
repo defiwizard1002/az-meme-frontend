@@ -23,7 +23,7 @@ function Entry() {
   if (!config) return <main className="notice">正在连接…</main>;
   return config.privy ? (
     <Suspense fallback={<main className="notice">正在加载登录…</main>}>
-      <PrivyTrading {...config.privy} />
+      <PrivyTrading {...config.privy} chainId={config.chainId} />
     </Suspense>
   ) : (
     <App />

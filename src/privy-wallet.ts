@@ -2,6 +2,7 @@ import type { SponsoredTransaction } from "./api";
 export async function sendSponsoredTransaction(
   tx: SponsoredTransaction,
   address: string,
+  chainId: number,
   send: (
     tx: { to: string; data: `0x${string}`; value: bigint; chainId: number },
     options: { sponsor: true; address: string },
@@ -10,7 +11,7 @@ export async function sendSponsoredTransaction(
   if (tx.from.toLowerCase() !== address.toLowerCase()) throw new Error("交易发起钱包不匹配");
   return (
     await send(
-      { to: tx.to, data: tx.data, value: BigInt(tx.value), chainId: 4663 },
+      { to: tx.to, data: tx.data, value: BigInt(tx.value), chainId },
       { sponsor: true, address },
     )
   ).hash;
