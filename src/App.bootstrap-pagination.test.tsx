@@ -79,6 +79,7 @@ function candle(t: number, price: string): Candle {
     h: price,
     l: price,
     c: price,
+    previousClose: null,
     baseVolume: "1",
     quoteVolume: "1",
     revision: "1",

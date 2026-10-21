@@ -464,8 +464,12 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
   const [historyError, setHistoryError] = useState<{ owner: object; message: string } | null>(null);
   const [accountOriginIssue, setAccountOriginIssue] = useState(false);
   const [accountRetry, setAccountRetry] = useState(0);
-  const [errorState, setErrorState] = useState<{ message: string; owner?: object } | null>(null);
-  const error = errorState?.message ?? null;
+  const [errorState, setErrorState] = useState<{
+    message: string;
+    owner?: object;
+    quote?: boolean;
+  } | null>(null);
+
   const setError = useCallback(
     (message: string | null) => setErrorState(message === null ? null : { message }),
     [],
@@ -613,6 +617,10 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
     side,
     fallbackSlippageBps,
   ]);
+  const error =
+    errorState && (!errorState.quote || errorState.owner === quoteRequest)
+      ? errorState.message
+      : null;
   const quoteRequestRef = useRef(quoteRequest);
   quoteRequestRef.current = quoteRequest;
   const quoteVersionRef = useRef(0);
@@ -1635,7 +1643,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
             setQuoteState(null);
             void refresh();
           },
-          Math.max(0, freshQuote.expiresAt - Date.now()),
+          Math.min(2_147_483_647, Math.max(0, freshQuote.expiresAt - Date.now())),
         );
       } catch (cause) {
         if (
@@ -1643,7 +1651,11 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
           quoteRequestRef.current === quoteRequest &&
           quoteVersionRef.current === version
         ) {
-          setErrorState({ message: friendlyError(cause, "报价暂时不可用"), owner: quoteRequest });
+          setErrorState({
+            message: friendlyError(cause, "报价暂时不可用"),
+            owner: quoteRequest,
+            quote: true,
+          });
         }
       } finally {
         inFlight = false;

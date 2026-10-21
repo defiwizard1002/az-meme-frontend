@@ -62,6 +62,7 @@ const huge: Candle = {
   h: "3.776570421343502e68",
   l: "3.776570421343502e68",
   c: "3.776570421343502e68",
+  previousClose: null,
   baseVolume: null,
   quoteVolume: null,
   revision: "1",
@@ -120,7 +121,10 @@ describe("App candle renderability", () => {
   });
 
   it("filters unrenderable candles without render or partial-history warnings", async () => {
-    renderMarket([huge, { ...huge, t: 160, o: "1", h: "2", l: "0.5", c: "1.5" }], true);
+    renderMarket(
+      [huge, { ...huge, t: 160, o: "1", h: "2", l: "0.5", c: "1.5", previousClose: null }],
+      true,
+    );
 
     await waitFor(() =>
       expect(screen.getByTestId("tradingview-chart")).toHaveAttribute("data-candle-count", "1"),

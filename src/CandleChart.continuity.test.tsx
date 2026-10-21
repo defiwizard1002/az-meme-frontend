@@ -27,12 +27,18 @@ vi.mock("lightweight-charts", () => ({
   CrosshairMode: { Normal: 0 },
   createChart: engine.create,
 }));
-const candle = (t: number, close: string, revision = "1"): Candle => ({
+const candle = (
+  t: number,
+  close: string,
+  revision = "1",
+  previousClose: string | null = null,
+): Candle => ({
   t,
   o: close,
   h: close,
   l: close,
   c: close,
+  previousClose,
   quoteVolume: "7",
   baseVolume: "9",
   revision,
@@ -88,9 +94,9 @@ describe("continuous candle projection and user viewport", () => {
 
   it("joins adjacent rendered bars across empty seconds while preserving real closes, extrema and volume", () => {
     const raw = [
-      { ...candle(110, "1"), o: "1.1", h: "1.2", l: "0.9" },
+      { ...candle(110, "1", "1", "3"), o: "1.1", h: "1.2", l: "0.9" },
       candle(100, "2"),
-      candle(101, "3"),
+      candle(101, "3", "1", "2"),
     ];
     const before = structuredClone(raw);
     render(<CandleChart symbol="A" candles={raw} />);
@@ -113,7 +119,7 @@ describe("continuous candle projection and user viewport", () => {
   });
 
   it("preserves history gap warnings and missing timestamps while joining the retained bars", () => {
-    const raw = [candle(100, "2"), candle(110, "4"), candle(115, "3")];
+    const raw = [candle(100, "2"), candle(110, "4", "1", "2"), candle(115, "3", "1", "4")];
     const { rerender } = render(<CandleChart symbol="A" candles={raw} />);
     rerender(
       <CandleChart
@@ -147,7 +153,12 @@ describe("continuous candle projection and user viewport", () => {
     const { rerender } = render(<CandleChart symbol="A" candles={initial.items} />);
     const merged = mergeSnapshots(
       initial,
-      snapshot([candle(105, "99", "0"), candle(100, "4", "2"), candle(90, "5")]),
+      snapshot([
+        candle(105, "99", "0"),
+        candle(105, "3", "2", "4"),
+        candle(100, "4", "2", "5"),
+        candle(90, "5"),
+      ]),
     );
     const before = structuredClone(merged);
     rerender(<CandleChart symbol="A" candles={merged.items} />);
@@ -162,7 +173,7 @@ describe("continuous candle projection and user viewport", () => {
     expect(merged.items.map((bar) => [bar.revision, bar.quoteVolume])).toEqual([
       ["1", "7"],
       ["2", "7"],
-      ["1", "7"],
+      ["2", "7"],
     ]);
   });
 
@@ -182,7 +193,10 @@ describe("continuous candle projection and user viewport", () => {
     input.focus();
     engine.update.mockImplementation(() => engine.range.mockReturnValue({ from: 8, to: 10 }));
     rerender(
-      <CandleChart symbol="A" candles={[initial[0]!, candle(105, "4", "2"), candle(110, "1")]} />,
+      <CandleChart
+        symbol="A"
+        candles={[initial[0]!, candle(105, "4", "2", "2"), candle(110, "1", "1", "4")]}
+      />,
     );
     expect(engine.set).toHaveBeenCalledTimes(setCount);
     expect(engine.update).toHaveBeenLastCalledWith({
@@ -211,14 +225,19 @@ describe("continuous candle projection and user viewport", () => {
   });
 
   it("deduplicates revisions before projection and updates a successor when an old WS close changes", () => {
-    const initial = [candle(105, "3"), candle(100, "2"), candle(100, "99", "0")];
+    const initial = [candle(105, "3", "1", "2"), candle(100, "2"), candle(100, "99", "0")];
     const { rerender } = render(<CandleChart symbol="A" candles={initial} />);
     expect(engine.set).toHaveBeenLastCalledWith([
       { time: 100, open: 2, high: 2, low: 2, close: 2 },
       { time: 105, open: 2, high: 3, low: 2, close: 3 },
     ]);
     engine.set.mockClear();
-    rerender(<CandleChart symbol="A" candles={[...initial, candle(100, "7", "2")]} />);
+    rerender(
+      <CandleChart
+        symbol="A"
+        candles={[...initial, candle(100, "7", "2"), candle(105, "3", "2", "7")]}
+      />,
+    );
     expect(engine.set).toHaveBeenLastCalledWith([
       { time: 100, open: 7, high: 7, low: 7, close: 7 },
       { time: 105, open: 7, high: 7, low: 3, close: 3 },

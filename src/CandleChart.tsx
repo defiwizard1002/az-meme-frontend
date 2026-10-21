@@ -71,9 +71,16 @@ export function buildChartData(candles: Candle[]): ChartData {
       data.excludedCount += 1;
       continue;
     }
-    // Recompute from the combined history on every change, including a prepend or
-    // an older WS correction. Never fill missing timestamps or rewrite real closes.
-    bar.open = data.candles.at(-1)?.close ?? bar.open;
+    // The persisted predecessor is independent of pagination and loaded history.
+    // Keep the API's raw bucket OHLC untouched; expand only the displayed bar.
+    if (item.previousClose != null) {
+      const previousClose = Number(item.previousClose);
+      if (!(previousClose > 0 && isRenderableValue(previousClose))) {
+        data.excludedCount += 1;
+        continue;
+      }
+      bar.open = previousClose;
+    }
     bar.high = Math.max(bar.high, bar.open, bar.close);
     bar.low = Math.min(bar.low, bar.open, bar.close);
     data.candles.push(bar);

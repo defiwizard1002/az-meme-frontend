@@ -190,6 +190,7 @@ function renderWithDeferredQuotes(options: { settlementAssets?: string[] } = {})
             h: "0.019",
             l: "0.017",
             c: "0.0184",
+            previousClose: null,
             baseVolume: null,
             quoteVolume: null,
           },
@@ -668,6 +669,7 @@ describe("App", () => {
         h: "1",
         l: "1",
         c: "1",
+        previousClose: null,
         revision: "3",
         baseVolume: null,
         quoteVolume: null,
@@ -816,7 +818,7 @@ describe("App", () => {
                 chainId: 4663,
                 tokenAddress: token.tokenAddress,
                 interval: "1m",
-                items: [{ t: 99, o: "1", h: "1", l: "1", c: "1" }],
+                items: [{ t: 99, o: "1", h: "1", l: "1", c: "1", previousClose: null }],
               })
             : response({
                 items: [
@@ -973,6 +975,7 @@ describe("App", () => {
               h: "0.019",
               l: "0.017",
               c: "0.0184",
+              previousClose: null,
               baseVolume: null,
               quoteVolume: null,
               revision: 1,
@@ -992,15 +995,25 @@ describe("App", () => {
     expect(screen.getByText("可用 0.42 ETH")).toBeInTheDocument();
     expect(screen.getByText("已登录")).toBeInTheDocument();
     expect(screen.queryByText(/账户暂不可用/)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "打开账户划转" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "钱包资产" }));
+    expect(screen.getByRole("button", { name: "账户划转" })).toBeEnabled();
     await waitFor(() => expect(document.querySelector("button.primary")).toBeEnabled());
     expect(document.querySelector("button.primary")).toHaveAccessibleName("买入");
-    expect(screen.getByText("3%")).toBeInTheDocument();
+    expect(screen.queryByText("3%")).not.toBeInTheDocument();
+    expect(
+      vi
+        .mocked(globalThis.fetch)
+        .mock.calls.some(
+          ([url, init]) =>
+            String(url).endsWith("/quotes") && JSON.parse(String(init?.body)).slippageBps === 2000,
+        ),
+    ).toBe(true);
     expect(screen.getAllByText("PONS").length).toBeGreaterThan(0);
     await waitFor(() => expect(screen.getAllByText("UNISWAP V4").length).toBeGreaterThan(0));
-    expect(screen.getByText("税 1%")).toBeInTheDocument();
-    expect(screen.getByText("已燃烧 95%")).toBeInTheDocument();
-    expect(screen.getAllByText("貔貅：否")).toHaveLength(2);
+    expect(screen.getByRole("region", { name: "代币安全与持仓" })).toBeInTheDocument();
+    expect(screen.getByText("LP 燃烧 / 锁定").parentElement).toHaveTextContent("95%");
+    expect(screen.getByText("貔貅：否")).toBeInTheDocument();
+    expect(screen.getByText("非貔貅").parentElement).toHaveTextContent("是");
     expect(screen.getAllByText("风险提示：未知")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "买入 CASHCAT" })).toBeEnabled();
     expect(screen.queryByText("预览交易")).not.toBeInTheDocument();
@@ -1009,7 +1022,7 @@ describe("App", () => {
     expect(screen.queryByText("Charts by TradingView")).not.toBeInTheDocument();
     expect(screen.queryByText("关于 CASHCAT")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "打开账户划转" }));
+    fireEvent.click(screen.getByRole("button", { name: "账户划转" }));
     expect(screen.getByRole("dialog", { name: "Meme Account 划转" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "确认划转" }));
     expect(await screen.findByRole("button", { name: "划转成功 / 10001" })).toBeInTheDocument();
@@ -1127,7 +1140,9 @@ describe("App", () => {
       expect(screen.getByText("没有匹配的代币")).toBeInTheDocument();
       expect(screen.getByPlaceholderText("搜索代币或粘贴合约地址")).toBeEnabled();
       expect(screen.getByRole("button", { name: "新币" })).toBeEnabled();
-      expect(screen.getByRole("button", { name: "打开账户划转" })).toBeDisabled();
+      if (!screen.queryByRole("dialog", { name: "钱包资产" }))
+        fireEvent.click(screen.getByRole("button", { name: "钱包资产" }));
+      expect(screen.getByRole("button", { name: "账户划转" })).toBeDisabled();
       expect(document.querySelector("button.primary")).toBeDisabled();
       expect(screen.queryByText("登录中")).not.toBeInTheDocument();
       expect(screen.queryByText("已登录")).not.toBeInTheDocument();
@@ -1140,7 +1155,9 @@ describe("App", () => {
       expect(await screen.findByLabelText("CASHCAT K 线图")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "查看 CASHCAT" }));
       expect(screen.getByRole("alert")).toHaveTextContent(message);
-      expect(screen.getByRole("button", { name: "打开账户划转" })).toBeDisabled();
+      if (!screen.queryByRole("dialog", { name: "钱包资产" }))
+        fireEvent.click(screen.getByRole("button", { name: "钱包资产" }));
+      expect(screen.getByRole("button", { name: "账户划转" })).toBeDisabled();
       expect(document.querySelector("button.primary")).toBeDisabled();
       expect(
         fetch.mock.calls.some(
@@ -1198,6 +1215,7 @@ describe("App", () => {
               h: "0.019",
               l: "0.017",
               c: "0.0184",
+              previousClose: null,
               baseVolume: null,
               quoteVolume: null,
               revision: 1,
@@ -1294,19 +1312,22 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("10 USDG / 0.01 ETH")).toBeInTheDocument();
+    await screen.findByText("主账户已连接");
+    fireEvent.click(screen.getByRole("button", { name: "钱包资产" }));
+    expect(screen.getByRole("dialog", { name: "钱包资产" })).toHaveTextContent("USDG10ETH0.01");
     expect(screen.getByText("主账户已连接")).toBeInTheDocument();
     const paymentAsset = screen.getByLabelText("支付资产") as HTMLSelectElement;
     expect(paymentAsset).toHaveValue("USDG");
     expect(Array.from(paymentAsset.options, (option) => option.value)).toEqual(["USDG", "ETH"]);
     expect(screen.getByLabelText("买入金额")).toHaveValue("1");
-    expect(screen.getByText("交易记录")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "交易记录" }));
+    expect(screen.getByRole("dialog", { name: "交易记录" })).toBeInTheDocument();
     expect(screen.getByText("买入 CASHCAT")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Tx1 ↗" })).toHaveAttribute(
       "href",
       `https://robinhoodchain.blockscout.com/tx/0x${"a".repeat(64)}`,
     );
-    expect(screen.queryByRole("button", { name: "打开账户划转" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "账户划转" })).not.toBeInTheDocument();
     expect(azRequests).toBe(0);
   });
 
@@ -1775,7 +1796,7 @@ describe("App", () => {
         (payload) =>
           (JSON.parse(payload) as { quote?: { amountIn: string } }).quote?.amountIn === "1",
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(quotes).toHaveLength(1);
   });
 
@@ -1811,7 +1832,7 @@ describe("App", () => {
     expect(displayedQuote()).toBe("≈ 200 CASHCAT");
   });
 
-  it("lets matching live WS quotes replace REST quotes and ignores an older REST completion", async () => {
+  it("keeps REST quote ownership when obsolete socket quotes arrive across amount changes", async () => {
     const { quotes } = renderWithDeferredQuotes();
     await waitFor(() => expect(quotes).toHaveLength(1));
     await act(async () => {
@@ -1829,7 +1850,7 @@ describe("App", () => {
         data: { ...quotes[0]!.input, quoteId: "live-quote", expectedAmountOut: "150" },
       }),
     );
-    expect(displayedQuote()).toBe("≈ 150 CASHCAT");
+    expect(displayedQuote()).toBe("≈ 100 CASHCAT");
 
     fireEvent.change(screen.getByLabelText("买入金额"), { target: { value: "2" } });
     await waitFor(() => expect(quotes).toHaveLength(2));
@@ -1841,10 +1862,10 @@ describe("App", () => {
         data: { ...quotes[1]!.input, quoteId: "new-live-quote", expectedAmountOut: "250" },
       }),
     );
-    expect(displayedQuote()).toBe("≈ 250 CASHCAT");
+    expect(displayedQuote()).not.toBe("≈ 250 CASHCAT");
     await act(async () => {
       quotes[1]!.resolve(await response({ ...quotes[1]!.input, expectedAmountOut: "200" }));
     });
-    expect(displayedQuote()).toBe("≈ 250 CASHCAT");
+    expect(displayedQuote()).toBe("≈ 200 CASHCAT");
   });
 });

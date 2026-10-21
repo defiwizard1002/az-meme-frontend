@@ -35,6 +35,7 @@ function candle(t: number, fields: Partial<Candle> = {}): Candle {
     h: "0.022",
     l: "0.017",
     c: "0.0195",
+    previousClose: t === 100 ? null : "0.0195",
     baseVolume: "1200",
     quoteVolume: "0.42",
     revision: "1",
@@ -166,7 +167,13 @@ describe("CandleChart renderability", () => {
   it("preserves boundary prices and small positive prices exactly, with no notice for valid bars", () => {
     const prices = ["90071992547409.91", "0.000000000000000001", "0.018456789123456789"];
     const candles = prices.map((price, index) =>
-      candle(100 + index * 60, { o: price, h: price, l: price, c: price }),
+      candle(100 + index * 60, {
+        o: price,
+        h: price,
+        l: price,
+        c: price,
+        previousClose: prices[index - 1] ?? null,
+      }),
     );
 
     render(<CandleChart symbol="VALID" candles={candles} />);

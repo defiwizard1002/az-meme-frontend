@@ -63,6 +63,7 @@ export interface Candle {
   h: string;
   l: string;
   c: string;
+  previousClose: string | null;
   baseVolume: string | null;
   quoteVolume: string | null;
   rawVolume?: string;

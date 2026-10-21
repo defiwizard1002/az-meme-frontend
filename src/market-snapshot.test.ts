@@ -9,6 +9,7 @@ const candle = (t: number, revision: string, close = "1"): Candle => ({
   h: close,
   l: close,
   c: close,
+  previousClose: null,
   baseVolume: "1",
   quoteVolume: "1",
   revision,

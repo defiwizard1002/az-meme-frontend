@@ -178,11 +178,16 @@ describe("demo issues regression", () => {
     await screen.findByText("主账户已连接");
     await act(async () => {});
     expect(document.querySelector(".quote-details")).not.toHaveTextContent(/路由|→|WETH/);
-    expect(document.querySelector(".quote-details")).toHaveTextContent("94.09 PONS");
+    expect(document.querySelector(".quote-details")).toHaveTextContent("100 PONS");
+    fireEvent.click(document.querySelector("button.primary")!);
+    await act(async () => {});
+    expect(memeApi.createQuote).toHaveBeenLastCalledWith(
+      expect.objectContaining({ purpose: "PREPARE_EXECUTION", minAmountOut: "94.09" }),
+    );
     expect(
       screen.queryByText("交易可能分步完成；中途失败时，已成交部分不会撤销。"),
     ).not.toBeInTheDocument();
-    expect(screen.getByLabelText("滑点设置")).toHaveValue("2000");
+    expect(screen.queryByLabelText("滑点设置")).not.toBeInTheDocument();
   });
   it("shows token identity and unknown protocol without exposing internal pool labels", async () => {
     setup();
@@ -236,18 +241,21 @@ describe("demo issues regression", () => {
     expect(document.body).not.toHaveTextContent("历史 K 线部分缺失");
     expect(document.body).not.toHaveTextContent("扫描起点");
     expect(document.body).not.toHaveTextContent(/第\s*\d+\s*跳|执行方式|每跳/);
-    expect(screen.getByText("最低得到")).toBeInTheDocument();
-    expect(screen.getByLabelText("滑点设置")).toHaveValue("2000");
+    expect(screen.queryByText("最低得到")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("滑点设置")).not.toBeInTheDocument();
   });
-  it("keeps user slippage in quote requests and invalidates the existing quote on change", async () => {
+  it("keeps configured fallback slippage and invalidates the quote when amount changes", async () => {
     setup();
     const quotes = vi.spyOn(memeApi, "createQuote");
     render(<App />);
     await screen.findByText("主账户已连接");
     await act(async () => {});
-    fireEvent.change(screen.getByLabelText("滑点设置"), { target: { value: "100" } });
+    const first = quotes.mock.calls.at(-1)![0];
+    expect(first.slippageBps).toBe(2000);
+    fireEvent.change(screen.getByLabelText("买入金额"), { target: { value: "2" } });
     await act(async () => {});
-    expect(quotes.mock.calls.at(-1)?.[0].slippageBps).toBe(100);
+    expect(quotes.mock.calls.at(-1)?.[0]).toMatchObject({ amountIn: "2", slippageBps: 2000 });
+    expect(quotes.mock.calls.at(-1)?.[0]).not.toBe(first);
   });
   it("keeps account connected and automatically retries records after a body timeout", async () => {
     vi.useFakeTimers();
@@ -357,12 +365,17 @@ describe("demo issues regression", () => {
     render(<App />);
     await screen.findByText("主账户已连接");
     await act(async () => {});
-    expect(screen.getByLabelText("滑点设置")).toHaveValue("2000");
+    expect(screen.queryByLabelText("滑点设置")).not.toBeInTheDocument();
     expect(
       screen.queryByText("拆分执行时，累计滑点可能高于所设值；最终以最低得到为准。"),
     ).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent("交易滑点上限");
-    expect(document.querySelector(".quote-details")).toHaveTextContent("94.09");
+    expect(document.querySelector(".quote-details")).toHaveTextContent("100 PONS");
+    fireEvent.click(document.querySelector("button.primary")!);
+    await act(async () => {});
+    expect(memeApi.createQuote).toHaveBeenLastCalledWith(
+      expect.objectContaining({ purpose: "PREPARE_EXECUTION", minAmountOut: "94.09" }),
+    );
   });
 });
 
