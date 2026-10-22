@@ -68,7 +68,7 @@ const huge: Candle = {
   revision: "1",
 };
 
-function renderMarket(items: Candle[], partial: boolean) {
+function renderMarket(items: Candle[], partial: boolean, emptyDirectory = false) {
   vi.stubGlobal("WebSocket", undefined);
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
@@ -81,7 +81,8 @@ function renderMarket(items: Candle[], partial: boolean) {
         defaultSlippageBps: 300,
         marketRefreshMs: { hot: 14_400_000, new: 300_000 },
       };
-    else if (url.includes("/markets")) result = { items: [token], stale: false };
+    else if (url.includes("/markets"))
+      result = { items: emptyDirectory ? [] : [token], stale: false };
     else if (url.endsWith(`/tokens/${address}`)) result = token;
     else if (url.includes("/candles"))
       result = {
@@ -115,9 +116,25 @@ function renderMarket(items: Candle[], partial: boolean) {
 describe("App candle renderability", () => {
   afterEach(() => {
     cleanup();
+    window.history.replaceState(null, "", "/");
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     chart.setData.mockClear();
+  });
+
+  it("opens and reloads stored history from a full token link with an empty directory", async () => {
+    window.history.replaceState(null, "", `/?chainId=4663&token=${address}`);
+    const bars = [{ ...huge, o: "1", h: "2", l: "0.5", c: "1.5" }];
+    renderMarket(bars, true, true);
+    await waitFor(() =>
+      expect(screen.getByTestId("tradingview-chart")).toHaveAttribute("data-candle-count", "1"),
+    );
+    cleanup();
+    renderMarket(bars, true, true);
+    await waitFor(() =>
+      expect(screen.getByTestId("tradingview-chart")).toHaveAttribute("data-candle-count", "1"),
+    );
+    expect(screen.queryByRole("button", { name: "查看 HUGE" })).not.toBeInTheDocument();
   });
 
   it("filters unrenderable candles without render or partial-history warnings", async () => {

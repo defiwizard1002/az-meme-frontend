@@ -799,8 +799,23 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
   useEffect(() => {
     let active = true;
     Promise.all([memeApi.getConfig(), memeApi.getMarkets()])
-      .then(([config, markets]) => {
-        const first = markets.items[0];
+      .then(async ([config, markets]) => {
+        const params = new URLSearchParams(window.location.search);
+        const address = params.get("token");
+        let first = markets.items[0];
+        if (address !== null) {
+          if (
+            !/^0x[0-9a-f]{40}$/i.test(address) ||
+            (params.has("chainId") && Number(params.get("chainId")) !== config.chainId)
+          )
+            throw new Error("代币链接的地址或链不匹配");
+          first = await memeApi.getToken(address.toLowerCase());
+          if (
+            first.chainId !== config.chainId ||
+            first.tokenAddress.toLowerCase() !== address.toLowerCase()
+          )
+            throw new Error("代币响应与链接不匹配");
+        }
         if (!active) return;
         setChainName(config.chainName);
         setExplorerBaseUrl(config.explorerBaseUrl);
