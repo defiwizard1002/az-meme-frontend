@@ -6,7 +6,7 @@ import {
   useSendTransaction,
   useCreateWallet,
 } from "@privy-io/react-auth";
-import { robinhood } from "viem/chains";
+import { arbitrumSepolia, robinhood } from "viem/chains";
 import App from "./App";
 import { sendSponsoredTransaction } from "./privy-wallet";
 import { configurePrivyTransport, type SponsoredTransaction } from "./api";
@@ -14,26 +14,30 @@ import { configurePrivyTransport, type SponsoredTransaction } from "./api";
 export default function PrivyTrading({
   appId,
   clientId,
+  chainId,
 }: {
   appId: string;
   clientId: string | null;
+  chainId: number;
 }) {
+  const chain = [robinhood, arbitrumSepolia].find((c) => c.id === chainId);
+  if (!chain) return <main className="notice">不支持的交易网络：{chainId}</main>;
   return (
     <PrivyProvider
       appId={appId}
       {...(clientId ? { clientId } : {})}
       config={{
         loginMethods: ["wallet"],
-        supportedChains: [robinhood],
-        defaultChain: robinhood,
+        supportedChains: [chain],
+        defaultChain: chain,
         embeddedWallets: { ethereum: { createOnLogin: "all-users" } },
       }}
     >
-      <TradingSession />
+      <TradingSession chainId={chainId} />
     </PrivyProvider>
   );
 }
-function TradingSession() {
+function TradingSession({ chainId }: { chainId: number }) {
   const { ready, authenticated, user, login, logout, getAccessToken } = usePrivy();
   const { wallets, ready: walletsReady } = useWallets();
   const { sendTransaction } = useSendTransaction();
@@ -58,12 +62,12 @@ function TradingSession() {
     configurePrivyTransport({
       getAccessToken,
       send: async (tx: SponsoredTransaction) => {
-        return sendSponsoredTransaction(tx, address, sendTransaction);
+        return sendSponsoredTransaction(tx, address, chainId, sendTransaction);
       },
     });
     setActive(true);
     return () => configurePrivyTransport(null);
-  }, [authenticated, user, wallet, getAccessToken, sendTransaction]);
+  }, [authenticated, user, wallet, getAccessToken, sendTransaction, chainId]);
   if (!ready || !walletsReady) return <main className="notice">正在连接 Privy…</main>;
   if (!authenticated)
     return (
