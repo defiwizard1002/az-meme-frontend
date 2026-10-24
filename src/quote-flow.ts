@@ -1,4 +1,4 @@
-import type { Asset, Quote, QuoteDisplay } from "./types";
+import type { Asset, Quote, QuoteDisplay, Trade } from "./types";
 export type QuoteRequest = {
   side: "BUY" | "SELL";
   tokenAddress: string;
@@ -65,8 +65,15 @@ export function calculatedSlippage(
     )
   )
     return null;
-  const [amount, ad] = decimal(quote.amountIn),
-    [out, od] = decimal(quote.expectedAmountOut);
+  const [amount, ad] = decimal(quote.amountIn);
+  const [out, od] =
+    quote.status === "LOCAL_ESTIMATE" &&
+    /^\d+$/.test(quote.expectedAmountOutAtomic ?? "") &&
+    Number.isInteger(quote.outputDecimals) &&
+    quote.outputDecimals >= 0 &&
+    quote.outputDecimals <= 255
+      ? ([BigInt(quote.expectedAmountOutAtomic), quote.outputDecimals] as const)
+      : decimal(quote.expectedAmountOut);
   const [token, td] = decimal(tokenPriceUsd),
     [settlement, sd] = decimal(settlementPriceUsd);
   if (amount <= 0n || token <= 0n || settlement <= 0n) return null;
@@ -75,11 +82,37 @@ export function calculatedSlippage(
   const idealNumerator = amount * ip * 10n ** BigInt(opd);
   const idealDenominator = op * 10n ** BigInt(ad + id);
   const denominator = idealNumerator * 10n ** BigInt(od);
-  const gap = (denominator - out * idealDenominator) * 10000n;
-  const rounded = gap > 0n ? (gap + denominator - 1n) / denominator : gap / denominator;
+  const gap = (out * idealDenominator - denominator) * 10000n;
+  const rounded = gap > 0n ? (gap + denominator - 1n) / denominator : 0n;
   const impactBps = Number(rounded);
   const suggested = (rounded > 0n ? rounded : 0n) + 500n;
-  return { impactBps, suggestedBps: suggested < 10000n ? Number(suggested) : null };
+  return { impactBps, suggestedBps: Number(suggested) };
+}
+/** Never infer transaction order from array arrival or hash lexical order.
+ * Current API omits block/transaction positions; equal-second different transactions
+ * are unknown unless their prices agree. Log indices order events within one tx.
+ */
+export function latestTradePrice(trades: readonly Trade[]): string | null {
+  if (!trades.length) return null;
+  const time = Math.max(...trades.map((t) => t.t));
+  const latest = trades.filter((t) => t.t === time);
+  let trade = latest[0]!;
+  if (latest.some((t) => t.txHash !== trade.txHash)) {
+    if (latest.some((t) => t.priceUsd !== trade.priceUsd)) return null;
+  } else {
+    const index = (t: Trade) =>
+      /^\d+$/.test(t.tradeId.split(":").at(-1) ?? "") ? BigInt(t.tradeId.split(":").at(-1)!) : null;
+    for (const candidate of latest.slice(1)) {
+      const a = index(trade),
+        b = index(candidate);
+      if (a === null || b === null) {
+        if (trade.priceUsd !== candidate.priceUsd) return null;
+      } else if (b > a) trade = candidate;
+    }
+  }
+  return /^\d+(?:\.\d+)?$/.test(trade.priceUsd) && compareAmounts(trade.priceUsd, "0") > 0
+    ? trade.priceUsd
+    : null;
 }
 /** Use the same-chain native quote and USD price already supplied for the selected asset. */
 export function settlementUsdPrice(

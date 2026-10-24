@@ -24,6 +24,7 @@ import {
   requirePreparedQuote,
   withSlippageMinimum,
   calculatedSlippage,
+  latestTradePrice,
   settlementUsdPrice,
 } from "./quote-flow";
 import { TokenRiskLabels, TokenRiskGrid } from "./TokenRiskLabels";
@@ -476,7 +477,9 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
   );
   const [chainName, setChainName] = useState("Robinhood Chain");
   const [explorerBaseUrl, setExplorerBaseUrl] = useState("");
-  const [fallbackSlippageBps] = useState(2000);
+  const [fallbackSlippageBps] = useState(500);
+  const [manualSlippage, setManualSlippage] = useState<{ key: string; value: string } | null>(null);
+  const [latestTrades, setLatestTrades] = useState<{ key: string; items: Trade[] } | null>(null);
   const [orderBusy, setOrderBusy] = useState(false);
   const orderBusyRef = useRef(false);
   const [search, setSearch] = useState("");
@@ -627,11 +630,15 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
   const refreshExpiredQuoteRef = useRef<() => void>(() => {});
   const rawQuote = quoteState?.request === quoteRequest ? quoteState.value : null;
   const displayedPrice = activeSnapshot?.items.at(-1)?.c ?? selected?.priceUsd ?? "0";
+  const draftKey = JSON.stringify([selectedTokenAddress, side, asset, amount]);
+  const manualValue = manualSlippage?.key === draftKey ? manualSlippage.value : null;
+  const lastPrice =
+    latestTrades?.key === activeTradeKey ? latestTradePrice(latestTrades.items) : null;
   const slipCalculation =
     rawQuote && selected
       ? calculatedSlippage(
           rawQuote,
-          displayedPrice,
+          lastPrice ?? "",
           (rawQuote.status === "LOCAL_ESTIMATE"
             ? side === "BUY"
               ? rawQuote.inputPriceUsd
@@ -639,8 +646,23 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
             : undefined) ?? settlementUsdPrice(asset, selected),
         )
       : null;
-  const slippageBps = slipCalculation?.suggestedBps ?? fallbackSlippageBps;
-  const quote = rawQuote ? withSlippageMinimum(rawQuote, slippageBps) : null;
+  const slippageBps =
+    manualValue !== null
+      ? /^\d+(?:\.\d{1,2})?$/.test(manualValue)
+        ? Math.round(Number(manualValue) * 100)
+        : null
+      : (slipCalculation?.suggestedBps ?? null);
+  const slippageSupported =
+    slippageBps !== null &&
+    Number.isInteger(slippageBps) &&
+    slippageBps >= 1 &&
+    slippageBps <= 9999;
+  const quote = rawQuote && slippageSupported ? withSlippageMinimum(rawQuote, slippageBps!) : null;
+  // Use the current displayed tolerance on refresh, without making it a request dependency.
+  const displayedSlippageRef = useRef(slippageBps);
+  displayedSlippageRef.current = slippageSupported ? slippageBps : null;
+  const displayedMinimumRef = useRef(quote?.minAmountOut);
+  displayedMinimumRef.current = quote?.minAmountOut;
   useEffect(() => {
     setOrderState(null);
   }, [quoteRequest, accountAvailable]);
@@ -741,6 +763,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
   const selectToken = useCallback(
     async (summary: Token, retry = false) => {
       const requestId = ++selectionRequestRef.current;
+      setManualSlippage(null);
       window.clearTimeout(detailPollRef.current);
       setError(null);
       setMarketError(null);
@@ -908,6 +931,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
           current?.initialized && existing.length >= 100 ? current.nextCursor : page.nextCursor;
         const entry = { items, nextCursor, initialized: true };
         boundedMapSet(tradeCacheRef.current, activeTradeKey, entry, 64);
+        setLatestTrades({ key: activeTradeKey, items });
         if (!tradesPausedRef.current) {
           setTrades(items);
           setTradeNextCursor(nextCursor);
@@ -1324,6 +1348,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
                 { items, nextCursor, initialized: true },
                 64,
               );
+              setLatestTrades({ key: currentTradeCacheKey, items });
               if (!tradesPausedRef.current) {
                 setTrades(items);
                 setTradeNextCursor(nextCursor);
@@ -1487,6 +1512,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
               const incoming = [...batch].reverse();
               const items = mergeTrades(current.items, batch);
               boundedMapSet(tradeCacheRef.current, currentTradeCacheKey, { ...current, items }, 64);
+              setLatestTrades({ key: currentTradeCacheKey, items });
               if (!tradesPausedRef.current) {
                 setTrades(items);
                 const seen = new Set(current.items.map((trade) => trade.tradeId));
@@ -1639,7 +1665,10 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
       if (!accountAvailable || !quoteRequest || inFlight) return;
       inFlight = true;
       try {
-        const freshQuote = await memeApi.createQuote(quoteRequest, controller.signal);
+        const freshQuote = await memeApi.createQuote(
+          { ...quoteRequest, slippageBps: displayedSlippageRef.current ?? fallbackSlippageBps },
+          controller.signal,
+        );
         if (
           controller.signal.aborted ||
           quoteRequestRef.current !== quoteRequest ||
@@ -1648,7 +1677,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
           return;
         if (!matchesQuoteRequest(freshQuote, quoteRequest)) throw new Error("报价与当前请求不匹配");
         setQuoteState({
-          value: withSlippageMinimum(freshQuote, quoteRequest.slippageBps),
+          value: freshQuote,
           request: quoteRequest,
         });
         setErrorState((current) => (current?.owner === quoteRequest ? null : current));
@@ -1692,7 +1721,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
       window.clearTimeout(expiryTimer);
       refreshExpiredQuoteRef.current = () => {};
     };
-  }, [quoteRequest, selectedTokenAddress, accountAvailable, accountMode]);
+  }, [quoteRequest, selectedTokenAddress, accountAvailable, accountMode, fallbackSlippageBps]);
 
   const selectedPosition = account?.positions.find(
     (item) => item.tokenAddress.toLowerCase() === selected?.tokenAddress.toLowerCase(),
@@ -1841,6 +1870,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
 
   const resetTradeDraft = useCallback(() => {
     setOrderState(null);
+    setManualSlippage(null);
   }, []);
 
   const selectSide = useCallback(
@@ -1931,7 +1961,8 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
   );
 
   const submitOrder = useCallback(async () => {
-    if (!accountAvailable || orderBusyRef.current) return;
+    if (!accountAvailable || orderBusyRef.current || slippageBps === null || !slippageSupported)
+      return;
     if (!quote || quote.expiresAt <= Date.now()) {
       refreshExpiredQuoteRef.current();
       return;
@@ -1947,7 +1978,12 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
         setOrderState("处理中");
         const input = preparationInput({ ...quoteRequest, slippageBps }, quote);
         const response = await memeApi.createQuote(input);
-        if (quoteRequestRef.current !== quoteRequest) return;
+        if (
+          quoteRequestRef.current !== quoteRequest ||
+          displayedSlippageRef.current !== slippageBps ||
+          displayedMinimumRef.current !== input.minAmountOut
+        )
+          return;
         const prepared = requirePreparedQuote(response, input);
         if (!selected) throw new Error("请选择代币");
         if (asset === "USDT") throw new Error("当前主账户未配置 USDT");
@@ -2022,6 +2058,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
     selected,
     side,
     slippageBps,
+    slippageSupported,
     trackMainAccountTransaction,
     trackOrder,
     setError,
@@ -2578,9 +2615,9 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
               <div>
                 <dt>预计得到</dt>
                 <dd>
-                  {quote ? (
-                    <span title={quote.expectedAmountOut}>
-                      ≈ {displayAmount(quote.expectedAmountOut)}{" "}
+                  {rawQuote ? (
+                    <span title={rawQuote.expectedAmountOut}>
+                      ≈ {displayAmount(rawQuote.expectedAmountOut)}{" "}
                       {side === "BUY" ? selected?.symbol : asset}
                     </span>
                   ) : (
@@ -2588,7 +2625,46 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
                   )}
                 </dd>
               </div>
+              <div>
+                <dt>最低得到</dt>
+                <dd>
+                  {quote ? (
+                    <span title={quote.minAmountOut}>
+                      {displayAmount(quote.minAmountOut)}{" "}
+                      {side === "BUY" ? selected?.symbol : asset}
+                    </span>
+                  ) : (
+                    "等待滑点"
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>
+                  <label htmlFor="slippage">滑点</label>
+                </dt>
+                <dd>
+                  <input
+                    id="slippage"
+                    aria-label="滑点百分比"
+                    inputMode="decimal"
+                    value={manualValue ?? (slippageBps === null ? "" : String(slippageBps / 100))}
+                    placeholder="等待最新成交"
+                    onChange={(event) =>
+                      setManualSlippage({ key: draftKey, value: event.target.value })
+                    }
+                  />{" "}
+                  %
+                  {manualValue !== null && (
+                    <button type="button" onClick={() => setManualSlippage(null)}>
+                      自动
+                    </button>
+                  )}
+                </dd>
+              </div>
             </dl>
+            {slippageBps !== null && !slippageSupported && (
+              <p role="status">滑点须在 0.01%–99.99% 内，请手动调整</p>
+            )}
             <button
               type="submit"
               className="primary"
