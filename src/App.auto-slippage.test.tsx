@@ -383,3 +383,76 @@ it("manual edit during preparation prevents a stale prepared tolerance from exec
   expect(execute).not.toHaveBeenCalled();
   expect(slip).toHaveValue("9");
 });
+
+it("REST keeps the producer's newest-first head across same-second different transactions", async () => {
+  setup();
+  const trade = (id: string, priceUsd: string) => ({
+    tradeId: `4663:${id}:1`,
+    txHash: id,
+    t: 10,
+    priceUsd,
+    side: "BUY" as const,
+    baseAmount: "1",
+    quoteAmount: "1",
+    quoteAsset: "USDG",
+    trader: token.tokenAddress,
+  });
+  vi.spyOn(memeApi, "getTrades").mockResolvedValue({
+    items: [trade("a", "2"), trade("z", "1")],
+    nextCursor: null,
+  });
+  render(<App />);
+  await waitFor(() => expect(screen.getByLabelText("滑点百分比")).toHaveValue("125"));
+});
+
+it("ordered WS same-second batch beats delayed REST; older revision cannot replace it and manual survives next batch", async () => {
+  setup();
+  Socket.instances = [];
+  vi.stubGlobal("WebSocket", Socket);
+  vi.spyOn(memeApi, "getWsTicket").mockResolvedValue({
+    ticket: "test",
+    expiresAt: Date.now() + 60000,
+  });
+  let resolve!: (v: Awaited<ReturnType<typeof memeApi.getTrades>>) => void;
+  vi.spyOn(memeApi, "getTrades").mockImplementation(
+    () =>
+      new Promise((r) => {
+        resolve = r;
+      }),
+  );
+  const trade = (id: string, priceUsd: string) => ({
+    tradeId: `4663:${id}:1`,
+    txHash: id,
+    t: 10,
+    priceUsd,
+    side: "BUY" as const,
+    baseAmount: "1",
+    quoteAmount: "1",
+    quoteAsset: "USDG",
+    trader: token.tokenAddress,
+  });
+  render(<App />);
+  const slip = await screen.findByLabelText("滑点百分比");
+  await waitFor(() => expect(Socket.instances.length).toBeGreaterThan(0));
+  const oldRest = resolve;
+  const socket = Socket.instances.at(-1)!;
+  await act(async () => socket.open());
+  const channel = socket.sent
+    .flatMap((s) => JSON.parse(s).channels ?? [])
+    .find((c: string) => c.startsWith("trade:"));
+  const push = (sequence: number, revision: string, items: ReturnType<typeof trade>[]) =>
+    socket.receive({ channel, epoch: "ordered", sequence, revision, data: { items } });
+  await act(async () => push(1, "100", [trade("z", "1"), trade("a", "2")]));
+  await waitFor(() => expect(slip).toHaveValue("125"));
+  await act(async () =>
+    oldRest({ items: [trade("older", "1"), trade("oldest", "0.9")], nextCursor: null }),
+  );
+  expect(slip).toHaveValue("125");
+  await act(async () => push(2, "99", [trade("backfill", "3")]));
+  expect(slip).toHaveValue("125");
+  fireEvent.change(slip, { target: { value: "8" } });
+  await act(async () => push(3, "200", [trade("next1", "2.5"), trade("next2", "3")]));
+  expect(slip).toHaveValue("8");
+  fireEvent.click(screen.getByRole("button", { name: "自动" }));
+  expect(slip).toHaveValue("235");
+});

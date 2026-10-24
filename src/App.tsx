@@ -182,6 +182,7 @@ interface StreamMessage<T> {
   channel: string;
   epoch: string;
   sequence: number;
+  revision?: string;
   data: T;
 }
 
@@ -479,7 +480,16 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
   const [explorerBaseUrl, setExplorerBaseUrl] = useState("");
   const [fallbackSlippageBps] = useState(500);
   const [manualSlippage, setManualSlippage] = useState<{ key: string; value: string } | null>(null);
-  const [latestTrades, setLatestTrades] = useState<{ key: string; items: Trade[] } | null>(null);
+  const [latestTrade, setLatestTrade] = useState<{
+    key: string;
+    trade: Trade | null;
+    revision?: string;
+  } | null>(null);
+  const latestTradeRef = useRef(latestTrade);
+  const updateLatestTrade = useCallback((head: NonNullable<typeof latestTrade>) => {
+    latestTradeRef.current = head;
+    setLatestTrade(head);
+  }, []);
   const [orderBusy, setOrderBusy] = useState(false);
   const orderBusyRef = useRef(false);
   const [search, setSearch] = useState("");
@@ -633,7 +643,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
   const draftKey = JSON.stringify([selectedTokenAddress, side, asset, amount]);
   const manualValue = manualSlippage?.key === draftKey ? manualSlippage.value : null;
   const lastPrice =
-    latestTrades?.key === activeTradeKey ? latestTradePrice(latestTrades.items) : null;
+    latestTrade?.key === activeTradeKey ? latestTradePrice(latestTrade.trade) : null;
   const slipCalculation =
     rawQuote && selected
       ? calculatedSlippage(
@@ -915,6 +925,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
     const scope = { key: activeTradeKey };
     const controller = new AbortController();
     tradeHistoryScopeRef.current = scope;
+    const headAtRequest = latestTradeRef.current;
     const cached = tradeCacheRef.current.get(activeTradeKey);
     const baseline = new Map((cached?.items ?? []).map((trade) => [trade.tradeId, trade]));
     setTrades(cached?.items ?? []);
@@ -931,7 +942,9 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
           current?.initialized && existing.length >= 100 ? current.nextCursor : page.nextCursor;
         const entry = { items, nextCursor, initialized: true };
         boundedMapSet(tradeCacheRef.current, activeTradeKey, entry, 64);
-        setLatestTrades({ key: activeTradeKey, items });
+        // REST is source-position DESC, unlike the merged display array.
+        if (latestTradeRef.current === headAtRequest)
+          updateLatestTrade({ key: activeTradeKey, trade: page.items[0] ?? null });
         if (!tradesPausedRef.current) {
           setTrades(items);
           setTradeNextCursor(nextCursor);
@@ -948,7 +961,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
       if (tradeHistoryScopeRef.current === scope) tradeHistoryScopeRef.current = null;
       controller.abort();
     };
-  }, [activeTradeKey, selectedMarketKey, selectedTokenAddress, setError]);
+  }, [activeTradeKey, selectedMarketKey, selectedTokenAddress, setError, updateLatestTrade]);
 
   useEffect(() => {
     if (!hasTrades || tradesPaused) return;
@@ -1309,6 +1322,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
         10_000,
       );
       const signal = AbortSignal.any([recoveryController.signal, deadline.signal]);
+      const headAtRequest = latestTradeRef.current;
       const tradeBaseline =
         channel === tradeChannel
           ? new Map(
@@ -1348,7 +1362,8 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
                 { items, nextCursor, initialized: true },
                 64,
               );
-              setLatestTrades({ key: currentTradeCacheKey, items });
+              if (latestTradeRef.current === headAtRequest)
+                updateLatestTrade({ key: currentTradeCacheKey, trade: page.items[0] ?? null });
               if (!tradesPausedRef.current) {
                 setTrades(items);
                 setTradeNextCursor(nextCursor);
@@ -1512,7 +1527,34 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
               const incoming = [...batch].reverse();
               const items = mergeTrades(current.items, batch);
               boundedMapSet(tradeCacheRef.current, currentTradeCacheKey, { ...current, items }, 64);
-              setLatestTrades({ key: currentTradeCacheKey, items });
+              // Normal TRADE items retain forward producer order. Never use mergeTrades
+              // for this head: timestamp ties and table sorting lose that ordering.
+              const head =
+                latestTradeRef.current?.key === currentTradeCacheKey
+                  ? latestTradeRef.current
+                  : null;
+              const candidate = batch.filter((t) => !t.history && !t.correction).at(-1);
+              const olderRevision =
+                head?.revision &&
+                message.revision &&
+                BigInt(message.revision) <= BigInt(head.revision);
+              const knownOlder =
+                candidate &&
+                candidate.tradeId !== head?.trade?.tradeId &&
+                current.items.some((t) => t.tradeId === candidate.tradeId);
+              if (
+                !requiresResync &&
+                !olderRevision &&
+                !knownOlder &&
+                candidate &&
+                (!head?.trade || candidate.t >= head.trade.t)
+              )
+                updateLatestTrade({
+                  key: currentTradeCacheKey,
+                  trade: candidate,
+                  revision: message.revision,
+                });
+              if (batch.some((t) => t.history || t.correction)) recover(tradeChannel);
               if (!tradesPausedRef.current) {
                 setTrades(items);
                 const seen = new Set(current.items.map((trade) => trade.tradeId));
@@ -1650,6 +1692,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
     selectedTokenAddress,
     selectedMarketKey,
     marketStreamAvailable,
+    updateLatestTrade,
     interval,
     setCachedSnapshot,
     setError,

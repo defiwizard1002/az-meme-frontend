@@ -88,29 +88,9 @@ export function calculatedSlippage(
   const suggested = (rounded > 0n ? rounded : 0n) + 500n;
   return { impactBps, suggestedBps: Number(suggested) };
 }
-/** Never infer transaction order from array arrival or hash lexical order.
- * Current API omits block/transaction positions; equal-second different transactions
- * are unknown unless their prices agree. Log indices order events within one tx.
- */
-export function latestTradePrice(trades: readonly Trade[]): string | null {
-  if (!trades.length) return null;
-  const time = Math.max(...trades.map((t) => t.t));
-  const latest = trades.filter((t) => t.t === time);
-  let trade = latest[0]!;
-  if (latest.some((t) => t.txHash !== trade.txHash)) {
-    if (latest.some((t) => t.priceUsd !== trade.priceUsd)) return null;
-  } else {
-    const index = (t: Trade) =>
-      /^\d+$/.test(t.tradeId.split(":").at(-1) ?? "") ? BigInt(t.tradeId.split(":").at(-1)!) : null;
-    for (const candidate of latest.slice(1)) {
-      const a = index(trade),
-        b = index(candidate);
-      if (a === null || b === null) {
-        if (trade.priceUsd !== candidate.priceUsd) return null;
-      } else if (b > a) trade = candidate;
-    }
-  }
-  return /^\d+(?:\.\d+)?$/.test(trade.priceUsd) && compareAmounts(trade.priceUsd, "0") > 0
+/** The caller selects the head using the producer's REST/WS order, before UI merging. */
+export function latestTradePrice(trade: Trade | null | undefined): string | null {
+  return trade && /^\d+(?:\.\d+)?$/.test(trade.priceUsd) && compareAmounts(trade.priceUsd, "0") > 0
     ? trade.priceUsd
     : null;
 }

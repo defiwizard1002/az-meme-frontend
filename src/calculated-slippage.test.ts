@@ -44,14 +44,10 @@ it("keeps exact arithmetic until final integer bps; absent/zero latest price is 
     )?.suggestedBps,
   ).toBe(1500);
 });
-it("selects latest event independent of array order; same-transaction logs order numerically, ambiguous ties stay unknown", () => {
-  const t = (time: number, tx: string, log: number, priceUsd: string) =>
-    ({ t: time, txHash: tx, tradeId: `4663:${tx}:${log}`, priceUsd }) as Trade;
-  const rows = [t(10, "a", 9, "1"), t(9, "b", 20, "8"), t(10, "a", 10, "2")];
-  expect(latestTradePrice(rows)).toBe("2");
-  expect(latestTradePrice(rows.reverse())).toBe("2");
-  expect(latestTradePrice([...rows, t(10, "b", 1, "3")])).toBeNull();
-  expect(latestTradePrice([...rows, t(11, "b", 1, "0")])).toBeNull();
+it("validates the producer-selected head without falling back to another trade", () => {
+  expect(latestTradePrice({ priceUsd: "2" } as Trade)).toBe("2");
+  expect(latestTradePrice({ priceUsd: "0" } as Trade)).toBeNull();
+  expect(latestTradePrice(null)).toBeNull();
 });
 it("floors client minimum from atomic output exactly once", () => {
   const q = {
