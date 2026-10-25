@@ -154,7 +154,10 @@ function poolLabel(poolType: string): string {
 }
 
 function stageLabel(token: Token): string {
-  return token.stage === "GRADUATED" ? "已毕业" : "内盘";
+  return (
+    { CURVE: "内盘", GRADUATED: "已毕业", AMM: "外盘", UNKNOWN: "阶段未知" }[token.stage] ??
+    "阶段未知"
+  );
 }
 
 function percentageOf(value: string, percent: number): string {
@@ -2333,11 +2336,7 @@ export default function App({
                     <span>
                       <b>{token.symbol}</b>
                       <small>
-                        <em
-                          className={
-                            token.stage === "GRADUATED" ? "badge graduated" : "badge curve"
-                          }
-                        >
+                        <em className={token.stage === "CURVE" ? "badge curve" : "badge graduated"}>
                           {stageLabel(token)}
                         </em>
                         {launchpadLabel(token.launchpad) && (
@@ -2403,9 +2402,7 @@ export default function App({
                     <div className="token-title">
                       <strong>{selected.symbol}</strong>
                       <span
-                        className={
-                          selected.stage === "GRADUATED" ? "badge graduated" : "badge curve"
-                        }
+                        className={selected.stage === "CURVE" ? "badge curve" : "badge graduated"}
                       >
                         {stageLabel(selected)}
                       </span>

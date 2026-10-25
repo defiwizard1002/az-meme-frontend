@@ -17,7 +17,7 @@ export interface Token {
   symbol: string;
   name: string;
   launchpad: string;
-  stage: "CURVE" | "GRADUATED";
+  stage: "CURVE" | "GRADUATED" | "AMM" | "UNKNOWN";
   quoteAssetKey: "NATIVE" | "USDC" | "USDT" | "USDG" | "OTHER";
   priceQuote: string;
   priceUsd: string;

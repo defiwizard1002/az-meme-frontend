@@ -275,3 +275,14 @@ it("keeps loading for a pending background result, polls to completion, and stop
     vi.useRealTimers();
   }
 });
+
+it("shows AMM and unknown stages without defaulting either to inner market", async () => {
+  const { detail } = await setup();
+  detail.mockResolvedValueOnce({ ...lists.hot[1]!, stage: "AMM" });
+  fireEvent.click(document.querySelectorAll(".token-select")[1]!);
+  await waitFor(() => expect(document.querySelector(".token-title")).toHaveTextContent("外盘"));
+  detail.mockResolvedValueOnce({ ...lists.hot[0]!, stage: "UNKNOWN" });
+  fireEvent.click(document.querySelectorAll(".token-select")[0]!);
+  await waitFor(() => expect(document.querySelector(".token-title")).toHaveTextContent("阶段未知"));
+  expect(document.querySelector(".token-title")).not.toHaveTextContent("内盘");
+});
