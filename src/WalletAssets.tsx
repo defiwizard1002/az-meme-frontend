@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import type { AccountSummary } from "./types";
 
 export function WalletAssets({
   balances,
   error,
   onTransfer,
 }: {
-  balances: AccountSummary["quoteBalances"] | undefined;
+  balances: Array<{ asset: string; available: string }> | undefined;
   error: string | null;
   onTransfer?: () => void;
 }) {

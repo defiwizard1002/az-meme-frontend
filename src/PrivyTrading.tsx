@@ -97,12 +97,10 @@ function TradingSession({ chainId }: { chainId: number }) {
       </main>
     );
   return (
-    <>
-      <div className="notice">
-        共享 USDG 资金池 · 我的 Privy 交易钱包：{wallet.address} · Gas 由应用赞助{" "}
-        <button onClick={() => void logout()}>退出</button>
-      </div>
-      <App key={user!.id + wallet.address} privyWallet={wallet.address} />
-    </>
+    <App
+      key={user!.id + wallet.address}
+      privyWallet={wallet.address}
+      onLogout={() => void logout()}
+    />
   );
 }

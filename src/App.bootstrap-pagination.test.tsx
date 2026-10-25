@@ -401,6 +401,63 @@ describe("urgent live trade and account origin regressions through App", () => {
     expect(azAuth.loginMock).not.toHaveBeenCalled();
   });
 
+  it("authenticates Privy market before balances and clears only recovered stream errors", async () => {
+    setup("MAIN_ACCOUNT_POC", true);
+    const pending = deferred<typeof summary>();
+    vi.mocked(memeApi.getAccount).mockReturnValue(pending.promise);
+    vi.mocked(memeApi.getWsTicket).mockRejectedValueOnce(new Error("temporary unavailable"));
+    vi.useFakeTimers();
+    await act(async () => {
+      render(<App privyWallet={tokenA.tokenAddress} />);
+    });
+    expect(memeApi.getWsTicket).toHaveBeenCalledWith(expect.any(AbortSignal), false);
+    expect(screen.getByRole("alert")).toHaveTextContent("实时行情暂时不可用");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    const socket = ControlledSocket.instances.at(-1)!;
+    act(() => socket.open());
+    expect(screen.getByRole("alert")).toHaveTextContent("实时行情暂时不可用");
+    push(socket, [trade("recovered", 500, "12")]);
+    expect(screen.queryByRole("alert")).toBeNull();
+    await act(async () => {
+      pending.resolve(summary);
+    });
+    expect(document.querySelector(".mock-badge")).toHaveAttribute("data-state", "connected");
+  });
+
+  it("shows canonical wallet assets rather than treasury funds and clears them on account change", async () => {
+    setup("MAIN_ACCOUNT_POC");
+    vi.mocked(memeApi.getAccount).mockResolvedValue({
+      ...summary,
+      walletAssets: {
+        address: tokenA.tokenAddress,
+        balances: [
+          { asset: "ETH", available: "0.125", frozen: "0" },
+          { asset: "USDG", available: "0", frozen: "0" },
+        ],
+      },
+    });
+    const logout = vi.fn();
+    const view = render(<App key="one" privyWallet={tokenA.tokenAddress} onLogout={logout} />);
+    await waitFor(() =>
+      expect(document.querySelector(".mock-badge")).toHaveAttribute("data-state", "connected"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "钱包资产" }));
+    const panel = screen.getByRole("dialog", { name: "钱包资产" });
+    expect(panel).toHaveTextContent("ETH0.125");
+    expect(panel).toHaveTextContent("USDG0");
+    expect(panel).not.toHaveTextContent("USDG10");
+    fireEvent.click(screen.getByRole("button", { name: "退出" }));
+    expect(logout).toHaveBeenCalledOnce();
+    vi.mocked(memeApi.getAccount).mockReturnValue(new Promise(() => {}));
+    await act(async () => {
+      view.rerender(<App key="two" privyWallet={tokenB.tokenAddress} />);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "钱包资产" }));
+    expect(screen.getByRole("dialog", { name: "钱包资产" })).not.toHaveTextContent("0.125");
+  });
+
   it("bounds public ticket retries independently of an AZ upstream failure", async () => {
     setup("AZ_ACCOUNT", true);
     vi.mocked(memeApi.getWsTicket).mockRejectedValue(
@@ -664,6 +721,8 @@ describe("account bootstrap and selection-scoped pagination", () => {
       render(<App />);
       await waitFor(() => expect(gate.started()).toBe(true));
       await exercisePending(mode);
+      // Keep this account-readiness check independent of the intentionally synthetic quote price.
+      fireEvent.change(screen.getByLabelText("滑点百分比"), { target: { value: "2" } });
       await act(async () => gate.resolve());
       await waitFor(() => expect(document.querySelector("button.primary")).toBeEnabled());
       expect(memeApi.createQuote).toHaveBeenCalledTimes(1);

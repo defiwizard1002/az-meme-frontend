@@ -416,7 +416,10 @@ function TokenMark({ token }: { token: Token }) {
   );
 }
 
-export default function App({ privyWallet }: { privyWallet?: string } = {}) {
+export default function App({
+  privyWallet,
+  onLogout,
+}: { privyWallet?: string; onLogout?: () => void } = {}) {
   const [tokens, setTokens] = useState<Token[]>([]);
   const [selected, setSelected] = useState<Token | null>(null);
   const [account, setAccount] = useState<AccountSummary | null>(null);
@@ -458,6 +461,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
   const [requestedDiscoveryTab, setRequestedDiscoveryTab] = useState<"hot" | "new">("hot");
   const [loading, setLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(false);
+  const [streamError, setStreamError] = useState<string | null>(null);
   const [marketError, setMarketError] = useState<string | null>(null);
   const [marketRetry, setMarketRetry] = useState(0);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
@@ -1410,8 +1414,11 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
         return;
       connecting = true;
       try {
-        // Failed account bootstrap must still be able to acquire a public market ticket.
-        const { ticket } = await memeApi.getWsTicket(recoveryController.signal, !accountAvailable);
+        // Privy transport is ready before balance bootstrap; its ticket requires authentication.
+        const { ticket } = await memeApi.getWsTicket(
+          recoveryController.signal,
+          !privyWallet && !accountAvailable,
+        );
         if (disposed || isHidden()) return;
         const nextSocket = new WebSocket(`${wsBaseUrl}?ticket=${encodeURIComponent(ticket)}`);
         socket = nextSocket;
@@ -1454,6 +1461,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
               | StreamBatch<Candle>
               | StreamBatch<Trade>
             >;
+            if (channels.includes(message.channel)) setStreamError(null);
             const previous = streamState.get(message.channel);
             const action = streamSequenceAction(previous, message);
             if (action === "DUPLICATE") return;
@@ -1580,7 +1588,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
               if (requiresResync) recover(tradeChannel);
             }
           } catch {
-            setError("实时行情暂时不可用，正在重连");
+            setStreamError("实时行情暂时不可用，正在重连");
             nextSocket.close();
           }
         });
@@ -1591,6 +1599,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
           openTimer = undefined;
           socket = null;
           if (streamSocketRef.current === nextSocket) streamSocketRef.current = null;
+          if (!disposed && !isHidden()) setStreamError("实时行情暂时不可用，正在重连");
           scheduleReconnect();
         });
       } catch (cause) {
@@ -1615,7 +1624,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
             setAccountError("登录已失效，请重新登录");
             return;
           }
-          setError("实时行情暂时不可用，历史行情仍可查看");
+          setStreamError("实时行情暂时不可用，历史行情仍可查看");
           scheduleReconnect();
         }
       } finally {
@@ -1689,6 +1698,7 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
   }, [
     accountAvailable,
     accountMode,
+    privyWallet,
     selectedTokenAddress,
     selectedMarketKey,
     marketStreamAvailable,
@@ -2161,7 +2171,20 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
           />
         </label>
         <WalletAssets
-          balances={account?.quoteBalances}
+          balances={
+            privyWallet
+              ? account?.walletAssets?.address.toLowerCase() === privyWallet.toLowerCase()
+                ? [
+                    ...account.walletAssets.balances,
+                    ...account.positions.map((p) => ({
+                      asset: p.symbol,
+                      available: p.available,
+                      frozen: "0",
+                    })),
+                  ]
+                : undefined
+              : account?.quoteBalances
+          }
           error={accountError ? "账户不可用" : null}
           {...(accountMode === "MAIN_ACCOUNT_POC"
             ? {}
@@ -2198,11 +2221,18 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
                 ? privyWallet
                   ? "Privy 钱包已连接"
                   : "主账户已连接"
-                : "主账户连接中"
+                : privyWallet
+                  ? "钱包连接中"
+                  : "主账户连接中"
               : sessionReady
                 ? "已登录"
                 : "登录中"}
         </div>
+        {onLogout && (
+          <button type="button" className="icon-button logout-button" onClick={onLogout}>
+            退出
+          </button>
+        )}
       </header>
 
       {accountError && (
@@ -2222,6 +2252,11 @@ export default function App({ privyWallet }: { privyWallet?: string } = {}) {
           <button type="button" onClick={() => setAccountRetry((n) => n + 1)}>
             重试账户连接
           </button>
+        </div>
+      )}
+      {streamError && (
+        <div className="notice" role="alert">
+          {streamError}
         </div>
       )}
       {error && (

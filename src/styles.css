@@ -2101,3 +2101,22 @@ button:active:not(:disabled) {
 .quote-details #slippage + button {
   margin-left: 5px;
 }
+
+/* Keep the authenticated account control in the existing header at every width. */
+.topbar:has(.logout-button) {
+  grid-template-columns: auto minmax(220px, 1fr) auto 36px auto 36px;
+}
+@media (max-width: 1060px) {
+  .topbar:has(.logout-button) {
+    grid-template-columns: auto minmax(180px, 1fr) auto 36px 36px;
+  }
+}
+@media (max-width: 760px) {
+  .topbar:has(.logout-button) {
+    grid-template-columns: 1fr auto 36px 36px;
+  }
+  .logout-button {
+    grid-column: 4;
+    grid-row: 1;
+  }
+}

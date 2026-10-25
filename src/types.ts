@@ -119,6 +119,7 @@ export interface Trade {
 }
 
 export interface AccountSummary {
+  walletAssets?: { address: string; balances: AccountSummary["quoteBalances"] };
   quoteBalances: Array<{ asset: Asset; available: string; frozen: string }>;
   positions: Array<{
     tokenAddress: string;
