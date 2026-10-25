@@ -401,7 +401,7 @@ describe("urgent live trade and account origin regressions through App", () => {
     expect(azAuth.loginMock).not.toHaveBeenCalled();
   });
 
-  it("authenticates Privy market before balances and clears only recovered stream errors", async () => {
+  it("authenticates Privy market before balances and clears recovered idle transport errors", async () => {
     setup("MAIN_ACCOUNT_POC", true);
     const pending = deferred<typeof summary>();
     vi.mocked(memeApi.getAccount).mockReturnValue(pending.promise);
@@ -417,13 +417,29 @@ describe("urgent live trade and account origin regressions through App", () => {
     });
     const socket = ControlledSocket.instances.at(-1)!;
     act(() => socket.open());
-    expect(screen.getByRole("alert")).toHaveTextContent("实时行情暂时不可用");
+    expect(screen.queryByRole("alert")).toBeNull();
     push(socket, [trade("recovered", 500, "12")]);
     expect(screen.queryByRole("alert")).toBeNull();
     await act(async () => {
       pending.resolve(summary);
     });
     expect(document.querySelector(".mock-badge")).toHaveAttribute("data-state", "connected");
+  });
+
+  it("keeps real disconnect warnings and clears them after an idle reconnect", async () => {
+    const socket = await mountLive();
+    act(() => socket.close());
+    expect(screen.getByRole("alert")).toHaveTextContent("实时行情暂时不可用");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    const recovered = ControlledSocket.instances.at(-1)!;
+    expect(recovered).not.toBe(socket);
+    expect(screen.getByRole("alert")).toHaveTextContent("实时行情暂时不可用");
+    act(() => recovered.open());
+    expect(screen.queryByRole("alert")).toBeNull();
+    act(() => recovered.close());
+    expect(screen.getByRole("alert")).toHaveTextContent("实时行情暂时不可用");
   });
 
   it("shows treasury balances in the header and personal positions separately, clearing both on account change", async () => {

@@ -1438,6 +1438,9 @@ export default function App({
             recover(candleChannel);
             recover(tradeChannel);
           }
+          // Transport recovery does not require a new trade in an idle market.
+          // Snapshot/account errors have separate owners and are not cleared here.
+          setStreamError(null);
           hasConnected = true;
           reconnectAttempt = 0;
           nextSocket.send(
