@@ -2171,20 +2171,7 @@ export default function App({
           />
         </label>
         <WalletAssets
-          balances={
-            privyWallet
-              ? account?.walletAssets?.address.toLowerCase() === privyWallet.toLowerCase()
-                ? [
-                    ...account.walletAssets.balances,
-                    ...account.positions.map((p) => ({
-                      asset: p.symbol,
-                      available: p.available,
-                      frozen: "0",
-                    })),
-                  ]
-                : undefined
-              : account?.quoteBalances
-          }
+          balances={account?.quoteBalances}
           error={accountError ? "账户不可用" : null}
           {...(accountMode === "MAIN_ACCOUNT_POC"
             ? {}

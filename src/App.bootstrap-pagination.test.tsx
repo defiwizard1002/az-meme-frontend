@@ -426,15 +426,24 @@ describe("urgent live trade and account origin regressions through App", () => {
     expect(document.querySelector(".mock-badge")).toHaveAttribute("data-state", "connected");
   });
 
-  it("shows canonical wallet assets rather than treasury funds and clears them on account change", async () => {
+  it("shows treasury balances in the header and personal positions separately, clearing both on account change", async () => {
     setup("MAIN_ACCOUNT_POC");
     vi.mocked(memeApi.getAccount).mockResolvedValue({
       ...summary,
+      positions: [
+        {
+          tokenAddress: tokenA.tokenAddress,
+          symbol: "AAA",
+          available: "7.25",
+          costUsd: "5",
+          valueUsd: "8",
+        },
+      ],
       walletAssets: {
         address: tokenA.tokenAddress,
         balances: [
           { asset: "ETH", available: "0.125", frozen: "0" },
-          { asset: "USDG", available: "0", frozen: "0" },
+          { asset: "USDG", available: "0.375", frozen: "0" },
         ],
       },
     });
@@ -443,11 +452,19 @@ describe("urgent live trade and account origin regressions through App", () => {
     await waitFor(() =>
       expect(document.querySelector(".mock-badge")).toHaveAttribute("data-state", "connected"),
     );
+    expect(screen.queryByRole("dialog", { name: "钱包资产" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "钱包资产" }));
     const panel = screen.getByRole("dialog", { name: "钱包资产" });
-    expect(panel).toHaveTextContent("ETH0.125");
-    expect(panel).toHaveTextContent("USDG0");
-    expect(panel).not.toHaveTextContent("USDG10");
+    expect(panel).toHaveTextContent("ETH10");
+    expect(panel).toHaveTextContent("USDG10");
+    expect(panel.querySelectorAll("dl > div")).toHaveLength(2);
+    expect(panel).not.toHaveTextContent("0.125");
+    expect(panel).not.toHaveTextContent("0.375");
+    expect(panel).not.toHaveTextContent("AAA");
+    const positions = document.querySelector(".positions")!;
+    expect(positions).toHaveTextContent("我的持仓");
+    expect(positions).toHaveTextContent("AAA7.25 枚");
+    expect(positions).not.toHaveTextContent("USDG");
     fireEvent.click(screen.getByRole("button", { name: "退出" }));
     expect(logout).toHaveBeenCalledOnce();
     vi.mocked(memeApi.getAccount).mockReturnValue(new Promise(() => {}));
@@ -455,7 +472,10 @@ describe("urgent live trade and account origin regressions through App", () => {
       view.rerender(<App key="two" privyWallet={tokenB.tokenAddress} />);
     });
     fireEvent.click(screen.getByRole("button", { name: "钱包资产" }));
-    expect(screen.getByRole("dialog", { name: "钱包资产" })).not.toHaveTextContent("0.125");
+    expect(screen.getByRole("dialog", { name: "钱包资产" })).toHaveTextContent("余额加载中");
+    expect(screen.getByRole("dialog", { name: "钱包资产" })).not.toHaveTextContent("USDG10");
+    expect(document.querySelector(".positions")).not.toHaveTextContent("AAA");
+    expect(document.querySelector(".positions")).not.toHaveTextContent("7.25");
   });
 
   it("bounds public ticket retries independently of an AZ upstream failure", async () => {
