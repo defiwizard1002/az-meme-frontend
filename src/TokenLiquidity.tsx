@@ -15,12 +15,12 @@ export function TokenLiquidity({
   const value = local
     ? local.status === "COMPLETE" && local.totalUsd !== null
       ? money(local.totalUsd)
-      : local.status === "PARTIAL" && local.knownSubtotalUsd !== null
-        ? `${money(local.knownSubtotalUsd)} + 未知`
-        : "未知"
+      : local.status === "PARTIAL"
+        ? "部分数据"
+        : "暂无数据"
     : money(token.liquidityUsd ?? token.pool.liquidityUsd);
   const title = local
-    ? `已知池的本金估值，不含累计手续费。${local.asOfBlock ? `区块 ${local.asOfBlock} 快照。` : ""}${local.status !== "COMPLETE" ? "部分数量或美元价格缺失，合计未完整。" : ""}${token.liquidityUsd !== undefined ? `提供方报告：${money(token.liquidityUsd)}。` : ""}`
+    ? `已知池的本金估值，不含累计手续费。${local.asOfBlock ? `区块 ${local.asOfBlock} 快照。` : ""}${local.status !== "COMPLETE" ? "部分数量或美元价格缺失，合计未完整。" : ""}${local.status === "PARTIAL" && local.knownSubtotalUsd !== null ? `已估值部分：${money(local.knownSubtotalUsd)}。` : ""}${token.liquidityUsd !== undefined ? `提供方报告：${money(token.liquidityUsd)}。` : ""}`
     : "提供方报告的数值，尚未确认覆盖全部池。";
   return (
     <div title={title}>

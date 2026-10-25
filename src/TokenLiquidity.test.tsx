@@ -18,7 +18,7 @@ it("shows actual known-pool sum, its coverage and the separate provider report",
   expect(screen.getByText("$3202.76")).toBeInTheDocument();
   expect(screen.getByTitle(/不含累计手续费.*92578604.*提供方报告：\$846.88/)).toBeInTheDocument();
 });
-it("keeps an incomplete sum visibly unknown", () => {
+it("labels incomplete coverage without presenting a partial sum as the total", () => {
   render(
     <TokenLiquidity
       token={{
@@ -28,11 +28,24 @@ it("keeps an incomplete sum visibly unknown", () => {
       money={(x) => `$${x}`}
     />,
   );
-  expect(screen.getByText("$3202.76 + 未知")).toBeInTheDocument();
+  expect(screen.getByText("部分数据")).toBeInTheDocument();
   expect(screen.getByText("已知池本金（8/9池）")).toBeInTheDocument();
 });
 it("labels older provider data without asserting an aggregate", () => {
   render(<TokenLiquidity token={token} money={(x) => `$${x}`} />);
   expect(screen.getByText("提供方流动性")).toBeInTheDocument();
   expect(screen.getByText("$846.88")).toBeInTheDocument();
+});
+
+it("shows no data when a local estimate is unavailable", () => {
+  render(
+    <TokenLiquidity
+      token={{
+        ...token,
+        localLiquidity: { ...local, status: "UNAVAILABLE", totalUsd: null, knownSubtotalUsd: null },
+      }}
+      money={(x) => `$${x}`}
+    />,
+  );
+  expect(screen.getByText("暂无数据")).toBeInTheDocument();
 });
