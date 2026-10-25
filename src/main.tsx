@@ -20,9 +20,9 @@ function Entry() {
         <button onClick={() => location.reload()}>重试</button>
       </main>
     );
-  if (!config) return <main className="notice">正在连接…</main>;
+  if (!config) return <App walletRequired connectionPending />;
   return config.privy ? (
-    <Suspense fallback={<main className="notice">正在加载登录…</main>}>
+    <Suspense fallback={<App walletRequired connectionPending />}>
       <PrivyTrading {...config.privy} chainId={config.chainId} />
     </Suspense>
   ) : (

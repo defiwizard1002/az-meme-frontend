@@ -419,7 +419,19 @@ function TokenMark({ token }: { token: Token }) {
 export default function App({
   privyWallet,
   onLogout,
-}: { privyWallet?: string; onLogout?: () => void } = {}) {
+  walletRequired = false,
+  connectionPending = false,
+  connectionError,
+  onConnect,
+}: {
+  privyWallet?: string;
+  onLogout?: () => void;
+  walletRequired?: boolean;
+  connectionPending?: boolean;
+  connectionError?: string | null;
+  onConnect?: () => void;
+} = {}) {
+  const guest = walletRequired && !privyWallet;
   const [tokens, setTokens] = useState<Token[]>([]);
   const [selected, setSelected] = useState<Token | null>(null);
   const [account, setAccount] = useState<AccountSummary | null>(null);
@@ -1001,7 +1013,7 @@ export default function App({
   }, [search, setError]);
 
   useEffect(() => {
-    if (!accountMode) return;
+    if (!accountMode || guest) return;
     let active = true;
     const controller = new AbortController();
     const fail = (cause: unknown) => {
@@ -1078,7 +1090,7 @@ export default function App({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [accountMode, accountRetry, trackMainAccountTransaction, trackOrder, setError]);
+  }, [accountMode, accountRetry, trackMainAccountTransaction, trackOrder, setError, guest]);
 
   useEffect(() => {
     if (!sessionReady || accountMode !== "MAIN_ACCOUNT_POC") return;
@@ -2173,19 +2185,21 @@ export default function App({
             placeholder="搜索代币或粘贴合约地址"
           />
         </label>
-        <WalletAssets
-          balances={account?.quoteBalances}
-          error={accountError ? "账户不可用" : null}
-          {...(accountMode === "MAIN_ACCOUNT_POC"
-            ? {}
-            : { onTransfer: () => setTransferOpen(true) })}
-        />
+        {!guest && (
+          <WalletAssets
+            balances={account?.quoteBalances}
+            error={accountError ? "账户不可用" : null}
+            {...(accountMode === "MAIN_ACCOUNT_POC"
+              ? {}
+              : { onTransfer: () => setTransferOpen(true) })}
+          />
+        )}
         <button
           type="button"
           className="icon-button history-trigger"
           aria-label="交易记录"
           title="交易记录"
-          onClick={() => setHistoryOpen(true)}
+          onClick={() => (guest ? onConnect?.() : setHistoryOpen(true))}
         >
           <svg
             viewBox="0 0 24 24"
@@ -2204,19 +2218,13 @@ export default function App({
           data-state={accountError ? "failed" : accountAvailable ? "connected" : "pending"}
         >
           <i aria-hidden="true" />
-          {accountError
-            ? "账户连接失败"
-            : accountMode === "MAIN_ACCOUNT_POC"
-              ? sessionReady
-                ? privyWallet
-                  ? "Privy 钱包已连接"
-                  : "主账户已连接"
-                : privyWallet
-                  ? "钱包连接中"
-                  : "主账户连接中"
-              : sessionReady
-                ? "已登录"
-                : "登录中"}
+          {guest
+            ? "未连接钱包"
+            : accountError
+              ? "账户连接失败"
+              : accountAvailable
+                ? "钱包已连接"
+                : "钱包连接中"}
         </div>
         {onLogout && (
           <button type="button" className="icon-button logout-button" onClick={onLogout}>
@@ -2606,7 +2614,8 @@ export default function App({
             <label>
               <span>{side === "BUY" ? "金额" : "数量"}</span>
               <span>
-                可用 {readableAmount(currentBalance)} {side === "BUY" ? asset : selected?.symbol}
+                可用 {guest ? "—" : readableAmount(currentBalance)}{" "}
+                {side === "BUY" ? asset : selected?.symbol}
               </span>
             </label>
             <div className="amount-input">
@@ -2733,41 +2742,53 @@ export default function App({
             {slippageBps !== null && !slippageSupported && (
               <p role="status">滑点须在 0.01%–99.99% 内，请手动调整</p>
             )}
-            <button
-              type="submit"
-              className="primary"
-              aria-busy={orderBusy || !quote || quote.expiresAt <= Date.now()}
-              disabled={
-                !accountAvailable ||
-                !selected ||
-                !quoteRequest ||
-                !quote ||
-                quote.expiresAt <= Date.now() ||
-                orderBusy ||
-                (side === "SELL" && Number(currentBalance) <= 0)
-              }
-            >
-              {accountError
-                ? "账户连接失败"
-                : !sessionReady
-                  ? accountMode === "MAIN_ACCOUNT_POC"
-                    ? "等待主账户"
-                    : "等待登录"
-                  : orderBusy
-                    ? "处理中"
-                    : !quote || quote.expiresAt <= Date.now()
-                      ? "更新报价中"
-                      : side === "BUY"
-                        ? "买入"
-                        : "卖出"}
-            </button>
+            {guest ? (
+              <button
+                type="button"
+                className="primary"
+                disabled={connectionPending && !connectionError}
+                onClick={onConnect}
+              >
+                {connectionPending && !connectionError ? "连接中…" : "连接钱包"}
+              </button>
+            ) : (
+              <button
+                type="submit"
+                className="primary"
+                aria-busy={orderBusy || !quote || quote.expiresAt <= Date.now()}
+                disabled={
+                  !accountAvailable ||
+                  !selected ||
+                  !quoteRequest ||
+                  !quote ||
+                  quote.expiresAt <= Date.now() ||
+                  orderBusy ||
+                  (side === "SELL" && Number(currentBalance) <= 0)
+                }
+              >
+                {accountError
+                  ? "账户连接失败"
+                  : !sessionReady
+                    ? accountMode === "MAIN_ACCOUNT_POC"
+                      ? "等待主账户"
+                      : "等待登录"
+                    : orderBusy
+                      ? "处理中"
+                      : !quote || quote.expiresAt <= Date.now()
+                        ? "更新报价中"
+                        : side === "BUY"
+                          ? "买入"
+                          : "卖出"}
+              </button>
+            )}
+            {connectionError && <p role="alert">{connectionError}</p>}
             {orderState && <p role="status">{orderState}</p>}
           </form>
 
           <div className="positions">
             <div className="positions-head">
               <strong>我的持仓</strong>
-              <span className="positive">{money(totalPosition)}</span>
+              <span className="positive">{guest ? "连接钱包后查看" : money(totalPosition)}</span>
             </div>
             {account?.positions.map((position) => {
               const cost = Number(position.costUsd);

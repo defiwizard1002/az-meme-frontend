@@ -144,7 +144,9 @@ class ControlledQuoteSocket {
   }
 }
 
-function renderWithDeferredQuotes(options: { settlementAssets?: string[] } = {}) {
+function renderWithDeferredQuotes(
+  options: { settlementAssets?: string[]; guest?: boolean; onConnect?: () => void } = {},
+) {
   const quotes: Array<{
     input: ReturnType<typeof quoteResult>;
     signal: AbortSignal | undefined;
@@ -210,7 +212,10 @@ function renderWithDeferredQuotes(options: { settlementAssets?: string[] } = {})
     }
     throw new Error(`Unexpected request ${url}`);
   });
-  return { ...render(<App />), quotes };
+  return {
+    ...render(<App walletRequired={options.guest} onConnect={options.onConnect} />),
+    quotes,
+  };
 }
 
 function displayedQuote(): string | null {
@@ -218,6 +223,22 @@ function displayedQuote(): string | null {
 }
 
 describe("App", () => {
+  it("shows public markets without private requests and connects from the trade area", async () => {
+    const onConnect = vi.fn();
+    renderWithDeferredQuotes({ guest: true, onConnect });
+    await screen.findByRole("button", { name: "查看 CASHCAT" });
+    await waitFor(() =>
+      expect(document.querySelector(".trade-panel .primary")).toHaveTextContent("连接钱包"),
+    );
+    expect(
+      vi
+        .mocked(globalThis.fetch)
+        .mock.calls.some(([url]) => /\/account\/|\/orders|\/quotes|login/.test(String(url))),
+    ).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "连接钱包" }));
+    expect(onConnect).toHaveBeenCalledOnce();
+    expect(screen.queryByText("主账户连接中")).toBeNull();
+  });
   it("displays actual quote assets with hidden pool internals and submits that quote", async () => {
     const { quotes } = renderWithDeferredQuotes({ settlementAssets: ["USDG", "ETH", "WETH"] });
     await screen.findByRole("button", { name: "查看 CASHCAT" });
@@ -993,7 +1014,7 @@ describe("App", () => {
     expect(candleRequestedBeforeDetail).toBe(true);
     resolveTokenDetail(await response(token));
     expect(screen.getByText("可用 0.42 ETH")).toBeInTheDocument();
-    expect(screen.getByText("已登录")).toBeInTheDocument();
+    expect(screen.getByText("钱包已连接")).toBeInTheDocument();
     expect(screen.queryByText(/账户暂不可用/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "钱包资产" }));
     expect(screen.getByRole("button", { name: "账户划转" })).toBeEnabled();
@@ -1312,10 +1333,10 @@ describe("App", () => {
 
     render(<App />);
 
-    await screen.findByText("主账户已连接");
+    await screen.findByText("钱包已连接");
     fireEvent.click(screen.getByRole("button", { name: "钱包资产" }));
     expect(screen.getByRole("dialog", { name: "钱包资产" })).toHaveTextContent("USDG10ETH0.01");
-    expect(screen.getByText("主账户已连接")).toBeInTheDocument();
+    expect(screen.getByText("钱包已连接")).toBeInTheDocument();
     const paymentAsset = screen.getByLabelText("支付资产") as HTMLSelectElement;
     expect(paymentAsset).toHaveValue("USDG");
     expect(Array.from(paymentAsset.options, (option) => option.value)).toEqual(["USDG", "ETH"]);

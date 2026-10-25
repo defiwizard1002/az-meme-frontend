@@ -68,39 +68,22 @@ function TradingSession({ chainId }: { chainId: number }) {
     setActive(true);
     return () => configurePrivyTransport(null);
   }, [authenticated, user, wallet, getAccessToken, sendTransaction, chainId]);
-  if (!ready || !walletsReady) return <main className="notice">正在连接 Privy…</main>;
-  if (!authenticated)
-    return (
-      <main className="notice">
-        <h1>内部共享资金交易</h1>
-        <p>
-          连接外部钱包登录后，Privy 会生成独立交易钱包。共享 USDG 用于买入，买到的代币归你的 Privy
-          钱包；卖出所得回到共享资金池。交易手续费由应用赞助。
-        </p>
-        <button onClick={login}>连接登录钱包</button>
-      </main>
-    );
-  if (!wallet || !active)
-    return (
-      <main className="notice">
-        <p>{error ?? "正在创建并连接 Privy 交易钱包…"}</p>
-        <button
-          onClick={() =>
-            void createWallet().catch((cause) =>
-              setError(cause instanceof Error ? cause.message : String(cause)),
-            )
-          }
-        >
-          创建交易钱包
-        </button>
-        <button onClick={() => void logout()}>退出</button>
-      </main>
-    );
+  const connected = ready && walletsReady && authenticated && wallet && active;
   return (
     <App
-      key={user!.id + wallet.address}
-      privyWallet={wallet.address}
-      onLogout={() => void logout()}
+      key={connected ? user!.id + wallet.address : "guest"}
+      privyWallet={connected ? wallet.address : undefined}
+      walletRequired
+      connectionPending={!ready || !walletsReady || (authenticated && Boolean(wallet) && !active)}
+      connectionError={error}
+      onConnect={() => {
+        if (!authenticated) login();
+        else
+          void createWallet().catch((cause) =>
+            setError(cause instanceof Error ? cause.message : String(cause)),
+          );
+      }}
+      onLogout={authenticated ? () => void logout() : undefined}
     />
   );
 }
