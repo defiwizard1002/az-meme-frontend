@@ -532,3 +532,127 @@ it("explains invalid input and empty SELL without claiming a quote is loading", 
   fireEvent.click(screen.getByRole("button", { name: "卖出" }));
   expect(screen.getByRole("button", { name: "暂无可卖持仓" })).toBeDisabled();
 });
+
+it("default auto slippage keeps a clicked BUY through a newer trade during preparation", async () => {
+  setup();
+  Socket.instances = [];
+  vi.stubGlobal("WebSocket", Socket);
+  vi.spyOn(memeApi, "getWsTicket").mockResolvedValue({
+    ticket: "local",
+    expiresAt: Date.now() + 60000,
+  });
+  const execute = vi
+    .spyOn(memeApi, "executeMainAccountTrade")
+    .mockImplementation(() => new Promise(() => {}));
+  render(<App />);
+  const slip = await screen.findByRole("textbox", { name: "滑点百分比" });
+  await waitFor(() => expect(slip).toHaveValue("15"));
+  await waitFor(() => expect(Socket.instances.length).toBeGreaterThan(0));
+  const socket = Socket.instances.at(-1)!;
+  await act(async () => socket.open());
+  const channel = socket.sent
+    .flatMap((s) => JSON.parse(s).channels ?? [])
+    .find((c: string) => c.startsWith("trade:"));
+  let resolve!: (q: Awaited<ReturnType<typeof memeApi.createQuote>>) => void;
+  const create = vi.spyOn(memeApi, "createQuote").mockImplementation(
+    () =>
+      new Promise((r) => {
+        resolve = r;
+      }),
+  );
+  fireEvent.click(document.querySelector<HTMLButtonElement>('button[type="submit"]')!);
+  await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+  const input = create.mock.calls[0]![0];
+  await act(async () =>
+    socket.receive({
+      channel,
+      epoch: "new-trade",
+      sequence: 1,
+      data: {
+        tradeId: "4663:new:1",
+        txHash: "new",
+        t: 2,
+        side: "BUY",
+        priceUsd: "1.1",
+        baseAmount: "1",
+        quoteAmount: "1.1",
+        quoteAsset: "USDG",
+        trader: token.tokenAddress,
+      },
+    }),
+  );
+  const displayedDuringPrepare = (slip as HTMLInputElement).value;
+  await act(async () =>
+    resolve({
+      ...input,
+      quoteId: "prepared",
+      expectedAmountOut: "1.1",
+      minAmountOut: input.minAmountOut!,
+      expiresAt: Date.now() + 60000,
+      routeFingerprint: "route",
+      routePools: [{ poolKey: "p", poolType: "UNISWAP_V3", liquidityUsd: "1" }],
+      routeAssets: [
+        { address: token.tokenAddress, symbol: "A", decimals: 6 },
+        { address: token.tokenAddress, symbol: "B", decimals: 6 },
+      ],
+      fees: [],
+    } as Awaited<ReturnType<typeof memeApi.createQuote>>),
+  );
+  await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+  expect(displayedDuringPrepare).toBe("15");
+  expect(screen.getByTitle("0.935")).toBeInTheDocument();
+  expect(execute.mock.lastCall?.[0]).toMatchObject({
+    amountIn: "1",
+    slippageBps: 1500,
+    minAmountOut: "0.935",
+  });
+});
+
+it.each(["amount", "side", "token", "wallet"])(
+  "deliberate %s change cancels an in-flight preparation",
+  async (change) => {
+    setup();
+    const second = { ...token, tokenAddress: `0x${"2".repeat(40)}`, symbol: "SECOND" };
+    vi.spyOn(memeApi, "getMarkets").mockResolvedValue({
+      items: [token, second],
+      stale: false,
+    } as Awaited<ReturnType<typeof memeApi.getMarkets>>);
+    const execute = vi.spyOn(memeApi, "executeMainAccountTrade");
+    const view = render(<App accountIdentity="first" />);
+    await waitFor(() => expect(screen.getByLabelText("滑点百分比")).toHaveValue("15"));
+    let resolve!: (q: Awaited<ReturnType<typeof memeApi.createQuote>>) => void;
+    const original = memeApi.createQuote;
+    const create = vi.spyOn(memeApi, "createQuote").mockImplementation((input, signal) =>
+      input.purpose === "PREPARE_EXECUTION"
+        ? new Promise((r) => {
+            resolve = r;
+          })
+        : original(input, signal),
+    );
+    fireEvent.click(document.querySelector<HTMLButtonElement>('button[type="submit"]')!);
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    const input = create.mock.calls[0]![0];
+    if (change === "amount")
+      fireEvent.change(screen.getByLabelText("买入金额"), { target: { value: "2" } });
+    if (change === "side") fireEvent.click(screen.getByRole("button", { name: "卖出" }));
+    if (change === "token") fireEvent.click(screen.getByRole("button", { name: "查看 SECOND" }));
+    if (change === "wallet") view.rerender(<App accountIdentity="second" />);
+    await act(async () =>
+      resolve({
+        ...input,
+        quoteId: "prepared",
+        expectedAmountOut: "1.1",
+        minAmountOut: input.minAmountOut!,
+        expiresAt: Date.now() + 60000,
+        routeFingerprint: "route",
+        routePools: [{ poolKey: "p", poolType: "UNISWAP_V3", liquidityUsd: "1" }],
+        routeAssets: [
+          { address: token.tokenAddress, symbol: "A", decimals: 6 },
+          { address: token.tokenAddress, symbol: "B", decimals: 6 },
+        ],
+        fees: [],
+      } as Awaited<ReturnType<typeof memeApi.createQuote>>),
+    );
+    expect(execute).not.toHaveBeenCalled();
+  },
+);

@@ -509,6 +509,15 @@ export default function App({
   const [explorerBaseUrl, setExplorerBaseUrl] = useState("");
   const [fallbackSlippageBps] = useState(500);
   const [manualSlippage, setManualSlippage] = useState<{ key: string; value: string } | null>(null);
+  const [submittedQuote, setSubmittedQuote] = useState<{
+    owner: string;
+    request: Parameters<typeof memeApi.createQuote>[0];
+    manual: typeof manualSlippage;
+    quote: QuoteDisplay;
+    slippageBps: number;
+  } | null>(null);
+  const manualSlippageRef = useRef(manualSlippage);
+  manualSlippageRef.current = manualSlippage;
   const [latestTrade, setLatestTrade] = useState<{
     key: string;
     trade: Trade | null;
@@ -687,7 +696,15 @@ export default function App({
   quoteRequestRef.current = quoteRequest;
   const quoteVersionRef = useRef(0);
   const refreshExpiredQuoteRef = useRef<() => void>(() => {});
-  const rawQuote = quoteState?.request === quoteRequest ? quoteState.value : null;
+  const activeSubmission =
+    orderBusy &&
+    submittedQuote?.owner === identity &&
+    submittedQuote.request === quoteRequest &&
+    submittedQuote.manual === manualSlippage
+      ? submittedQuote
+      : null;
+  const rawQuote =
+    activeSubmission?.quote ?? (quoteState?.request === quoteRequest ? quoteState.value : null);
   const displayedPrice = activeSnapshot?.items.at(-1)?.c ?? selected?.priceUsd ?? "0";
   const draftKey = JSON.stringify([selectedTokenAddress, side, asset, amount]);
   const manualValue = manualSlippage?.key === draftKey ? manualSlippage.value : null;
@@ -706,22 +723,23 @@ export default function App({
         )
       : null;
   const slippageBps =
-    manualValue !== null
+    activeSubmission?.slippageBps ??
+    (manualValue !== null
       ? /^\d+(?:\.\d{1,2})?$/.test(manualValue)
         ? Math.round(Number(manualValue) * 100)
         : null
-      : (slipCalculation?.suggestedBps ?? null);
+      : (slipCalculation?.suggestedBps ?? null));
   const slippageSupported =
     slippageBps !== null &&
     Number.isInteger(slippageBps) &&
     slippageBps >= 1 &&
     slippageBps <= 9999;
-  const quote = rawQuote && slippageSupported ? withSlippageMinimum(rawQuote, slippageBps!) : null;
+  const quote =
+    activeSubmission?.quote ??
+    (rawQuote && slippageSupported ? withSlippageMinimum(rawQuote, slippageBps!) : null);
   // Use the current displayed tolerance on refresh, without making it a request dependency.
   const displayedSlippageRef = useRef(slippageBps);
   displayedSlippageRef.current = slippageSupported ? slippageBps : null;
-  const displayedMinimumRef = useRef(quote?.minAmountOut);
-  displayedMinimumRef.current = quote?.minAmountOut;
   useEffect(() => {
     setOrderState(null);
   }, [quoteRequest, accountAvailable]);
@@ -2098,6 +2116,7 @@ export default function App({
       refreshExpiredQuoteRef.current();
       return;
     }
+    const clickedManual = manualSlippageRef.current;
     let executionSent = false;
     orderBusyRef.current = true;
     setOrderBusy(true);
@@ -2108,12 +2127,18 @@ export default function App({
         if (!quoteRequest) throw new Error("请输入有效金额");
         setOrderState("处理中");
         const input = preparationInput({ ...quoteRequest, slippageBps }, quote);
+        setSubmittedQuote({
+          owner,
+          request: quoteRequest,
+          manual: clickedManual,
+          quote,
+          slippageBps,
+        });
         const response = await memeApi.createQuote(input);
         if (
           ownerRef.current !== owner ||
           quoteRequestRef.current !== quoteRequest ||
-          displayedSlippageRef.current !== slippageBps ||
-          displayedMinimumRef.current !== input.minAmountOut
+          manualSlippageRef.current !== clickedManual
         ) {
           setOrderState(null);
           return;
@@ -2186,6 +2211,7 @@ export default function App({
       if (ownerRef.current === owner) {
         orderBusyRef.current = false;
         setOrderBusy(false);
+        setSubmittedQuote(null);
       }
     }
   }, [
