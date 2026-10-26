@@ -28,9 +28,23 @@ export interface SponsoredTransaction {
   data: `0x${string}`;
   value: string;
 }
+export interface PrivyBatchRequest {
+  version: 1;
+  method: "POST";
+  url: string;
+  headers: { "privy-app-id": string; "privy-idempotency-key": string };
+  body: {
+    method: "wallet_sendCalls";
+    chain_type: "ethereum";
+    caip2: string;
+    sponsor: true;
+    params: { calls: Array<{ to: string; data: `0x${string}`; value: string }> };
+  };
+}
 interface PrivyTransport {
+  accountId: string;
   getAccessToken: () => Promise<string | null>;
-  send: (tx: SponsoredTransaction) => Promise<`0x${string}`>;
+  sign: (request: PrivyBatchRequest) => Promise<string>;
 }
 let privyTransport: PrivyTransport | null = null;
 export function configurePrivyTransport(value: PrivyTransport | null) {
@@ -415,57 +429,42 @@ async function executeAccountTrade(input: AccountTradeInput): Promise<AccountTra
       body: JSON.stringify(input),
     });
   const transport = privyTransport;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const prepared = await request<{
-      record: AccountTransaction | null;
-      transaction: SponsoredTransaction | null;
-      approvals: SponsoredTransaction[];
-    }>("/sapi/v1/meme/privy/transactions", { method: "POST", body: JSON.stringify(input) });
-    if (prepared.approvals.length) {
-      for (const tx of prepared.approvals) {
-        const hash = await transport.send(tx);
-        let confirmed = false;
-        for (let poll = 0; poll < 120; poll++) {
-          const receipt = await request<{ status: "PENDING" | "CONFIRMED" | "FAILED" }>(
-            `/sapi/v1/meme/privy/approvals/${hash}?token=${encodeURIComponent(tx.to)}`,
-          );
-          if (receipt.status === "FAILED") throw new Error("代币授权已回滚");
-          if (receipt.status === "CONFIRMED") {
-            confirmed = true;
-            break;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 500));
-        }
-        if (!confirmed) throw new Error(`授权结果待确认：${hash}`);
-      }
-      const quote = await memeApi.createQuote({
-        ...input,
-        settlementAsset: "USDG",
-        purpose: "PREPARE_EXECUTION",
-      });
-      if (!quote.quoteId || !quote.routeFingerprint) throw new Error("授权后未能重新准备交易");
-      input = {
-        ...input,
-        quoteId: quote.quoteId,
-        routeFingerprint: quote.routeFingerprint,
-        clientExecutionId: crypto.randomUUID(),
-      };
-      continue;
-    }
-    if (!prepared.record) throw new Error("交易记录缺失");
-    if (!prepared.transaction) return prepared.record;
-    const hash = await transport.send(prepared.transaction);
-    // Retain the real hash if recording fails; never silently resend an uncertain transaction.
-    try {
-      return await request<AccountTransaction>(
-        `/sapi/v1/meme/privy/transactions/${prepared.record.executionId}/submitted`,
-        { method: "POST", body: JSON.stringify({ txHash: hash }) },
-      );
-    } catch (cause) {
-      throw new Error(
-        `交易已发送 ${hash}，记录尚未确认：${cause instanceof Error ? cause.message : String(cause)}`,
-      );
-    }
+  const pendingKey = `az:privy-pending:${transport.accountId.toLowerCase()}`;
+  const pendingId = localStorage.getItem(pendingKey);
+  if (pendingId) {
+    const existing = await request<AccountTransaction>(
+      `/sapi/v1/meme/account/transactions/${pendingId}`,
+    );
+    if (existing.status === "PENDING") return existing;
+    localStorage.removeItem(pendingKey);
   }
-  throw new Error("授权状态已变化，请重新确认交易");
+  const prepared = await request<{
+    record: AccountTransaction;
+    authorizationRequest: PrivyBatchRequest | null;
+  }>("/sapi/v1/meme/privy/transactions", { method: "POST", body: JSON.stringify(input) });
+  if (!prepared.authorizationRequest) return prepared.record;
+  const signature = await transport.sign(prepared.authorizationRequest);
+  localStorage.setItem(pendingKey, prepared.record.executionId);
+  try {
+    const submitted = await request<AccountTransaction>(
+      `/sapi/v1/meme/privy/transactions/${prepared.record.executionId}/submit`,
+      {
+        method: "POST",
+        body: JSON.stringify({ signature }),
+      },
+    );
+    if (submitted.status !== "PENDING") localStorage.removeItem(pendingKey);
+    return submitted;
+  } catch (cause) {
+    if (
+      cause instanceof ApiError &&
+      ["MEME_ROUTE_STALE", "MEME_PRIVY_SUBMISSION_REJECTED"].includes(cause.code)
+    ) {
+      localStorage.removeItem(pendingKey);
+      throw cause;
+    }
+    throw new Error(
+      `交易 ${prepared.record.executionId} 提交结果待确认，请在交易记录查看：${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+  }
 }

@@ -28,7 +28,7 @@ vi.mock("@privy-io/react-auth", () => ({
     ready: state.walletReady,
     wallets: state.authenticated && state.walletLoaded ? [state.wallet] : [],
   }),
-  useSendTransaction: () => ({ sendTransaction: vi.fn() }),
+  useAuthorizationSignature: () => ({ generateAuthorizationSignature: vi.fn() }),
   useCreateWallet: () => ({ createWallet: state.create }),
 }));
 vi.mock("./App", () => ({

@@ -1,151 +1,124 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { configurePrivyTransport, memeApi, type SponsoredTransaction } from "./api";
-import { sendSponsoredTransaction } from "./privy-wallet";
-const user = `0x${"1".repeat(40)}`,
-  router = `0x${"2".repeat(40)}`;
-const hash = `0x${"a".repeat(64)}` as const;
-const swap: SponsoredTransaction = { from: user, to: router, data: "0x1234", value: "0x0" };
+import { configurePrivyTransport, memeApi } from "./api";
+const input = {
+  clientExecutionId: crypto.randomUUID(),
+  side: "SELL" as const,
+  tokenAddress: `0x${"1".repeat(40)}`,
+  settlementAsset: "USDG" as const,
+  quoteId: "quote",
+  amountIn: "5",
+  minAmountOut: "4",
+  routeFingerprint: "plan",
+  slippageBps: 100,
+};
+const signedRequest = {
+  version: 1,
+  method: "POST",
+  url: "https://api.privy.io/v1/wallets/owned/rpc",
+  headers: { "privy-app-id": "app", "privy-idempotency-key": input.clientExecutionId },
+  body: {
+    method: "wallet_sendCalls",
+    chain_type: "ethereum",
+    caip2: "eip155:4663",
+    sponsor: true,
+    params: {
+      calls: [
+        { to: input.tokenAddress, data: "0x1234", value: "0x0" },
+        { to: input.tokenAddress, data: "0xabcd", value: "0x0" },
+      ],
+    },
+  },
+};
+const result = (value: unknown) => new Response(JSON.stringify({ rc: 0, result: value }));
 afterEach(() => {
+  localStorage.clear();
   configurePrivyTransport(null);
   vi.unstubAllGlobals();
 });
-it.each([421614, 4663])(
-  "uses chain %s, selected embedded wallet, and sponsorship",
-  async (chainId) => {
-    const send = vi.fn(async () => ({ hash }));
-    expect(await sendSponsoredTransaction(swap, user, chainId, send)).toBe(hash);
-    expect(send).toHaveBeenCalledWith(
-      { to: router, data: "0x1234", value: 0n, chainId },
-      { sponsor: true, address: user, uiOptions: { showWalletUIs: false } },
-    );
-    await expect(
-      sendSponsoredTransaction({ ...swap, from: router }, user, chainId, send),
-    ).rejects.toThrow("不匹配");
-    expect(send).toHaveBeenCalledTimes(1);
+it.each(["BUY", "SELL"] as const)(
+  "%s signs once and submits one fixed batch without approval sends or requotes",
+  async (side) => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        result({
+          record: { executionId: input.clientExecutionId },
+          authorizationRequest: signedRequest,
+        }),
+      )
+      .mockResolvedValueOnce(
+        result({ executionId: input.clientExecutionId, status: "PENDING", txHashes: [] }),
+      );
+    vi.stubGlobal("fetch", fetch);
+    const sign = vi.fn(async () => "signed-request");
+    configurePrivyTransport({
+      accountId: input.tokenAddress,
+      getAccessToken: async () => "token",
+      sign,
+    });
+    await memeApi.executeMainAccountTrade({ ...input, side });
+    expect(sign).toHaveBeenCalledExactlyOnceWith(signedRequest);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetch.mock.calls[0]![1].body)).toEqual({ ...input, side });
+    expect(String(fetch.mock.calls[1]![0])).toMatch(/\/submit$/);
+    expect(JSON.parse(fetch.mock.calls[1]![1].body)).toEqual({ signature: "signed-request" });
   },
 );
-it("sends approval then requotes with the same minimum, sends user swap and records actual hash", async () => {
-  const fetch = vi.fn();
-  vi.stubGlobal("fetch", fetch);
-  const result = (value: unknown) =>
-    new Response(JSON.stringify({ rc: 0, mc: "", ma: [], result: value }), { status: 200 });
-  fetch
-    .mockResolvedValueOnce(
-      result({ record: null, transaction: null, approvals: [{ ...swap, to: user }] }),
-    )
-    .mockResolvedValueOnce(result({ status: "CONFIRMED" }))
-    .mockResolvedValueOnce(result({ quoteId: "new-quote", routeFingerprint: "new-plan" }))
-    .mockResolvedValueOnce(
-      result({ record: { executionId: "saved" }, transaction: swap, approvals: [] }),
-    )
-    .mockResolvedValueOnce(result({ executionId: "saved", status: "PENDING", txHashes: [hash] }));
-  const sdkSend = vi.fn<Parameters<typeof sendSponsoredTransaction>[3]>(async () => ({ hash }));
-  const send = vi.fn((tx: SponsoredTransaction) =>
-    sendSponsoredTransaction(tx, user, 4663, sdkSend),
-  );
-  configurePrivyTransport({ getAccessToken: async () => "fresh-access-token", send });
-  const t = await memeApi.executeMainAccountTrade({
-    clientExecutionId: crypto.randomUUID(),
-    side: "SELL",
-    tokenAddress: user,
-    settlementAsset: "USDG",
-    quoteId: "old",
-    amountIn: "5",
-    minAmountOut: "4",
-    routeFingerprint: "old-plan",
-    slippageBps: 100,
-  });
-  expect(t.txHashes).toEqual([hash]);
-  expect(send).toHaveBeenCalledTimes(2);
-  expect(sdkSend.mock.calls.map((call) => call[1])).toEqual([
-    { sponsor: true, address: user, uiOptions: { showWalletUIs: false } },
-    { sponsor: true, address: user, uiOptions: { showWalletUIs: false } },
-  ]);
-  expect(JSON.parse(fetch.mock.calls[2]![1].body).minAmountOut).toBe("4");
-  expect(JSON.parse(fetch.mock.calls[3]![1].body).routeFingerprint).toBe("new-plan");
-  expect(fetch.mock.calls.every((c) => !String(c[0]).endsWith("/account/transactions"))).toBe(true);
-  expect((fetch.mock.calls[0]![1].headers as Headers).get("authorization")).toBe(
-    "Bearer fresh-access-token",
-  );
-});
-it("reports a known broadcast hash without automatically resending if recording fails", async () => {
-  const fetch = vi.fn();
-  vi.stubGlobal("fetch", fetch);
-  fetch
-    .mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          rc: 0,
-          result: { record: { executionId: "saved" }, transaction: swap, approvals: [] },
-        }),
-      ),
-    )
-    .mockRejectedValueOnce(new Error("offline"));
-  const send = vi.fn(async () => hash);
-  configurePrivyTransport({ getAccessToken: async () => "token", send });
-  await expect(
-    memeApi.executeMainAccountTrade({
-      clientExecutionId: crypto.randomUUID(),
-      side: "BUY",
-      tokenAddress: user,
-      settlementAsset: "USDG",
-      quoteId: "q",
-      routeFingerprint: "p",
-      amountIn: "1",
-      minAmountOut: "1",
-      slippageBps: 100,
+it("resumes a stored pending execution without signing or submitting again", async () => {
+  const fetch = vi.fn().mockResolvedValue(
+    result({
+      record: { executionId: input.clientExecutionId, status: "PENDING" },
+      authorizationRequest: null,
     }),
-  ).rejects.toThrow(hash);
-  expect(send).toHaveBeenCalledTimes(1);
+  );
+  vi.stubGlobal("fetch", fetch);
+  const sign = vi.fn();
+  configurePrivyTransport({
+    accountId: input.tokenAddress,
+    getAccessToken: async () => "token",
+    sign,
+  });
+  expect((await memeApi.executeMainAccountTrade(input)).status).toBe("PENDING");
+  expect(sign).not.toHaveBeenCalled();
 });
-
-it("stops after a failed allowance receipt without preparing or sending the swap", async () => {
+it("uncertain submit reports original execution id without automatic resend", async () => {
   const fetch = vi
     .fn()
     .mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({ rc: 0, result: { record: null, transaction: null, approvals: [swap] } }),
-      ),
+      result({
+        record: { executionId: input.clientExecutionId },
+        authorizationRequest: signedRequest,
+      }),
     )
-    .mockResolvedValueOnce(new Response(JSON.stringify({ rc: 0, result: { status: "FAILED" } })));
+    .mockRejectedValueOnce(Error("offline"));
   vi.stubGlobal("fetch", fetch);
-  const send = vi.fn(async () => hash);
-  configurePrivyTransport({ getAccessToken: async () => "test", send });
-  await expect(
-    memeApi.executeMainAccountTrade({
-      clientExecutionId: "test",
-      side: "SELL",
-      tokenAddress: user,
-      settlementAsset: "USDG",
-      quoteId: "q",
-      routeFingerprint: "r",
-      amountIn: "5",
-      minAmountOut: "4",
-      slippageBps: 100,
-    }),
-  ).rejects.toThrow("授权已回滚");
-  expect(send).toHaveBeenCalledTimes(1);
+  const sign = vi.fn(async () => "signed-request");
+  configurePrivyTransport({
+    accountId: input.tokenAddress,
+    getAccessToken: async () => "token",
+    sign,
+  });
+  await expect(memeApi.executeMainAccountTrade(input)).rejects.toThrow(input.clientExecutionId);
   expect(fetch).toHaveBeenCalledTimes(2);
+  expect(sign).toHaveBeenCalledTimes(1);
 });
 
-it("bounds access-token restoration and does not start a late request after timeout", async () => {
-  vi.useFakeTimers();
-  const fetch = vi.fn();
+it("reload or a new quote resumes the original wallet execution without another submit", async () => {
+  localStorage.setItem(`az:privy-pending:${input.tokenAddress}`, "original-execution");
+  const fetch = vi
+    .fn()
+    .mockResolvedValue(result({ executionId: "original-execution", status: "PENDING" }));
   vi.stubGlobal("fetch", fetch);
-  let resolve!: (value: string) => void;
+  const sign = vi.fn();
   configurePrivyTransport({
-    getAccessToken: () =>
-      new Promise((r) => {
-        resolve = r;
-      }),
-    send: vi.fn(),
+    accountId: input.tokenAddress,
+    getAccessToken: async () => "token",
+    sign,
   });
-  const response = memeApi.getAccount();
-  const assertion = expect(response).rejects.toMatchObject({ code: "MEME_REQUEST_TIMEOUT" });
-  await vi.advanceTimersByTimeAsync(15000);
-  await assertion;
-  resolve("test");
-  await Promise.resolve();
-  expect(fetch).not.toHaveBeenCalled();
-  vi.useRealTimers();
+  expect(
+    (await memeApi.executeMainAccountTrade({ ...input, quoteId: "new-quote" })).executionId,
+  ).toBe("original-execution");
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(sign).not.toHaveBeenCalled();
+  expect(String(fetch.mock.calls[0]![0])).toMatch(/original-execution$/);
 });

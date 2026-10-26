@@ -3,13 +3,12 @@ import {
   PrivyProvider,
   usePrivy,
   useWallets,
-  useSendTransaction,
+  useAuthorizationSignature,
   useCreateWallet,
 } from "@privy-io/react-auth";
 import { arbitrumSepolia, robinhood } from "viem/chains";
 import App from "./App";
-import { sendSponsoredTransaction } from "./privy-wallet";
-import { configurePrivyTransport, type SponsoredTransaction } from "./api";
+import { configurePrivyTransport, type PrivyBatchRequest } from "./api";
 
 export default function PrivyTrading({
   appId,
@@ -40,7 +39,7 @@ export default function PrivyTrading({
 function TradingSession({ chainId }: { chainId: number }) {
   const { ready, authenticated, user, login, logout, getAccessToken } = usePrivy();
   const { wallets, ready: walletsReady } = useWallets();
-  const { sendTransaction } = useSendTransaction();
+  const { generateAuthorizationSignature } = useAuthorizationSignature();
   const { createWallet } = useCreateWallet();
   const [error, setError] = useState<string | null>(null);
   const embedded = wallets.filter((w) => w.walletClientType === "privy");
@@ -60,14 +59,30 @@ function TradingSession({ chainId }: { chainId: number }) {
     }
     const address = wallet.address;
     configurePrivyTransport({
+      accountId: address,
       getAccessToken,
-      send: async (tx: SponsoredTransaction) => {
-        return sendSponsoredTransaction(tx, address, chainId, sendTransaction);
+      sign: async (request: PrivyBatchRequest) => {
+        if (
+          !linked?.id ||
+          request.url !== `https://api.privy.io/v1/wallets/${linked.id}/rpc` ||
+          request.body.caip2 !== `eip155:${chainId}` ||
+          wallet.address.toLowerCase() !== address.toLowerCase()
+        )
+          throw new Error("批量请求与当前执行钱包不匹配");
+        return (await generateAuthorizationSignature(request)).signature;
       },
     });
     setActive(true);
     return () => configurePrivyTransport(null);
-  }, [authenticated, user, wallet, getAccessToken, sendTransaction, chainId]);
+  }, [
+    authenticated,
+    user,
+    wallet,
+    getAccessToken,
+    generateAuthorizationSignature,
+    chainId,
+    linked,
+  ]);
   const connected = ready && walletsReady && authenticated && wallet && active;
   const pending = !ready || !walletsReady || (authenticated && !connected);
   const status = !ready
