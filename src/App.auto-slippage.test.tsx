@@ -456,3 +456,65 @@ it("ordered WS same-second batch beats delayed REST; older revision cannot repla
   fireEvent.click(screen.getByRole("button", { name: "自动" }));
   expect(slip).toHaveValue("235");
 });
+
+it("selects a holding absent from the market list and sells its exact personal available balance", async () => {
+  setup();
+  const held = { ...token, tokenAddress: `0x${"2".repeat(40)}`, symbol: "TETSU" } as Awaited<
+    ReturnType<typeof memeApi.getToken>
+  >;
+  vi.spyOn(memeApi, "getAccount").mockResolvedValue({
+    quoteBalances: [{ asset: "USDG", available: "10", frozen: "0" }],
+    positions: [
+      {
+        tokenAddress: held.tokenAddress,
+        symbol: held.symbol,
+        available: "1779.447123456789123456",
+        costUsd: "0",
+        valueUsd: "0.009",
+      },
+    ],
+  });
+  const get = vi
+    .spyOn(memeApi, "getToken")
+    .mockImplementation(async (address) =>
+      address === held.tokenAddress ? held : (token as typeof held),
+    );
+  const quotes = vi.spyOn(memeApi, "createQuote");
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "卖" }));
+  fireEvent.click(screen.getByRole("button", { name: "100%" }));
+  expect(screen.getByRole("textbox", { name: "卖出数量" })).toHaveValue("1779.447123456789123456");
+  await waitFor(() => expect(get).toHaveBeenCalledWith(held.tokenAddress));
+  await waitFor(() =>
+    expect(quotes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tokenAddress: held.tokenAddress,
+        side: "SELL",
+        amountIn: "1779.447123456789123456",
+      }),
+      expect.anything(),
+    ),
+  );
+  expect(document.querySelector(".amount-unit")).toHaveTextContent("TETSU");
+  expect(screen.queryByText("处理中")).toBeNull();
+});
+it("clears preparing status when draft changes before execution", async () => {
+  setup();
+  const execute = vi.spyOn(memeApi, "executeMainAccountTrade");
+  render(<App />);
+  await waitFor(() =>
+    expect(screen.getByRole("textbox", { name: "滑点百分比" })).toHaveValue("15"),
+  );
+  let resolve!: (value: Awaited<ReturnType<typeof memeApi.createQuote>>) => void;
+  vi.spyOn(memeApi, "createQuote").mockImplementationOnce(
+    () =>
+      new Promise((r) => {
+        resolve = r;
+      }),
+  );
+  fireEvent.click(document.querySelector<HTMLButtonElement>('button[type="submit"]')!);
+  fireEvent.change(screen.getByRole("textbox", { name: "买入金额" }), { target: { value: "2" } });
+  await act(async () => resolve({} as Awaited<ReturnType<typeof memeApi.createQuote>>));
+  expect(execute).not.toHaveBeenCalled();
+  expect(screen.queryByText("处理中")).toBeNull();
+});

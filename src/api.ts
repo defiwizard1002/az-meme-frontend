@@ -120,13 +120,6 @@ async function send<T>(
   init?.signal?.throwIfAborted();
   const headers = new Headers(init?.headers);
   if (init?.body) headers.set("content-type", "application/json");
-  if (publicMarket) headers.delete("authorization");
-  else if (privyTransport) {
-    const token = await privyTransport.getAccessToken();
-    if (!token) throw new ApiError("MEME_UNAUTHORIZED", "请先登录 Privy", 401);
-    headers.set("authorization", `Bearer ${token}`);
-  } else if (sessionToken && !headers.has("authorization"))
-    headers.set("authorization", `Bearer ${sessionToken}`);
   const controller = new AbortController();
   const cancel = () => controller.abort(init?.signal?.reason);
   let response: Response | undefined;
@@ -153,6 +146,18 @@ async function send<T>(
     return await Promise.race([
       aborted,
       (async () => {
+        if (publicMarket) headers.delete("authorization");
+        else if (privyTransport) {
+          if (path === "/sapi/v1/meme/account/summary")
+            performance.mark("wallet:access-token-start");
+          const token = await privyTransport.getAccessToken();
+          if (path === "/sapi/v1/meme/account/summary")
+            performance.mark("wallet:access-token-ready");
+          if (!token) throw new ApiError("MEME_UNAUTHORIZED", "请先登录 Privy", 401);
+          headers.set("authorization", `Bearer ${token}`);
+        } else if (sessionToken && !headers.has("authorization"))
+          headers.set("authorization", `Bearer ${sessionToken}`);
+        controller.signal.throwIfAborted();
         response = await fetch(`${base}${path}`, {
           ...init,
           headers,

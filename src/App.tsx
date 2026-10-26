@@ -425,18 +425,26 @@ export default function App({
   walletRequired = false,
   connectionPending = false,
   connectionError,
+  connectionStatus = "正在连接钱包",
+  connectionRetryable = false,
   onConnect,
 }: {
   privyWallet?: string;
   onLogout?: () => void;
   walletRequired?: boolean;
   connectionPending?: boolean;
+  connectionStatus?: string;
+  connectionRetryable?: boolean;
   connectionError?: string | null;
   onConnect?: () => void;
 } = {}) {
   const guest = walletRequired && !privyWallet;
   const [tokens, setTokens] = useState<Token[]>([]);
   const [selected, setSelected] = useState<Token | null>(null);
+  const [selectionIdentity, setSelectionIdentity] = useState<Pick<
+    Token,
+    "tokenAddress" | "symbol"
+  > | null>(null);
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [accountTransactions, setAccountTransactions] = useState<AccountTransaction[]>([]);
   const [snapshot, setSnapshot] = useState<CandleSnapshot | null>(null);
@@ -790,7 +798,7 @@ export default function App({
   );
 
   const selectToken = useCallback(
-    async (summary: Token, retry = false) => {
+    async (summary: Pick<Token, "tokenAddress" | "symbol">, retry = false) => {
       const requestId = ++selectionRequestRef.current;
       setManualSlippage(null);
       window.clearTimeout(detailPollRef.current);
@@ -800,7 +808,10 @@ export default function App({
       setDetailLoading(true);
       tradesPausedRef.current = false;
       setTradesPaused(false);
-      setSelected(summary);
+      setSelectionIdentity(summary);
+      setSelected("pool" in summary ? (summary as Token) : null);
+      if (!orderBusyRef.current && !transactionPollsRef.current.size && !orderPollsRef.current.size)
+        setOrderState(null);
       let polls = 0;
       const load = async (retryRequest = false) => {
         try {
@@ -1795,7 +1806,9 @@ export default function App({
   }, [quoteRequest, selectedTokenAddress, accountAvailable, accountMode, fallbackSlippageBps]);
 
   const selectedPosition = account?.positions.find(
-    (item) => item.tokenAddress.toLowerCase() === selected?.tokenAddress.toLowerCase(),
+    (item) =>
+      item.tokenAddress.toLowerCase() ===
+      (selected ?? selectionIdentity)?.tokenAddress.toLowerCase(),
   );
   const currentBalance =
     side === "BUY"
@@ -1940,7 +1953,8 @@ export default function App({
   }, [accountMode, asset, currentBalance, side]);
 
   const resetTradeDraft = useCallback(() => {
-    setOrderState(null);
+    if (!orderBusyRef.current && !transactionPollsRef.current.size && !orderPollsRef.current.size)
+      setOrderState(null);
     setManualSlippage(null);
   }, []);
 
@@ -2053,8 +2067,10 @@ export default function App({
           quoteRequestRef.current !== quoteRequest ||
           displayedSlippageRef.current !== slippageBps ||
           displayedMinimumRef.current !== input.minAmountOut
-        )
+        ) {
+          setOrderState(null);
           return;
+        }
         const prepared = requirePreparedQuote(response, input);
         if (!selected) throw new Error("请选择代币");
         if (asset === "USDT") throw new Error("当前主账户未配置 USDT");
@@ -2105,8 +2121,8 @@ export default function App({
       setOrderState("处理中");
       await trackOrder(order.orderId);
     } catch (cause) {
-      if (quoteRequestRef.current !== quoteRequest) return;
       setOrderState(null);
+      if (quoteRequestRef.current !== quoteRequest) return;
       if (
         !executionSent &&
         (cause instanceof QuoteExpiredError ||
@@ -2222,12 +2238,16 @@ export default function App({
         >
           <i aria-hidden="true" />
           {guest
-            ? "未连接钱包"
+            ? connectionError
+              ? "钱包连接失败"
+              : connectionPending
+                ? connectionStatus
+                : "未连接钱包"
             : accountError
               ? "账户连接失败"
               : accountAvailable
                 ? "钱包已连接"
-                : "钱包连接中"}
+                : "正在加载账户"}
         </div>
         {onLogout && (
           <button type="button" className="icon-button logout-button" onClick={onLogout}>
@@ -2579,7 +2599,16 @@ export default function App({
               </section>
             </>
           ) : (
-            <div className="empty">请选择代币</div>
+            <div className="empty">
+              {detailLoading
+                ? `正在加载 ${selectionIdentity?.symbol ?? "代币"}`
+                : (detailError ?? "请选择代币")}
+              {detailError && selectionIdentity && (
+                <button type="button" onClick={() => void selectToken(selectionIdentity, true)}>
+                  重试
+                </button>
+              )}
+            </div>
           )}
         </section>
 
@@ -2611,8 +2640,11 @@ export default function App({
             <label>
               <span>{side === "BUY" ? "金额" : "数量"}</span>
               <span>
-                可用 {guest ? "—" : readableAmount(currentBalance)}{" "}
-                {side === "BUY" ? asset : selected?.symbol}
+                可用{" "}
+                {guest || !accountAvailable || (side === "SELL" && !selected && !selectionIdentity)
+                  ? "—"
+                  : readableAmount(currentBalance)}{" "}
+                {side === "BUY" ? asset : (selected ?? selectionIdentity)?.symbol}
               </span>
             </label>
             <div className="amount-input">
@@ -2649,7 +2681,7 @@ export default function App({
                   ))}
                 </select>
               ) : (
-                <span className="amount-unit">{selected?.symbol}</span>
+                <span className="amount-unit">{(selected ?? selectionIdentity)?.symbol}</span>
               )}
             </div>
             {side === "SELL" && (
@@ -2675,6 +2707,9 @@ export default function App({
                   type="button"
                   className={activePreset === preset.label ? "active" : ""}
                   key={preset.label}
+                  disabled={
+                    side === "SELL" && (!accountAvailable || (!selected && !selectionIdentity))
+                  }
                   onClick={() => {
                     setAmount(preset.value);
                     setActivePreset(preset.label);
@@ -2692,7 +2727,7 @@ export default function App({
                   {rawQuote ? (
                     <span title={rawQuote.expectedAmountOut}>
                       ≈ {displayAmount(rawQuote.expectedAmountOut)}{" "}
-                      {side === "BUY" ? selected?.symbol : asset}
+                      {side === "BUY" ? (selected ?? selectionIdentity)?.symbol : asset}
                     </span>
                   ) : (
                     "等待报价"
@@ -2705,7 +2740,7 @@ export default function App({
                   {quote ? (
                     <span title={quote.minAmountOut}>
                       {displayAmount(quote.minAmountOut)}{" "}
-                      {side === "BUY" ? selected?.symbol : asset}
+                      {side === "BUY" ? (selected ?? selectionIdentity)?.symbol : asset}
                     </span>
                   ) : (
                     "等待滑点"
@@ -2743,10 +2778,14 @@ export default function App({
               <button
                 type="button"
                 className="primary"
-                disabled={connectionPending && !connectionError}
-                onClick={onConnect}
+                disabled={connectionPending && !connectionRetryable && !connectionError}
+                onClick={onConnect ?? (() => window.location.reload())}
               >
-                {connectionPending && !connectionError ? "连接中…" : "连接钱包"}
+                {connectionError || connectionRetryable
+                  ? "重试连接"
+                  : connectionPending
+                    ? `${connectionStatus}…`
+                    : "连接钱包"}
               </button>
             ) : (
               <button
@@ -2767,7 +2806,7 @@ export default function App({
                   ? "账户连接失败"
                   : !sessionReady
                     ? accountMode === "MAIN_ACCOUNT_POC"
-                      ? "等待主账户"
+                      ? "正在加载账户"
                       : "等待登录"
                     : orderBusy
                       ? "处理中"
@@ -2807,13 +2846,7 @@ export default function App({
                   <button
                     type="button"
                     onClick={() => {
-                      setSelected(
-                        tokens.find(
-                          (token) =>
-                            token.tokenAddress.toLowerCase() ===
-                            position.tokenAddress.toLowerCase(),
-                        ) ?? null,
-                      );
+                      void selectToken(position);
                       selectSide("SELL");
                     }}
                   >

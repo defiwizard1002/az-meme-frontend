@@ -20,9 +20,18 @@ function Entry() {
         <button onClick={() => location.reload()}>重试</button>
       </main>
     );
-  if (!config) return <App walletRequired connectionPending />;
+  if (!config) return <App walletRequired connectionPending connectionStatus="正在读取连接配置" />;
   return config.privy ? (
-    <Suspense fallback={<App walletRequired connectionPending />}>
+    <Suspense
+      fallback={
+        <App
+          walletRequired
+          connectionPending
+          connectionStatus="正在加载钱包组件"
+          connectionRetryable
+        />
+      }
+    >
       <PrivyTrading {...config.privy} chainId={config.chainId} />
     </Suspense>
   ) : (

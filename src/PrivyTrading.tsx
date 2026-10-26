@@ -30,7 +30,7 @@ export default function PrivyTrading({
         loginMethods: ["wallet"],
         supportedChains: [chain],
         defaultChain: chain,
-        embeddedWallets: { ethereum: { createOnLogin: "all-users" } },
+        embeddedWallets: { showWalletUIs: false, ethereum: { createOnLogin: "all-users" } },
       }}
     >
       <TradingSession chainId={chainId} />
@@ -69,15 +69,39 @@ function TradingSession({ chainId }: { chainId: number }) {
     return () => configurePrivyTransport(null);
   }, [authenticated, user, wallet, getAccessToken, sendTransaction, chainId]);
   const connected = ready && walletsReady && authenticated && wallet && active;
+  const pending = !ready || !walletsReady || (authenticated && !connected);
+  const status = !ready
+    ? "正在恢复登录会话"
+    : !walletsReady || (authenticated && !wallet)
+      ? "正在恢复执行钱包"
+      : pending
+        ? "正在连接钱包"
+        : undefined;
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    setSlow(false);
+    if (!pending) return;
+    const timer = window.setTimeout(() => setSlow(true), 15_000);
+    return () => window.clearTimeout(timer);
+  }, [pending]);
+  useEffect(() => {
+    performance.mark(`wallet:${status ?? (connected ? "ready" : "guest")}`);
+  }, [status, connected]);
   return (
     <App
-      key={connected ? user!.id + wallet.address : "guest"}
+      key={authenticated && user ? user.id + (linked?.address.toLowerCase() ?? "") : "guest"}
       privyWallet={connected ? wallet.address : undefined}
       walletRequired
-      connectionPending={!ready || !walletsReady || (authenticated && Boolean(wallet) && !active)}
+      connectionPending={pending}
+      connectionStatus={status}
+      connectionRetryable={slow || Boolean(error)}
       connectionError={error}
       onConnect={() => {
-        if (!authenticated) login();
+        setError(null);
+        if (!ready || !walletsReady) window.location.reload();
+        else if (!authenticated) login();
+        else if (linked) window.location.reload();
+        else if (canonical?.length) setError("执行钱包绑定不唯一，请检查钱包账户");
         else
           void createWallet().catch((cause) =>
             setError(cause instanceof Error ? cause.message : String(cause)),

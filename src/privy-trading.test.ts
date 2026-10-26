@@ -16,7 +16,7 @@ it.each([421614, 4663])(
     expect(await sendSponsoredTransaction(swap, user, chainId, send)).toBe(hash);
     expect(send).toHaveBeenCalledWith(
       { to: router, data: "0x1234", value: 0n, chainId },
-      { sponsor: true, address: user },
+      { sponsor: true, address: user, uiOptions: { showWalletUIs: false } },
     );
     await expect(
       sendSponsoredTransaction({ ...swap, from: router }, user, chainId, send),
@@ -39,7 +39,10 @@ it("sends approval then requotes with the same minimum, sends user swap and reco
       result({ record: { executionId: "saved" }, transaction: swap, approvals: [] }),
     )
     .mockResolvedValueOnce(result({ executionId: "saved", status: "PENDING", txHashes: [hash] }));
-  const send = vi.fn(async () => hash);
+  const sdkSend = vi.fn<Parameters<typeof sendSponsoredTransaction>[3]>(async () => ({ hash }));
+  const send = vi.fn((tx: SponsoredTransaction) =>
+    sendSponsoredTransaction(tx, user, 4663, sdkSend),
+  );
   configurePrivyTransport({ getAccessToken: async () => "fresh-access-token", send });
   const t = await memeApi.executeMainAccountTrade({
     clientExecutionId: crypto.randomUUID(),
@@ -54,6 +57,10 @@ it("sends approval then requotes with the same minimum, sends user swap and reco
   });
   expect(t.txHashes).toEqual([hash]);
   expect(send).toHaveBeenCalledTimes(2);
+  expect(sdkSend.mock.calls.map((call) => call[1])).toEqual([
+    { sponsor: true, address: user, uiOptions: { showWalletUIs: false } },
+    { sponsor: true, address: user, uiOptions: { showWalletUIs: false } },
+  ]);
   expect(JSON.parse(fetch.mock.calls[2]![1].body).minAmountOut).toBe("4");
   expect(JSON.parse(fetch.mock.calls[3]![1].body).routeFingerprint).toBe("new-plan");
   expect(fetch.mock.calls.every((c) => !String(c[0]).endsWith("/account/transactions"))).toBe(true);
@@ -90,4 +97,55 @@ it("reports a known broadcast hash without automatically resending if recording 
     }),
   ).rejects.toThrow(hash);
   expect(send).toHaveBeenCalledTimes(1);
+});
+
+it("stops after a failed allowance receipt without preparing or sending the swap", async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ rc: 0, result: { record: null, transaction: null, approvals: [swap] } }),
+      ),
+    )
+    .mockResolvedValueOnce(new Response(JSON.stringify({ rc: 0, result: { status: "FAILED" } })));
+  vi.stubGlobal("fetch", fetch);
+  const send = vi.fn(async () => hash);
+  configurePrivyTransport({ getAccessToken: async () => "test", send });
+  await expect(
+    memeApi.executeMainAccountTrade({
+      clientExecutionId: "test",
+      side: "SELL",
+      tokenAddress: user,
+      settlementAsset: "USDG",
+      quoteId: "q",
+      routeFingerprint: "r",
+      amountIn: "5",
+      minAmountOut: "4",
+      slippageBps: 100,
+    }),
+  ).rejects.toThrow("授权已回滚");
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+
+it("bounds access-token restoration and does not start a late request after timeout", async () => {
+  vi.useFakeTimers();
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  let resolve!: (value: string) => void;
+  configurePrivyTransport({
+    getAccessToken: () =>
+      new Promise((r) => {
+        resolve = r;
+      }),
+    send: vi.fn(),
+  });
+  const response = memeApi.getAccount();
+  const assertion = expect(response).rejects.toMatchObject({ code: "MEME_REQUEST_TIMEOUT" });
+  await vi.advanceTimersByTimeAsync(15000);
+  await assertion;
+  resolve("test");
+  await Promise.resolve();
+  expect(fetch).not.toHaveBeenCalled();
+  vi.useRealTimers();
 });
