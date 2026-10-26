@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useState, type ComponentProps } from "react";
 import {
   PrivyProvider,
   usePrivy,
@@ -14,10 +14,12 @@ export default function PrivyTrading({
   appId,
   clientId,
   chainId,
+  onConnection,
 }: {
   appId: string;
   clientId: string | null;
   chainId: number;
+  onConnection?: (props: Partial<ComponentProps<typeof App>>) => void;
 }) {
   const chain = [robinhood, arbitrumSepolia].find((c) => c.id === chainId);
   if (!chain) return <main className="notice">不支持的交易网络：{chainId}</main>;
@@ -32,11 +34,17 @@ export default function PrivyTrading({
         embeddedWallets: { showWalletUIs: false, ethereum: { createOnLogin: "all-users" } },
       }}
     >
-      <TradingSession chainId={chainId} />
+      <TradingSession chainId={chainId} onConnection={onConnection} />
     </PrivyProvider>
   );
 }
-function TradingSession({ chainId }: { chainId: number }) {
+function TradingSession({
+  chainId,
+  onConnection,
+}: {
+  chainId: number;
+  onConnection?: (props: Partial<ComponentProps<typeof App>>) => void;
+}) {
   const { ready, authenticated, user, login, logout, getAccessToken } = usePrivy();
   const { wallets, ready: walletsReady } = useWallets();
   const { generateAuthorizationSignature } = useAuthorizationSignature();
@@ -102,27 +110,46 @@ function TradingSession({ chainId }: { chainId: number }) {
   useEffect(() => {
     performance.mark(`wallet:${status ?? (connected ? "ready" : "guest")}`);
   }, [status, connected]);
-  return (
-    <App
-      key={authenticated && user ? user.id + (linked?.address.toLowerCase() ?? "") : "guest"}
-      privyWallet={connected ? wallet.address : undefined}
-      walletRequired
-      connectionPending={pending}
-      connectionStatus={status}
-      connectionRetryable={slow || Boolean(error)}
-      connectionError={error}
-      onConnect={() => {
-        setError(null);
-        if (!ready || !walletsReady) window.location.reload();
-        else if (!authenticated) login();
-        else if (linked) window.location.reload();
-        else if (canonical?.length) setError("执行钱包绑定不唯一，请检查钱包账户");
-        else
-          void createWallet().catch((cause) =>
-            setError(cause instanceof Error ? cause.message : String(cause)),
-          );
-      }}
-      onLogout={authenticated ? () => void logout() : undefined}
-    />
-  );
+  const props: ComponentProps<typeof App> = {
+    accountIdentity:
+      authenticated && user ? user.id + (linked?.address.toLowerCase() ?? "") : "guest",
+    privyWallet: connected ? wallet.address : undefined,
+    walletRequired: true,
+    connectionPending: pending,
+    connectionStatus: status,
+    connectionRetryable: slow || Boolean(error),
+    connectionError: error,
+    onConnect: () => {
+      setError(null);
+      if (!ready || !walletsReady) window.location.reload();
+      else if (!authenticated) login();
+      else if (linked) window.location.reload();
+      else if (canonical?.length) setError("执行钱包绑定不唯一，请检查钱包账户");
+      else
+        void createWallet().catch((cause) =>
+          setError(cause instanceof Error ? cause.message : String(cause)),
+        );
+    },
+    onLogout: authenticated ? () => void logout() : undefined,
+  };
+  const publishConnection = useEffectEvent(() => onConnection?.(props));
+  useEffect(() => {
+    publishConnection();
+  }, [
+    onConnection,
+    connected,
+    pending,
+    status,
+    slow,
+    error,
+    authenticated,
+    user?.id,
+    linked?.address,
+    ready,
+    walletsReady,
+    login,
+    logout,
+    createWallet,
+  ]);
+  return onConnection ? null : <App {...props} />;
 }

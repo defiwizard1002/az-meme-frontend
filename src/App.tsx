@@ -421,6 +421,7 @@ function TokenMark({ token }: { token: Token }) {
 
 export default function App({
   privyWallet,
+  accountIdentity,
   onLogout,
   walletRequired = false,
   connectionPending = false,
@@ -430,6 +431,7 @@ export default function App({
   onConnect,
 }: {
   privyWallet?: string;
+  accountIdentity?: string;
   onLogout?: () => void;
   walletRequired?: boolean;
   connectionPending?: boolean;
@@ -536,7 +538,27 @@ export default function App({
   const [transferAsset, setTransferAsset] = useState<Asset>("ETH");
   const [transferAmount, setTransferAmount] = useState("0.1");
   const [transferState, setTransferState] = useState<string | null>(null);
-  const accountAvailable = sessionReady && account !== null && !accountError;
+  const identity = accountIdentity ?? privyWallet ?? "legacy";
+  const [privateOwner, setPrivateOwner] = useState(identity);
+  const ownerRef = useRef(identity);
+  ownerRef.current = identity;
+  if (privateOwner !== identity) {
+    setPrivateOwner(identity);
+    setAccount(null);
+    setAccountTransactions([]);
+    setSessionReady(false);
+    setAccountError(null);
+    setTransactionRefreshError(null);
+    setOrderState(null);
+    setOrderBusy(false);
+    setQuoteState(null);
+    setErrorState(null);
+    setHistoryOpen(false);
+    setTransferOpen(false);
+    setTransferState(null);
+  }
+  const accountAvailable =
+    sessionReady && account !== null && !accountError && identity === privateOwner;
   const candleCacheRef = useRef(new Map<string, CandleSnapshot>());
   const tradeCacheRef = useRef(new Map<string, TradeCacheEntry>());
   const tradesPausedRef = useRef(false);
@@ -712,6 +734,7 @@ export default function App({
       signal: controller.signal,
       loadOrder: memeApi.getOrder,
       onUpdate: (latest) => {
+        if (controller.signal.aborted) return;
         if (latest.status === "SETTLED") {
           setOrderState("交易成功");
         } else if (latest.status === "FAILED_FINAL" && latest.fundStatus === "RELEASED") {
@@ -735,10 +758,12 @@ export default function App({
   }, []);
 
   const refreshMainAccount = useCallback(async () => {
+    const owner = ownerRef.current;
     const [summary, transactions] = await Promise.all([
       memeApi.getAccount(),
       memeApi.getAccountTransactions(),
     ]);
+    if (ownerRef.current !== owner) return;
     setAccount(summary);
     setAccountTransactions(transactions.items);
   }, []);
@@ -752,6 +777,7 @@ export default function App({
         signal: controller.signal,
         loadTransaction: memeApi.getAccountTransaction,
         onUpdate: (latest) => {
+          if (controller.signal.aborted) return;
           setAccountTransactions((current) => upsertAccountTransaction(current, latest));
           if (latest.status === "CONFIRMED") {
             setOrderState("交易成功");
@@ -759,7 +785,7 @@ export default function App({
               if (value === executionId) mainAccountIdempotencyRef.current.delete(key);
             }
             void refreshMainAccount().catch((cause: unknown) => {
-              setAccountError(friendlyError(cause, "余额刷新失败"));
+              if (!controller.signal.aborted) setAccountError(friendlyError(cause, "余额刷新失败"));
             });
           } else if (latest.status === "FAILED" || latest.status === "PARTIAL") {
             if (latest.status === "FAILED" && latest.txHashes.length === 0) {
@@ -1027,6 +1053,17 @@ export default function App({
   }, [search, setError]);
 
   useEffect(() => {
+    setSessionToken(null);
+    for (const { controller } of orderPollsRef.current.values()) controller.abort();
+    orderPollsRef.current.clear();
+    for (const { controller } of transactionPollsRef.current.values()) controller.abort();
+    transactionPollsRef.current.clear();
+    orderIdempotencyRef.current.clear();
+    mainAccountIdempotencyRef.current.clear();
+    orderBusyRef.current = false;
+  }, [identity]);
+
+  useEffect(() => {
     if (!accountMode || guest) return;
     let active = true;
     const controller = new AbortController();
@@ -1104,7 +1141,15 @@ export default function App({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [accountMode, accountRetry, trackMainAccountTransaction, trackOrder, setError, guest]);
+  }, [
+    accountMode,
+    accountRetry,
+    trackMainAccountTransaction,
+    trackOrder,
+    setError,
+    guest,
+    identity,
+  ]);
 
   useEffect(() => {
     if (!sessionReady || accountMode !== "MAIN_ACCOUNT_POC") return;
@@ -1133,7 +1178,7 @@ export default function App({
       window.clearInterval(timer);
       controller.abort();
     };
-  }, [accountMode, sessionReady, accountRetry]);
+  }, [accountMode, sessionReady, accountRetry, identity]);
 
   useEffect(() => {
     if (!selectedTokenAddress || !selectedMarketKey) return;
@@ -2046,6 +2091,7 @@ export default function App({
   );
 
   const submitOrder = useCallback(async () => {
+    const owner = ownerRef.current;
     if (!accountAvailable || orderBusyRef.current || slippageBps === null || !slippageSupported)
       return;
     if (!quote || quote.expiresAt <= Date.now()) {
@@ -2064,6 +2110,7 @@ export default function App({
         const input = preparationInput({ ...quoteRequest, slippageBps }, quote);
         const response = await memeApi.createQuote(input);
         if (
+          ownerRef.current !== owner ||
           quoteRequestRef.current !== quoteRequest ||
           displayedSlippageRef.current !== slippageBps ||
           displayedMinimumRef.current !== input.minAmountOut
@@ -2100,6 +2147,7 @@ export default function App({
           amountIn: input.amountIn,
           slippageBps,
         });
+        if (ownerRef.current !== owner) return;
         setAccountTransactions((current) => upsertAccountTransaction(current, transaction));
         setOrderState("处理中");
         await trackMainAccountTransaction(transaction.executionId);
@@ -2118,9 +2166,11 @@ export default function App({
         maxAmountIn: quote.amountIn,
         minAmountOut: quote.minAmountOut,
       });
+      if (ownerRef.current !== owner) return;
       setOrderState("处理中");
       await trackOrder(order.orderId);
     } catch (cause) {
+      if (ownerRef.current !== owner) return;
       setOrderState(null);
       if (quoteRequestRef.current !== quoteRequest) return;
       if (
@@ -2133,8 +2183,10 @@ export default function App({
       }
       setError(friendlyError(cause, "下单请求未完成"));
     } finally {
-      orderBusyRef.current = false;
-      setOrderBusy(false);
+      if (ownerRef.current === owner) {
+        orderBusyRef.current = false;
+        setOrderBusy(false);
+      }
     }
   }, [
     accountAvailable,
@@ -2152,6 +2204,7 @@ export default function App({
   ]);
 
   const submitTransfer = useCallback(async () => {
+    const owner = ownerRef.current;
     if (!accountAvailable) return;
     if (!/^\d+(?:\.\d+)?$/.test(transferAmount) || Number(transferAmount) <= 0) {
       setError("请输入有效的划转金额");
@@ -2172,9 +2225,11 @@ export default function App({
         amount: transferAmount,
       });
       const summary = await memeApi.getAccount();
+      if (ownerRef.current !== owner) return;
       setAccount(summary);
       setTransferState(`划转成功 / ${transferId}`);
     } catch (cause) {
+      if (ownerRef.current !== owner) return;
       setTransferState(null);
       setError(friendlyError(cause, "划转失败"));
     }
@@ -2206,6 +2261,7 @@ export default function App({
         </label>
         {!guest && (
           <WalletAssets
+            key={identity}
             balances={account?.quoteBalances}
             error={accountError ? "账户不可用" : null}
             {...(accountMode === "MAIN_ACCOUNT_POC"

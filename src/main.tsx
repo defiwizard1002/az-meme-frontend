@@ -1,43 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import App from "./App";
-import { lazy, Suspense, useEffect, useState } from "react";
-import { memeApi } from "./api";
-const PrivyTrading = lazy(() => import("./PrivyTrading"));
-function Entry() {
-  const [config, setConfig] = useState<Awaited<ReturnType<typeof memeApi.getConfig>> | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    void memeApi
-      .getConfig()
-      .then(setConfig)
-      .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
-  }, []);
-  if (error)
-    return (
-      <main className="notice">
-        {error}
-        <button onClick={() => location.reload()}>重试</button>
-      </main>
-    );
-  if (!config) return <App walletRequired connectionPending connectionStatus="正在读取连接配置" />;
-  return config.privy ? (
-    <Suspense
-      fallback={
-        <App
-          walletRequired
-          connectionPending
-          connectionStatus="正在加载钱包组件"
-          connectionRetryable
-        />
-      }
-    >
-      <PrivyTrading {...config.privy} chainId={config.chainId} />
-    </Suspense>
-  ) : (
-    <App />
-  );
-}
+import Entry from "./Entry";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
