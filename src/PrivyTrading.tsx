@@ -132,6 +132,7 @@ function TradingSession({
     },
     onLogout: authenticated ? () => void logout() : undefined,
   };
+  // SDK callback identities can change on every render; only publish connection changes.
   const publishConnection = useEffectEvent(() => onConnection?.(props));
   useEffect(() => {
     publishConnection();
@@ -147,9 +148,6 @@ function TradingSession({
     linked?.address,
     ready,
     walletsReady,
-    login,
-    logout,
-    createWallet,
   ]);
   return onConnection ? null : <App {...props} />;
 }

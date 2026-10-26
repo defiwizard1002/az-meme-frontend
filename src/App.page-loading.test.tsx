@@ -263,10 +263,10 @@ const sdk = vi.hoisted(() => ({
 }));
 vi.mock("@privy-io/react-auth", () => ({
   PrivyProvider: ({ children }: { children: ReactNode }) => children,
-  usePrivy: () => sdk,
+  usePrivy: () => ({ ...sdk, login: () => sdk.login(), logout: () => sdk.logout() }),
   useWallets: () => ({ ready: sdk.walletsReady, wallets: sdk.walletsReady ? [sdk.wallet] : [] }),
   useAuthorizationSignature: () => sdk,
-  useCreateWallet: () => sdk,
+  useCreateWallet: () => ({ createWallet: () => sdk.createWallet() }),
 }));
 afterEach(() => {
   cleanup();
