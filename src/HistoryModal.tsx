@@ -92,6 +92,7 @@ export function HistoryModal({
                       ? ` → ${displayAmount(tx.amountOut)} ${tx.side === "BUY" ? tx.tokenSymbol : tx.settlementAsset}`
                       : ""}
                   </small>
+                  {tx.errorMessage && <small>{tx.errorMessage}</small>}
                   <time dateTime={new Date(tx.createdAt).toISOString()}>
                     {new Date(tx.createdAt).toLocaleString()}
                   </time>

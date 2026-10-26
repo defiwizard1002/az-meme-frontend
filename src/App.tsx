@@ -2847,7 +2847,14 @@ export default function App({
               <button
                 type="submit"
                 className="primary"
-                aria-busy={orderBusy || !quote || quote.expiresAt <= Date.now()}
+                aria-busy={
+                  orderBusy ||
+                  Boolean(
+                    quoteRequest &&
+                    !(side === "SELL" && Number(currentBalance) <= 0) &&
+                    (!quote || quote.expiresAt <= Date.now()),
+                  )
+                }
                 disabled={
                   !accountAvailable ||
                   !selected ||
@@ -2866,11 +2873,15 @@ export default function App({
                       : "等待登录"
                     : orderBusy
                       ? "处理中"
-                      : !quote || quote.expiresAt <= Date.now()
-                        ? "更新报价中"
-                        : side === "BUY"
-                          ? "买入"
-                          : "卖出"}
+                      : side === "SELL" && Number(currentBalance) <= 0
+                        ? "暂无可卖持仓"
+                        : !quoteRequest
+                          ? "请输入有效金额"
+                          : !quote || quote.expiresAt <= Date.now()
+                            ? "更新报价中"
+                            : side === "BUY"
+                              ? "买入"
+                              : "卖出"}
               </button>
             )}
             {connectionError && <p role="alert">{connectionError}</p>}

@@ -518,3 +518,17 @@ it("clears preparing status when draft changes before execution", async () => {
   expect(execute).not.toHaveBeenCalled();
   expect(screen.queryByText("处理中")).toBeNull();
 });
+
+it("explains invalid input and empty SELL without claiming a quote is loading", async () => {
+  setup();
+  render(<App />);
+  await screen.findByTitle("1.1");
+  fireEvent.change(screen.getByRole("textbox", { name: "买入金额" }), { target: { value: "0" } });
+  expect(screen.getByRole("button", { name: "请输入有效金额" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "请输入有效金额" })).toHaveAttribute(
+    "aria-busy",
+    "false",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "卖出" }));
+  expect(screen.getByRole("button", { name: "暂无可卖持仓" })).toBeDisabled();
+});
