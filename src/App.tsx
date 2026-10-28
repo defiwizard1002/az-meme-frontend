@@ -420,7 +420,7 @@ function TokenMark({ token }: { token: Token }) {
 }
 
 export default function App({
-  privyWallet,
+  walletAddress,
   accountIdentity,
   onLogout,
   walletRequired = false,
@@ -430,7 +430,7 @@ export default function App({
   connectionRetryable = false,
   onConnect,
 }: {
-  privyWallet?: string;
+  walletAddress?: string;
   accountIdentity?: string;
   onLogout?: () => void;
   walletRequired?: boolean;
@@ -440,7 +440,7 @@ export default function App({
   connectionError?: string | null;
   onConnect?: () => void;
 } = {}) {
-  const guest = walletRequired && !privyWallet;
+  const guest = walletRequired && !walletAddress;
   const [tokens, setTokens] = useState<Token[]>([]);
   const [selected, setSelected] = useState<Token | null>(null);
   const [selectionIdentity, setSelectionIdentity] = useState<Pick<
@@ -547,7 +547,7 @@ export default function App({
   const [transferAsset, setTransferAsset] = useState<Asset>("ETH");
   const [transferAmount, setTransferAmount] = useState("0.1");
   const [transferState, setTransferState] = useState<string | null>(null);
-  const identity = accountIdentity ?? privyWallet ?? "legacy";
+  const identity = accountIdentity ?? walletAddress ?? "legacy";
   const [privateOwner, setPrivateOwner] = useState(identity);
   const ownerRef = useRef(identity);
   ownerRef.current = identity;
@@ -1503,10 +1503,10 @@ export default function App({
         return;
       connecting = true;
       try {
-        // Privy transport is ready before balance bootstrap; its ticket requires authentication.
+        // Wallet session is ready before balance bootstrap; its ticket requires authentication.
         const { ticket } = await memeApi.getWsTicket(
           recoveryController.signal,
-          !privyWallet && !accountAvailable,
+          !walletAddress && !accountAvailable,
         );
         if (disposed || isHidden()) return;
         const nextSocket = new WebSocket(`${wsBaseUrl}?ticket=${encodeURIComponent(ticket)}`);
@@ -1790,7 +1790,7 @@ export default function App({
   }, [
     accountAvailable,
     accountMode,
-    privyWallet,
+    walletAddress,
     selectedTokenAddress,
     selectedMarketKey,
     marketStreamAvailable,

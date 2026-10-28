@@ -238,84 +238,18 @@ function setup(mode: "AZ_ACCOUNT" | "MAIN_ACCOUNT_POC", withSocket = false) {
   vi.spyOn(memeApi, "getAccountTransaction").mockResolvedValue(transaction);
 }
 
-const sdk = vi.hoisted(() => ({
-  ready: false,
-  authenticated: false,
-  walletsReady: false,
-  user: {
-    id: "user-one",
-    linkedAccounts: [
-      {
-        type: "wallet",
-        walletClientType: "privy",
-        chainType: "ethereum",
-        address: "0x1111111111111111111111111111111111111111",
-        id: "wallet-one",
-      },
-    ],
-  },
-  wallet: { walletClientType: "privy", address: "0x1111111111111111111111111111111111111111" },
-  login: vi.fn(),
-  logout: vi.fn(),
-  getAccessToken: vi.fn(),
-  generateAuthorizationSignature: vi.fn(),
-  createWallet: vi.fn(),
-}));
-vi.mock("@privy-io/react-auth", () => ({
-  PrivyProvider: ({ children }: { children: ReactNode }) => children,
-  usePrivy: () => ({ ...sdk, login: () => sdk.login(), logout: () => sdk.logout() }),
-  useWallets: () => ({ ready: sdk.walletsReady, wallets: sdk.walletsReady ? [sdk.wallet] : [] }),
-  useAuthorizationSignature: () => sdk,
-  useCreateWallet: () => ({ createWallet: () => sdk.createWallet() }),
-}));
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  sdk.ready = false;
-  sdk.authenticated = false;
-  sdk.walletsReady = false;
 });
 
 describe("page loading continuity", () => {
-  it("preserves selected market and DOM through config, SDK restore and ordinary rerender", async () => {
-    setup("MAIN_ACCOUNT_POC");
-    const config = await memeApi.getConfig();
-    const pending = deferred<typeof config>();
-    vi.mocked(memeApi.getConfig)
-      .mockClear()
-      .mockResolvedValueOnce(config)
-      .mockReturnValueOnce(pending.promise)
-      .mockResolvedValue(config);
-    const view = render(<Entry />);
-    await screen.findByLabelText("AAA K 线图");
-    fireEvent.click(screen.getByRole("button", { name: "查看 BBB" }));
-    await screen.findByLabelText("BBB K 线图");
-    const workspace = document.querySelector(".workspace");
-    const chartNode = screen.getByLabelText("BBB K 线图");
-    await act(async () => pending.resolve({ ...config, privy: { appId: "test", clientId: null } }));
-    await waitFor(() =>
-      expect(document.querySelector(".mock-badge")).toHaveTextContent("正在恢复登录会话"),
-    );
-    expect(document.querySelector(".workspace")).toBe(workspace);
-    sdk.ready = true;
-    sdk.authenticated = true;
-    sdk.walletsReady = true;
-    view.rerender(<Entry />);
-    await waitFor(() =>
-      expect(document.querySelector(".mock-badge")).toHaveAttribute("data-state", "connected"),
-    );
-    view.rerender(<Entry />);
-    expect(document.querySelector(".workspace")).toBe(workspace);
-    expect(screen.getByLabelText("BBB K 线图")).toBe(chartNode);
-    expect(memeApi.getMarkets).toHaveBeenCalledTimes(1);
-    expect(memeApi.getConfig).toHaveBeenCalledTimes(2);
-  });
   it("clears private data on identity change without remounting markets and ignores old account responses", async () => {
     setup("MAIN_ACCOUNT_POC");
     const props: ComponentProps<typeof App> = {
       walletRequired: true,
-      privyWallet: tokenA.tokenAddress,
+      walletAddress: tokenA.tokenAddress,
       accountIdentity: "one",
     };
     vi.mocked(memeApi.getAccount).mockResolvedValue({
@@ -337,7 +271,7 @@ describe("page loading continuity", () => {
     const workspace = document.querySelector(".workspace");
     const late = deferred<Awaited<ReturnType<typeof memeApi.getAccount>>>();
     vi.mocked(memeApi.getAccount).mockReturnValue(late.promise);
-    view.rerender(<App {...props} accountIdentity="two" privyWallet={tokenB.tokenAddress} />);
+    view.rerender(<App {...props} accountIdentity="two" walletAddress={tokenB.tokenAddress} />);
     expect(document.querySelector(".positions")).not.toHaveTextContent("PRIVATE");
     view.rerender(<App walletRequired accountIdentity="guest" />);
     await act(async () =>

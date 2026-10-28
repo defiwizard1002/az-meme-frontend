@@ -1,31 +1,23 @@
-import { lazy, Suspense, useEffect, useState, type ComponentProps } from "react";
-import App from "./App";
+import { useEffect, useState } from "react";
+import WalletTrading from "./WalletTrading";
 import { memeApi } from "./api";
-const PrivyTrading = lazy(() => import("./PrivyTrading"));
+
 export default function Entry() {
   const [config, setConfig] = useState<Awaited<ReturnType<typeof memeApi.getConfig>> | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string>();
   useEffect(() => {
     void memeApi
       .getConfig()
-      .then(setConfig)
+      .then((value) => {
+        setConfig(value);
+      })
       .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
   }, []);
-  const [connection, setConnection] = useState<Partial<ComponentProps<typeof App>>>({});
+  if (error)
+    return <WalletTrading />;
   return (
-    <>
-      <App
-        walletRequired={!config || Boolean(config.privy)}
-        connectionPending={!config || Boolean(config.privy)}
-        connectionStatus="正在加载钱包组件"
-        {...connection}
-        {...(error ? { connectionError: error, connectionRetryable: true } : {})}
-      />
-      {config?.privy && (
-        <Suspense fallback={null}>
-          <PrivyTrading {...config.privy} chainId={config.chainId} onConnection={setConnection} />
-        </Suspense>
-      )}
-    </>
+    <WalletTrading
+      serverSignedTransactions={Boolean(config?.serverSignedTransactions)}
+    />
   );
 }

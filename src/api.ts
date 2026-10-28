@@ -28,28 +28,14 @@ export interface SponsoredTransaction {
   data: `0x${string}`;
   value: string;
 }
-export interface PrivyBatchRequest {
-  version: 1;
-  method: "POST";
-  url: string;
-  headers: { "privy-app-id": string; "privy-idempotency-key": string };
-  body: {
-    method: "wallet_sendCalls";
-    chain_type: "ethereum";
-    caip2: string;
-    sponsor: true;
-    params: { calls: Array<{ to: string; data: `0x${string}`; value: string }> };
-  };
+export interface WalletProvider {
+  request(args: { method: string; params?: unknown[] }): Promise<unknown>;
+  on?: (event: string, listener: (...args: unknown[]) => void) => void;
+  removeListener?: (event: string, listener: (...args: unknown[]) => void) => void;
 }
-interface PrivyTransport {
-  accountId: string;
-  getAccessToken: () => Promise<string | null>;
-  sign: (request: PrivyBatchRequest) => Promise<string>;
-}
-let privyTransport: PrivyTransport | null = null;
-export function configurePrivyTransport(value: PrivyTransport | null) {
-  privyTransport = value;
-  sessionToken = null;
+let serverSignedTransactions = false;
+export function configureServerSignedTransactions(enabled: boolean): void {
+  serverSignedTransactions = enabled;
 }
 
 const requestTimeoutMs = 15_000;
@@ -67,6 +53,10 @@ export class ApiError extends Error {
 
 export function setSessionToken(token: string | null): void {
   sessionToken = token;
+}
+
+export function clearSessionToken(): void {
+  sessionToken = null;
 }
 
 async function readEnvelope<T>(response: Response, prefix: "MEME" | "AZ"): Promise<T> {
@@ -161,15 +151,7 @@ async function send<T>(
       aborted,
       (async () => {
         if (publicMarket) headers.delete("authorization");
-        else if (privyTransport) {
-          if (path === "/sapi/v1/meme/account/summary")
-            performance.mark("wallet:access-token-start");
-          const token = await privyTransport.getAccessToken();
-          if (path === "/sapi/v1/meme/account/summary")
-            performance.mark("wallet:access-token-ready");
-          if (!token) throw new ApiError("MEME_UNAUTHORIZED", "请先登录 Privy", 401);
-          headers.set("authorization", `Bearer ${token}`);
-        } else if (sessionToken && !headers.has("authorization"))
+        else if (sessionToken && !headers.has("authorization"))
           headers.set("authorization", `Bearer ${sessionToken}`);
         controller.signal.throwIfAborted();
         response = await fetch(`${base}${path}`, {
@@ -204,6 +186,20 @@ function requestPublicMarket<T>(path: string, init?: RequestInit): Promise<T> {
 }
 function requestAz<T>(path: string, init?: RequestInit): Promise<T> {
   return send(azApiBaseUrl, "AZ", path, init);
+}
+
+export async function authenticateWallet(address: string, provider: WalletProvider): Promise<void> {
+  const nonce = await request<{ message: string }>("/sapi/v1/meme/auth/wallet/nonce", {
+    method: "POST",
+    body: JSON.stringify({ address }),
+  });
+  const signature = await provider.request({ method: "personal_sign", params: [nonce.message, address] });
+  if (typeof signature !== "string") throw new ApiError("MEME_WALLET_SIGNATURE_INVALID", "钱包签名无效", 400);
+  const verified = await request<{ token: string }>("/sapi/v1/meme/auth/wallet/verify", {
+    method: "POST",
+    body: JSON.stringify({ address, signature }),
+  });
+  setSessionToken(verified.token);
 }
 
 export const azAuth = {
@@ -259,7 +255,7 @@ export const azFundApi = {
 export const memeApi = {
   getConfig: () =>
     requestPublicMarket<{
-      privy?: { appId: string; clientId: string | null } | null;
+      serverSignedTransactions?: boolean;
       chainId: number;
       chainName: string;
       explorerBaseUrl: string;
@@ -423,13 +419,12 @@ export const wsBaseUrl =
 
 type AccountTradeInput = Parameters<typeof memeApi.executeMainAccountTrade>[0];
 async function executeAccountTrade(input: AccountTradeInput): Promise<AccountTransaction> {
-  if (!privyTransport)
+  if (!serverSignedTransactions)
     return request<AccountTransaction>("/sapi/v1/meme/account/transactions", {
       method: "POST",
       body: JSON.stringify(input),
     });
-  const transport = privyTransport;
-  const pendingKey = `az:privy-pending:${transport.accountId.toLowerCase()}`;
+  const pendingKey = `az:server-signed-pending:${input.tokenAddress.toLowerCase()}`;
   const pendingId = localStorage.getItem(pendingKey);
   if (pendingId) {
     const existing = await request<AccountTransaction>(
@@ -440,17 +435,16 @@ async function executeAccountTrade(input: AccountTradeInput): Promise<AccountTra
   }
   const prepared = await request<{
     record: AccountTransaction;
-    authorizationRequest: PrivyBatchRequest | null;
+    authorizationRequest: unknown;
   }>("/sapi/v1/meme/privy/transactions", { method: "POST", body: JSON.stringify(input) });
   if (!prepared.authorizationRequest) return prepared.record;
-  const signature = await transport.sign(prepared.authorizationRequest);
   localStorage.setItem(pendingKey, prepared.record.executionId);
   try {
     const submitted = await request<AccountTransaction>(
       `/sapi/v1/meme/privy/transactions/${prepared.record.executionId}/submit`,
       {
         method: "POST",
-        body: JSON.stringify({ signature }),
+        body: JSON.stringify({}),
       },
     );
     if (submitted.status !== "PENDING") localStorage.removeItem(pendingKey);

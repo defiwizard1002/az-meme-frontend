@@ -401,14 +401,14 @@ describe("urgent live trade and account origin regressions through App", () => {
     expect(azAuth.loginMock).not.toHaveBeenCalled();
   });
 
-  it("authenticates Privy market before balances and clears recovered idle transport errors", async () => {
+  it("authenticates wallet market before balances and clears recovered idle transport errors", async () => {
     setup("MAIN_ACCOUNT_POC", true);
     const pending = deferred<typeof summary>();
     vi.mocked(memeApi.getAccount).mockReturnValue(pending.promise);
     vi.mocked(memeApi.getWsTicket).mockRejectedValueOnce(new Error("temporary unavailable"));
     vi.useFakeTimers();
     await act(async () => {
-      render(<App privyWallet={tokenA.tokenAddress} />);
+      render(<App walletAddress={tokenA.tokenAddress} />);
     });
     expect(memeApi.getWsTicket).toHaveBeenCalledWith(expect.any(AbortSignal), false);
     expect(screen.getByRole("alert")).toHaveTextContent("实时行情暂时不可用");
@@ -464,7 +464,7 @@ describe("urgent live trade and account origin regressions through App", () => {
       },
     });
     const logout = vi.fn();
-    const view = render(<App key="one" privyWallet={tokenA.tokenAddress} onLogout={logout} />);
+    const view = render(<App key="one" walletAddress={tokenA.tokenAddress} onLogout={logout} />);
     await waitFor(() =>
       expect(document.querySelector(".mock-badge")).toHaveAttribute("data-state", "connected"),
     );
@@ -485,7 +485,7 @@ describe("urgent live trade and account origin regressions through App", () => {
     expect(logout).toHaveBeenCalledOnce();
     vi.mocked(memeApi.getAccount).mockReturnValue(new Promise(() => {}));
     await act(async () => {
-      view.rerender(<App key="two" privyWallet={tokenB.tokenAddress} />);
+      view.rerender(<App key="two" walletAddress={tokenB.tokenAddress} />);
     });
     fireEvent.click(screen.getByRole("button", { name: "钱包资产" }));
     expect(screen.getByRole("dialog", { name: "钱包资产" })).toHaveTextContent("余额加载中");
