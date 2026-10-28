@@ -21,7 +21,11 @@ interface Envelope<T> {
 
 const apiBaseUrl = (import.meta.env.VITE_MEME_API_BASE_URL as string | undefined) ?? "";
 const azApiBaseUrl = (import.meta.env.VITE_AZ_API_BASE_URL as string | undefined) ?? "";
-let sessionToken: string | null = null;
+const sessionStorageKey = "az:meme:wallet-session";
+let sessionToken: string | null =
+  typeof window === "undefined" || !window.localStorage
+    ? null
+    : window.localStorage.getItem(sessionStorageKey);
 export interface SponsoredTransaction {
   from: string;
   to: string;
@@ -53,10 +57,14 @@ export class ApiError extends Error {
 
 export function setSessionToken(token: string | null): void {
   sessionToken = token;
+  if (typeof window !== "undefined" && window.localStorage) {
+    if (token) window.localStorage.setItem(sessionStorageKey, token);
+    else window.localStorage.removeItem(sessionStorageKey);
+  }
 }
 
 export function clearSessionToken(): void {
-  sessionToken = null;
+  setSessionToken(null);
 }
 
 async function readEnvelope<T>(response: Response, prefix: "MEME" | "AZ"): Promise<T> {
