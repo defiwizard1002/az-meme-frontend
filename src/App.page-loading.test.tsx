@@ -128,8 +128,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-import Entry from "./Entry";
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps } from "react";
 class ControlledSocket {
   static readonly OPEN = 1;
   static instances: ControlledSocket[] = [];

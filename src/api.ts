@@ -193,8 +193,12 @@ export async function authenticateWallet(address: string, provider: WalletProvid
     method: "POST",
     body: JSON.stringify({ address }),
   });
-  const signature = await provider.request({ method: "personal_sign", params: [nonce.message, address] });
-  if (typeof signature !== "string") throw new ApiError("MEME_WALLET_SIGNATURE_INVALID", "钱包签名无效", 400);
+  const signature = await provider.request({
+    method: "personal_sign",
+    params: [nonce.message, address],
+  });
+  if (typeof signature !== "string")
+    throw new ApiError("MEME_WALLET_SIGNATURE_INVALID", "钱包签名无效", 400);
   const verified = await request<{ token: string }>("/sapi/v1/meme/auth/wallet/verify", {
     method: "POST",
     body: JSON.stringify({ address, signature }),

@@ -13,11 +13,6 @@ export default function Entry() {
       })
       .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
   }, []);
-  if (error)
-    return <WalletTrading />;
-  return (
-    <WalletTrading
-      serverSignedTransactions={Boolean(config?.serverSignedTransactions)}
-    />
-  );
+  if (error) return <WalletTrading />;
+  return <WalletTrading serverSignedTransactions={Boolean(config?.serverSignedTransactions)} />;
 }

@@ -1,6 +1,11 @@
-import { useEffect, useState, type ComponentProps } from "react";
+import { useCallback, useEffect, useMemo, useState, type ComponentProps } from "react";
 import App from "./App";
-import { authenticateWallet, clearSessionToken, configureServerSignedTransactions, type WalletProvider } from "./api";
+import {
+  authenticateWallet,
+  clearSessionToken,
+  configureServerSignedTransactions,
+  type WalletProvider,
+} from "./api";
 
 declare global {
   interface Window {
@@ -20,7 +25,7 @@ export default function WalletTrading({
   const [pending, setPending] = useState(true);
   const [error, setError] = useState<string>();
 
-  const connect = async () => {
+  const connect = useCallback(async () => {
     if (!provider) {
       setPending(false);
       setError("未检测到浏览器钱包，请先安装并解锁钱包扩展");
@@ -39,7 +44,7 @@ export default function WalletTrading({
     } finally {
       setPending(false);
     }
-  };
+  }, [provider]);
 
   useEffect(() => {
     configureServerSignedTransactions(serverSignedTransactions);
@@ -49,7 +54,8 @@ export default function WalletTrading({
       return;
     }
     const onAccountsChanged = (accounts: unknown) => {
-      const next = Array.isArray(accounts) && typeof accounts[0] === "string" ? accounts[0] : undefined;
+      const next =
+        Array.isArray(accounts) && typeof accounts[0] === "string" ? accounts[0] : undefined;
       if (!next) {
         clearSessionToken();
         setAddress(undefined);
@@ -75,7 +81,8 @@ export default function WalletTrading({
     void provider
       .request({ method: "eth_accounts" })
       .then((accounts) => {
-        const next = Array.isArray(accounts) && typeof accounts[0] === "string" ? accounts[0] : undefined;
+        const next =
+          Array.isArray(accounts) && typeof accounts[0] === "string" ? accounts[0] : undefined;
         if (next) return connectFor(next);
         setPending(false);
       })
@@ -86,20 +93,23 @@ export default function WalletTrading({
     return () => provider.removeListener?.("accountsChanged", onAccountsChanged);
   }, [provider, serverSignedTransactions]);
 
-  const props: ComponentProps<typeof App> = {
-    walletRequired: true,
-    walletAddress: address,
-    accountIdentity: address,
-    connectionPending: pending,
-    connectionStatus: pending ? "正在连接浏览器钱包" : undefined,
-    connectionRetryable: Boolean(error),
-    connectionError: error,
-    onConnect: () => void connect(),
-    onLogout: () => {
-      clearSessionToken();
-      setAddress(undefined);
-    },
-  };
-  useEffect(() => onConnection?.(props), [onConnection, address, pending, error]);
+  const props = useMemo<ComponentProps<typeof App>>(
+    () => ({
+      walletRequired: true,
+      walletAddress: address,
+      accountIdentity: address,
+      connectionPending: pending,
+      connectionStatus: pending ? "正在连接浏览器钱包" : undefined,
+      connectionRetryable: Boolean(error),
+      connectionError: error,
+      onConnect: () => void connect(),
+      onLogout: () => {
+        clearSessionToken();
+        setAddress(undefined);
+      },
+    }),
+    [address, pending, error, connect],
+  );
+  useEffect(() => onConnection?.(props), [onConnection, props]);
   return onConnection ? null : <App {...props} />;
 }
