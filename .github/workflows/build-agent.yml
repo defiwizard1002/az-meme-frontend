@@ -1,0 +1,23 @@
+name: Build Agent
+"on":
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: corepack enable && corepack pnpm install --frozen-lockfile
+      - run: cat BUILD.md
+      - run: corepack pnpm build
+      - run: corepack pnpm test
+      - run: docker build -t local/az-meme-frontend:${{ github.sha }} .
