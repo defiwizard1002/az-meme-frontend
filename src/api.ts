@@ -19,8 +19,22 @@ interface Envelope<T> {
   result: T;
 }
 
-const apiBaseUrl = (import.meta.env.VITE_MEME_API_BASE_URL as string | undefined) ?? "";
-const azApiBaseUrl = (import.meta.env.VITE_AZ_API_BASE_URL as string | undefined) ?? "";
+export function resolveApiBaseUrl(configuredUrl: string | undefined): string {
+  return configuredUrl ?? "";
+}
+
+export function resolveWsBaseUrl(
+  configuredUrl: string | undefined,
+  location: Pick<Location, "protocol" | "host"> = window.location,
+): string {
+  return (
+    configuredUrl ||
+    `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/sapi/v1/meme/stream`
+  );
+}
+
+const apiBaseUrl = resolveApiBaseUrl(import.meta.env.VITE_MEME_API_BASE_URL as string | undefined);
+const azApiBaseUrl = resolveApiBaseUrl(import.meta.env.VITE_AZ_API_BASE_URL as string | undefined);
 const sessionStorageKey = "az:meme:wallet-session";
 let sessionToken: string | null =
   typeof window === "undefined" || !window.localStorage
@@ -425,9 +439,10 @@ export function approvalDetails(cause: unknown): ApprovalRequired | null {
     : null;
 }
 
-export const wsBaseUrl =
-  (import.meta.env.VITE_MEME_WS_URL as string | undefined) ||
-  `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/sapi/v1/meme/stream`;
+export const wsBaseUrl = resolveWsBaseUrl(
+  import.meta.env.VITE_MEME_WS_URL as string | undefined,
+  window.location,
+);
 
 type AccountTradeInput = Parameters<typeof memeApi.executeMainAccountTrade>[0];
 async function executeAccountTrade(input: AccountTradeInput): Promise<AccountTransaction> {

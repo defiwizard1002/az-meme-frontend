@@ -1,11 +1,54 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, azAuth, memeApi, setSessionToken } from "./api";
+import {
+  ApiError,
+  azAuth,
+  memeApi,
+  resolveApiBaseUrl,
+  resolveWsBaseUrl,
+  setSessionToken,
+} from "./api";
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   setSessionToken(null);
 });
+
+describe("runtime endpoint fallback", () => {
+  it("keeps REST requests relative for empty API config", () => {
+    for (const configuredUrl of [undefined, ""]) {
+      expect(`${resolveApiBaseUrl(configuredUrl)}/sapi/v1/meme/config`).toBe(
+        "/sapi/v1/meme/config",
+      );
+    }
+    expect(resolveApiBaseUrl("http://127.0.0.1:3000")).toBe("http://127.0.0.1:3000");
+  });
+
+  it.each([
+    [undefined, "http:", "ws://dopemac-mini.tailc44fad.ts.net:10000/sapi/v1/meme/stream"],
+    ["", "https:", "wss://dopemac-mini.tailc44fad.ts.net:10000/sapi/v1/meme/stream"],
+  ])(
+    "derives a same-origin WebSocket URL for empty config from %s",
+    (configuredUrl, protocol, expected) => {
+      expect(
+        resolveWsBaseUrl(configuredUrl, {
+          protocol,
+          host: "dopemac-mini.tailc44fad.ts.net:10000",
+        }),
+      ).toBe(expected);
+    },
+  );
+
+  it("keeps an explicitly configured WebSocket URL", () => {
+    expect(
+      resolveWsBaseUrl("ws://127.0.0.1:3000/sapi/v1/meme/stream", {
+        protocol: "https:",
+        host: "production.example",
+      }),
+    ).toBe("ws://127.0.0.1:3000/sapi/v1/meme/stream");
+  });
+});
+
 describe("HTTP envelopes", () => {
   it("passes a pinned candle series through pagination without changing its boundary", async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ rc: 0, result: {} })));
