@@ -25,11 +25,11 @@ export default function WalletTrading({
   const [pending, setPending] = useState(true);
   const [error, setError] = useState<string>();
 
-  const connect = useCallback(async () => {
+  const connect = useCallback(async (): Promise<boolean> => {
     if (!provider) {
       setPending(false);
       setError("未检测到浏览器钱包，请先安装并解锁钱包扩展");
-      return;
+      return false;
     }
     setPending(true);
     setError(undefined);
@@ -39,8 +39,10 @@ export default function WalletTrading({
       if (!next) throw new Error("钱包没有返回账户地址");
       await authenticateWallet(next, provider);
       setAddress(next);
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+      return false;
     } finally {
       setPending(false);
     }
@@ -102,7 +104,7 @@ export default function WalletTrading({
       connectionStatus: pending ? "正在连接浏览器钱包" : undefined,
       connectionRetryable: Boolean(error),
       connectionError: error,
-      onConnect: () => void connect(),
+      onConnect: connect,
       onLogout: () => {
         clearSessionToken();
         setAddress(undefined);

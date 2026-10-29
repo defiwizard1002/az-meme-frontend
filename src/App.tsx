@@ -438,7 +438,7 @@ export default function App({
   connectionStatus?: string;
   connectionRetryable?: boolean;
   connectionError?: string | null;
-  onConnect?: () => void;
+  onConnect?: () => Promise<boolean> | void;
 } = {}) {
   const guest = walletRequired && !walletAddress;
   const [tokens, setTokens] = useState<Token[]>([]);
@@ -568,6 +568,14 @@ export default function App({
   }
   const accountAvailable =
     sessionReady && account !== null && !accountError && identity === privateOwner;
+  const retryAccountConnection = useCallback(async () => {
+    if (accountMode !== "MAIN_ACCOUNT_POC") {
+      setAccountRetry((retry) => retry + 1);
+      return;
+    }
+    const connected = await onConnect?.();
+    if (connected !== false) setAccountRetry((retry) => retry + 1);
+  }, [accountMode, onConnect]);
   const candleCacheRef = useRef(new Map<string, CandleSnapshot>());
   const tradeCacheRef = useRef(new Map<string, TradeCacheEntry>());
   const tradesPausedRef = useRef(false);
@@ -2352,7 +2360,7 @@ export default function App({
               )}
             </span>
           )}
-          <button type="button" onClick={() => setAccountRetry((n) => n + 1)}>
+          <button type="button" onClick={() => void retryAccountConnection()}>
             重试账户连接
           </button>
         </div>

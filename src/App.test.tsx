@@ -605,8 +605,9 @@ describe("App", () => {
     expect(quotes[1]!.input.tokenAddress).toBe(second.tokenAddress);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
-  it("retries an empty HTTP account failure and restores the account session", async () => {
-    renderWithDeferredQuotes();
+  it("reconnects the MAIN_ACCOUNT_POC wallet before retrying account loading", async () => {
+    const onConnect = vi.fn(() => Promise.resolve(true));
+    renderWithDeferredQuotes({ onConnect });
     const fetch = vi.mocked(globalThis.fetch);
     const fallback = fetch.getMockImplementation()!;
     let accountCalls = 0;
@@ -617,6 +618,7 @@ describe("App", () => {
     });
     expect(await screen.findByRole("alert")).toHaveTextContent("HTTP 502");
     fireEvent.click(screen.getByRole("button", { name: "重试账户连接" }));
+    await waitFor(() => expect(onConnect).toHaveBeenCalledOnce());
     await waitFor(() => expect(accountCalls).toBe(2));
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: "重试账户连接" })).not.toBeInTheDocument(),
