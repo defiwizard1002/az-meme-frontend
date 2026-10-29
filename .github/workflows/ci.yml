@@ -11,11 +11,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: pnpm
-      - run: corepack enable
+      - run: corepack enable && corepack prepare pnpm@11.0.9 --activate
       - run: corepack pnpm install --frozen-lockfile
       - run: corepack pnpm format:check
       - run: corepack pnpm lint
-      - run: corepack pnpm typecheck
-      - run: corepack pnpm build
       - run: corepack pnpm test

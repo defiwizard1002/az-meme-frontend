@@ -1,9 +1,19 @@
 # CI/CD
 
-现有 `.github/workflows/ci.yml` 在 PR 事件执行检查；`build-agent.yml` 在 main push 后于 GitHub-hosted `ubuntu-latest` 按 `github.sha` 构建。它是云端 workflow，不是本地 Build Agent 自动调度。尚未实现本地 Build Agent 自动触发、签名审批验证或自动 E2E 交接；不能声称这些已形成门禁。
+本仓使用自己的 `.github/workflows/ci.yml`，运行在 GitHub-hosted `ubuntu-latest`，只 checkout 和处理本仓。
 
-PR CI 使用 checkout action 的默认 PR checkout；这不等同 Reviewer 已审准确 head SHA。Build workflow 显式 checkout `github.sha`。审批记录必须明确对应 SHA，云端构建成功也不能替代 E2E 或生产验证。
+## CI 做什么
 
-Coder 从 fetch 后最新 main 开发；Reviewer checkout 准确待审 SHA，见 [开发规则](AGENTS.md)。本仓 workflow 不引用父仓或其他 submodule，不使用 self-hosted runner、Webhook、轮询或常驻 bot。
+- `format:check`（recorder 无此脚本，跳过）
+- `lint`（recorder 无此脚本，跳过）
+- 单测
 
-所有 agent worktree 用完即删，但必须先将成果保存到 commit、远端 PR 和证据，确认没有遗漏未提交改动；不得删除他人或仍活动的 worktree。当前 cwd 交由 Main 在确认三仓已 push、证据和父仓 patch 已保存后清理，本次不自行删除。
+## CI 不做什么
+
+- 不执行生产 build；
+- 不执行 `docker build`；
+- 不运行 E2E、真实服务、数据库、RPC 或真实钱包。
+
+GitHub Actions 只做静态检查和单测。生产构建、镜像构建和部署由 Main 在本机调度 Build Agent 完成，规则见 [BUILD.md](BUILD.md)。
+
+不使用 `self-hosted` runner，不使用 Webhook、轮询服务或常驻 bot。

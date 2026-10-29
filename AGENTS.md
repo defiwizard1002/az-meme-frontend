@@ -1,28 +1,51 @@
-# az-meme-frontend 开发规则
+# az-meme-frontend 文档索引
 
-开始先读 [handoff](handoff.md) 和 [本地检查](LOCAL-TESTS.md)。本仓负责行情、K线、钱包登录与交易确认页面，独立管理源码、依赖、构建和协作文档。父仓提供可选聚合编排，不是本仓构建前提。
+本文件只做文档入口，不重复规则正文。开始任务先读 [handoff](handoff.md)，再按下面索引打开对应文档。
 
-- 最小必要改动，保持边界清晰；错误显式暴露，不吞异常。
-- 外部数据只在入口校验；不增加无需求的抽象或保护机制。
-- 技术文档放 `docs/tech/`，产品文档放 `docs/product/`；只写当前事实，不复制父仓历史。README 只写介绍与运行入口。
-- Coder 不运行 E2E；Main 按明确范围调度真实服务、浏览器和钱包。测试少且快，常规不超过 50 个、2 分钟；本次文档交付明确不新增/运行测试。
-- 私密配置只放 ignored env，不打印或提交；用户数据隔离。
-- 提交使用 feature/fix/refactor/chore 前缀；禁止直接 push main。
+## 流程与规范文档
 
-## Checkout 与清理
+| 文档 | 用途 |
+|---|---|
+| [handoff.md](handoff.md) | 当前状态、未完成事项、运行与检查命令 |
+| [README.md](README.md) | 项目介绍与启动方式 |
+| [GOALS.md](GOALS.md) | 仓库职责与边界 |
+| [ENVIRONMENT.md](ENVIRONMENT.md) | 运行时、包管理器、端口、环境文件 |
+| [SETUP.md](SETUP.md) | 从最新 `main` 检出本仓并执行本地检查 |
+| [LOCAL-TESTS.md](LOCAL-TESTS.md) | 允许的本地检查；Coder 不运行 E2E |
+| [BUILD.md](BUILD.md) | Build Agent 构建规则与证据要求 |
+| [PERFORMANCE.md](PERFORMANCE.md) | 本仓性能要求 |
+| [SECURITY.md](SECURITY.md) | 密钥管理、数据隔离、敏感信息 |
+| [REVIEW.md](REVIEW.md) | Review 轮数、准确 SHA、结论格式 |
+| [E2E.md](E2E.md) | E2E 调度、浏览器复用、证据 |
+| [CI-CD.md](CI-CD.md) | 当前 GitHub Actions 实际范围 |
+| [AGENT-COORDINATION.md](AGENT-COORDINATION.md) | Main、Coder、Reviewer、Build、E2E 分工 |
+| [AGENT-APPROVALS.md](AGENT-APPROVALS.md) | 审批签名与 SHA 绑定 |
+| [BRANCH-PROTECTION.md](BRANCH-PROTECTION.md) | main 保护与合并门禁 |
+| [GITHUB-WEBHOOK.md](GITHUB-WEBHOOK.md) | Webhook 决策（当前不启用） |
 
-Coder 每次开始任务先 fetch 本仓完整分支引用，核对远端最新 main，并从该 main 创建开发分支；不能从过时本地 main 或父仓 gitlink 开发。已有未提交任务先保存，不得覆盖。本次交付继续已有 `chore/independent-repo-workflow` 分支，只用当前父 worktree，不另建分支或 worktree。
+## 技术与产品文档
 
-Reviewer 必须 fetch 并 checkout 待 review 的准确 commit SHA，核对 `git rev-parse HEAD` 后再审；不能 review 会移动的 main。PR head 更新后旧结论不覆盖新 SHA。
+文档总索引：[docs/README.md](docs/README.md)
 
-所有 agent worktree 用完即删，但必须先将成果保存到 commit、远端 PR 和证据，确认没有遗漏未提交改动；不得删除他人或仍活动的 worktree。当前 cwd 交由 Main 在确认三仓已 push、证据和父仓 patch 已保存后清理，本次不自行删除。
+技术文档（`docs/tech/`）：
 
-## 性能
+- [delivery-limitations.md](docs/tech/delivery-limitations.md)：交付限制与未完成的集成项
+- [agent-workflow.md](docs/tech/agent-workflow.md)：Agent 工作流说明
 
-仅关注首屏加载：减少阻塞资源和重复请求、控制 bundle 体积、按需加载、减少无效渲染；不承担后端 worker 吞吐目标。
+产品文档：`docs/product/` 目前没有文件；新增产品说明时按 `docs/product/<主题>.md` 放置。
 
-## 交付状态
+本文档索引由 `AGENTS.md` 统一入口维护；新增文档时同步更新本文件。
 
-现有 `.github/workflows/ci.yml` 在 PR 事件执行检查；`build-agent.yml` 在 main push 后于 GitHub-hosted `ubuntu-latest` 按 `github.sha` 构建。它是云端 workflow，不是本地 Build Agent 自动调度。尚未实现本地 Build Agent 自动触发、签名审批验证或自动 E2E 交接；不能声称这些已形成门禁。
+## 硬性规则（摘要）
 
-`/handoff` 更新本仓上下文：当前改动、问题、脱敏环境键、运行/检查命令、工具、文档索引和待办。
+- Coder 每次开发先 fetch，从本仓最新 `main` 创建开发分支和 worktree；不在旧分支上继续改。
+- Reviewer checkout 待审的准确 commit SHA，不审查会移动的 `main`。
+- 所有 Agent worktree 用完即删：成果已 commit、推送、证据已保存后才删；不删他人或仍活动的 worktree。
+- Coder 不运行 E2E；真实服务、浏览器、钱包、RPC 由 Main 调度。
+- 提交前缀用 `feature:`、`fix:`、`refactor:`、`chore:`；禁止直接 push `main`。
+- 敏感信息只放 ignored env，不打印、不提交。
+- 文档只保留与当前实现一致的内容，不写历史状态。
+
+## CI 当前范围
+
+`.github/workflows/ci.yml` 只在 PR 上运行 format check、lint 和单测。GitHub Actions 不再执行生产 build，也不执行 `docker build`。构建由 Main 在本机调度 Build Agent 完成，见 [BUILD.md](BUILD.md)。
