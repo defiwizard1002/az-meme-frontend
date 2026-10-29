@@ -1079,7 +1079,6 @@ export default function App({
   }, [search, setError]);
 
   useEffect(() => {
-    setSessionToken(null);
     for (const { controller } of orderPollsRef.current.values()) controller.abort();
     orderPollsRef.current.clear();
     for (const { controller } of transactionPollsRef.current.values()) controller.abort();
@@ -1110,7 +1109,7 @@ export default function App({
       () => fail(new ApiError("MEME_ACCOUNT_TIMEOUT", "账户连接超时，请重试", 0)),
       20_000,
     );
-    setSessionToken(null);
+    if (accountMode !== "MAIN_ACCOUNT_POC") setSessionToken(null);
     setSessionReady(false);
     setAccount(null);
     setAccountTransactions([]);
