@@ -67,11 +67,12 @@ describe("WalletTrading wallet authentication", () => {
   it("only syncs the initial and changed account without signing", async () => {
     render(<WalletTrading />);
 
-    await waitFor(() => expect(screen.getByTestId("wallet-address")).toHaveTextContent(address));
+    await waitFor(() => expect(provider.request).toHaveBeenCalledWith({ method: "eth_accounts" }));
+    expect(screen.getByTestId("wallet-address")).toHaveTextContent("");
     expect(vi.mocked(authenticateWallet)).not.toHaveBeenCalled();
 
     provider.emit("accountsChanged", [address]);
-    await waitFor(() => expect(screen.getByTestId("wallet-address")).toHaveTextContent(address));
+    expect(screen.getByTestId("wallet-address")).toHaveTextContent("");
     expect(vi.mocked(authenticateWallet)).not.toHaveBeenCalled();
   });
 
@@ -81,7 +82,7 @@ describe("WalletTrading wallet authentication", () => {
       () => new Promise<void>((resolve) => (resolveAuthentication = resolve)),
     );
     render(<WalletTrading />);
-    await waitFor(() => expect(screen.getByTestId("wallet-address")).toHaveTextContent(address));
+    await waitFor(() => expect(provider.request).toHaveBeenCalledWith({ method: "eth_accounts" }));
 
     const connect = screen.getByRole("button", { name: "连接钱包" });
     fireEvent.click(connect);

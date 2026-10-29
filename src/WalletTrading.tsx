@@ -26,6 +26,7 @@ export default function WalletTrading({
   const [error, setError] = useState<string>();
   const connectingRef = useRef(false);
   const addressRef = useRef<string | undefined>(undefined);
+  const detectedAddressRef = useRef<string | undefined>(undefined);
 
   const connect = useCallback(async (): Promise<boolean> => {
     if (connectingRef.current) return false;
@@ -41,16 +42,16 @@ export default function WalletTrading({
       const accounts = await provider.request({ method: "eth_requestAccounts" });
       const next = Array.isArray(accounts) && typeof accounts[0] === "string" ? accounts[0] : null;
       if (!next) throw new Error("钱包没有返回账户地址");
-      if (addressRef.current?.toLowerCase() !== next.toLowerCase()) {
+      if (detectedAddressRef.current?.toLowerCase() !== next.toLowerCase()) {
         clearSessionToken();
-        addressRef.current = next;
-        setAddress(next);
+        detectedAddressRef.current = next;
       }
       await authenticateWallet(next, provider);
-      if (addressRef.current?.toLowerCase() !== next.toLowerCase()) {
+      if (detectedAddressRef.current?.toLowerCase() !== next.toLowerCase()) {
         clearSessionToken();
         return false;
       }
+      addressRef.current = next;
       setAddress(next);
       return true;
     } catch (cause) {
@@ -74,17 +75,22 @@ export default function WalletTrading({
         Array.isArray(accounts) && typeof accounts[0] === "string" ? accounts[0] : undefined;
       if (!next) {
         clearSessionToken();
+        detectedAddressRef.current = undefined;
         addressRef.current = undefined;
         setAddress(undefined);
         setPending(false);
         setError(undefined);
         return;
       }
-      if (addressRef.current && addressRef.current.toLowerCase() !== next.toLowerCase()) {
+      if (
+        detectedAddressRef.current &&
+        detectedAddressRef.current.toLowerCase() !== next.toLowerCase()
+      ) {
         clearSessionToken();
+        addressRef.current = undefined;
+        setAddress(undefined);
       }
-      addressRef.current = next;
-      setAddress(next);
+      detectedAddressRef.current = next;
       setPending(false);
       setError(undefined);
     };
