@@ -48,4 +48,5 @@
 
 ## CI 当前范围
 
-`.github/workflows/ci.yml` 只在 PR 上运行 format check、lint 和单测。GitHub Actions 不再执行生产 build，也不执行 `docker build`。构建由 Main 在本机调度 Build Agent 完成，见 [BUILD.md](BUILD.md)。
+本仓当前没有云端 CI/CD，也没有 GitHub Actions workflow。PR 的检查和构建由 Main 在本机按需执行并记录。
+

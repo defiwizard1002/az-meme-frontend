@@ -6,7 +6,7 @@ Coder 每次开始任务先 fetch 本仓完整分支引用，核对远端最新 
 
 Reviewer 必须 fetch 并 checkout 待 review 的准确 commit SHA，核对 `git rev-parse HEAD` 后再审；不能 review 会移动的 main。PR head 更新后旧结论不覆盖新 SHA。
 
-现有 `.github/workflows/ci.yml` 在 PR 事件执行检查；`build-agent.yml` 在 main push 后于 GitHub-hosted `ubuntu-latest` 按 `github.sha` 构建。它是云端 workflow，不是本地 Build Agent 自动调度。尚未实现本地 Build Agent 自动触发、签名审批验证或自动 E2E 交接；不能声称这些已形成门禁。
+本仓当前没有云端 CI/CD，也没有 GitHub Actions workflow。PR 的检查和构建由 Main 在本机按需执行并记录，不产生云端费用。尚未实现本地 Build Agent 自动触发、签名审批验证或自动 E2E 交接；不能声称这些已形成门禁。
 
 Build 使用 [构建命令](../../BUILD.md)，Main 手动交接 [E2E](../../E2E.md)。具体约束见 [协作](../../AGENT-COORDINATION.md) 与 [审批](../../AGENT-APPROVALS.md)。
 

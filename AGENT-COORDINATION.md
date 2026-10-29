@@ -6,6 +6,6 @@ Reviewer 必须 fetch 并 checkout 待 review 的准确 commit SHA，核对 `git
 
 Main 传递仓库、准确 SHA、命令、证据位置和下一步。Build 完成后才交 E2E，Coder 不执行 E2E。
 
-现有 `.github/workflows/ci.yml` 在 PR 事件执行检查；`build-agent.yml` 在 main push 后于 GitHub-hosted `ubuntu-latest` 按 `github.sha` 构建。它是云端 workflow，不是本地 Build Agent 自动调度。尚未实现本地 Build Agent 自动触发、签名审批验证或自动 E2E 交接；不能声称这些已形成门禁。
+本仓当前没有云端 CI/CD，也没有 GitHub Actions workflow。PR 的检查和构建由 Main 在本机按需执行并记录，不产生云端费用。尚未实现本地 Build Agent 自动触发、签名审批验证或自动 E2E 交接；不能声称这些已形成门禁。
 
 所有 agent worktree 用完即删，但必须先将成果保存到 commit、远端 PR 和证据，确认没有遗漏未提交改动；不得删除他人或仍活动的 worktree。当前 cwd 交由 Main 在确认三仓已 push、证据和父仓 patch 已保存后清理，本次不自行删除。
