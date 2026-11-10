@@ -16,7 +16,6 @@ export default defineConfig(({ mode }) => {
       port: 4173,
       strictPort: true,
       proxy,
-      allowedHosts: ["dopemac-mini.tailc44fad.ts.net"],
     },
     test: {
       environment: "jsdom",
