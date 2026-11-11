@@ -82,11 +82,15 @@ const cleanScenario2 = () => {
 afterEach(cleanScenario2);
 
 describe("phase D trading", () => {
-  it("uses platform funds for BUY even when the user's balance differs, and keeps missing funds unknown", async () => {
+  it("quotes unknown public support using treasury funds, blocks explicit unsupported pools, and keeps missing funds unknown", async () => {
     const createQuote = vi
       .spyOn(memeApi, "createQuote")
       .mockResolvedValue({ ...terms, amountIn: "1" });
-    const props = { token, walletAddress: wallet, onAccountRefresh: vi.fn() };
+    const props = {
+      token: { ...token, tradeStatus: undefined },
+      walletAddress: wallet,
+      onAccountRefresh: vi.fn(),
+    };
     const funded = {
       ...account,
       treasury: {
@@ -102,6 +106,17 @@ describe("phase D trading", () => {
       expect.objectContaining({ amountIn: "1", purpose: "ESTIMATE" }),
       expect.any(AbortSignal),
     );
+    rerender(
+      <TradingPanel
+        {...props}
+        token={{ ...token, tradeStatus: "UNSUPPORTED_POOL_TYPE" }}
+        account={funded}
+      />,
+    );
+    expect(screen.getByText("当前代币暂不支持交易")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "刷新报价" })).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(createQuote).toHaveBeenCalledTimes(1);
     const userFunded: AccountSummary = {
       ...account,
       quoteBalances: [{ asset: "USDG", available: "1000", frozen: "0" }],

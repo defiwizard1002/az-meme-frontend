@@ -52,7 +52,8 @@ export interface Token {
   smartMoneyCount?: number | null;
   kolCount?: number | null;
   pool?: { poolKey: string; poolType: string; liquidityUsd: string; quoteTokenSymbol?: string };
-  tradeStatus?: "TRADABLE" | "UNSUPPORTED_POOL_TYPE";
+  // Public observations may omit execution support; quotes remain server-authoritative.
+  tradeStatus?: "TRADABLE" | "UNSUPPORTED_POOL_TYPE" | null;
   riskFlags?: string[];
   source?: "GMGN";
   observedAt?: number | null;

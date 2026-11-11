@@ -151,7 +151,7 @@ function TradingForm({
         if (ownBalance === null) return "当前钱包的代币余额未知，暂时无法卖出";
         if (compareAmounts(input, ownBalance) > 0) return "当前钱包代币余额不足";
       }
-      if (token.tradeStatus !== "TRADABLE") return "当前代币暂不支持交易";
+      if (token.tradeStatus === "UNSUPPORTED_POOL_TYPE") return "当前代币暂不支持交易";
       return null;
     },
     [honeypot, ownBalance, token.tradeStatus, treasury],
