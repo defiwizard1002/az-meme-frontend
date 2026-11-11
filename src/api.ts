@@ -1,3 +1,5 @@
+import { forgetExecution, pendingExecutionId, rememberExecution } from "./transaction-tracker";
+import { requireQuoteTerms, type QuoteRequest, type ValidQuote } from "./quote-flow";
 import type {
   AccountSummary,
   AccountTransaction,
@@ -5,11 +7,9 @@ import type {
   Candle,
   CandleSnapshot,
   Interval,
-  Order,
   QuoteDisplay,
   Token,
   Trade,
-  TradePlan,
 } from "./types";
 
 interface Envelope<T> {
@@ -34,7 +34,6 @@ export function resolveWsBaseUrl(
 }
 
 const apiBaseUrl = resolveApiBaseUrl(import.meta.env.VITE_MEME_API_BASE_URL as string | undefined);
-const azApiBaseUrl = resolveApiBaseUrl(import.meta.env.VITE_AZ_API_BASE_URL as string | undefined);
 const sessionStorageKey = "az:meme:wallet-session";
 let sessionToken: string | null =
   typeof window === "undefined" || !window.localStorage
@@ -200,16 +199,12 @@ async function send<T>(
     controller.signal.removeEventListener("abort", rejectAbort);
   }
 }
-function request<T>(path: string, init?: RequestInit): Promise<T> {
+export function request<T>(path: string, init?: RequestInit): Promise<T> {
   return send(apiBaseUrl, "MEME", path, init);
 }
-function requestPublicMarket<T>(path: string, init?: RequestInit): Promise<T> {
+export function requestPublicMarket<T>(path: string, init?: RequestInit): Promise<T> {
   return send(apiBaseUrl, "MEME", path, init, true);
 }
-function requestAz<T>(path: string, init?: RequestInit): Promise<T> {
-  return send(azApiBaseUrl, "AZ", path, init);
-}
-
 export async function authenticateWallet(address: string, provider: WalletProvider): Promise<void> {
   const nonce = await request<{ message: string }>("/sapi/v1/meme/auth/wallet/nonce", {
     method: "POST",
@@ -227,56 +222,6 @@ export async function authenticateWallet(address: string, provider: WalletProvid
   });
   setSessionToken(verified.token);
 }
-
-export const azAuth = {
-  loginMock: async (signal?: AbortSignal) => {
-    const sourceAddr = `0x${"7".repeat(40)}`;
-    const nonce = await requestAz<{ nonce: string; message: string }>(
-      "/az-auth/uaapi/user/web3/get-nonce",
-      {
-        method: "POST",
-        signal,
-        body: JSON.stringify({ sourceAddr, type: "LOGIN", chainType: "ETHEREUM" }),
-      },
-    );
-    if (!nonce.message) throw new Error("AZ nonce response is missing the sign message");
-    const login = await requestAz<{ accessToken: string; expiresAt: number }>(
-      "/az-auth/uaapi/user/web3/login",
-      {
-        method: "POST",
-        signal,
-        body: JSON.stringify({
-          signature: "0xmock-signature",
-          sourceAddr,
-          chainType: "ETHEREUM",
-          chainId: 1,
-          loginType: "WALLET",
-        }),
-      },
-    );
-    const user = await requestAz<{ userId: string; accountId: string; loginStatus: string }>(
-      "/az-auth/uaapi/user/user/getDesensitizedUserInfo",
-      { signal, headers: { authorization: `Bearer ${login.accessToken}` } },
-    );
-    signal?.throwIfAborted();
-    setSessionToken(login.accessToken);
-    return { ...user, expiresAt: login.expiresAt };
-  },
-};
-
-export const azFundApi = {
-  transfer: (input: {
-    bizId: string;
-    from: "SPOT" | "MEME";
-    to: "SPOT" | "MEME";
-    currency: Asset;
-    amount: string;
-  }) =>
-    requestAz<number>("/sapi/v4/fund/balance/transfer", {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
-};
 
 export const memeApi = {
   getConfig: () =>
@@ -337,86 +282,29 @@ export const memeApi = {
     }),
   getAccountTransaction: (executionId: string) =>
     request<AccountTransaction>(`/sapi/v1/meme/account/transactions/${executionId}`),
-  executeMainAccountTrade: (input: {
-    clientExecutionId: string;
-    side: "BUY" | "SELL";
-    tokenAddress: string;
-    settlementAsset: "USDG" | "ETH" | "WETH" | "USDC";
-    quoteId: string;
-    routeFingerprint?: string;
-    minAmountOut?: string;
-    amountIn: string;
-    slippageBps: number;
-  }) => executeAccountTrade(input),
-  createQuote: (
-    input: {
-      side: "BUY" | "SELL";
-      tokenAddress: string;
-      settlementAsset: Asset;
-      amountIn: string;
-      slippageBps: number;
-      purpose?: "ESTIMATE" | "PREPARE_EXECUTION";
-      minAmountOut?: string;
-    },
-    signal?: AbortSignal,
-  ) =>
-    request<QuoteDisplay | ApprovalRequired>("/sapi/v1/meme/quotes", {
+  executeMainAccountTrade: (input: AccountTradeInput) => executeAccountTrade(input),
+  createQuote: (input: QuoteRequest, signal?: AbortSignal) => {
+    const { feeConfigVersion: _boundFeeVersion, ...body } = input;
+    return request<QuoteDisplay | ApprovalRequired>("/sapi/v1/meme/quotes", {
       method: "POST",
-      body: JSON.stringify(input),
+      body: JSON.stringify(body),
       signal,
-    }).then((value): QuoteDisplay => {
+    }).then((value): ValidQuote => {
       if ("status" in value && value.status === "APPROVAL_REQUIRED")
-        throw new ApiError(
-          "MEME_APPROVAL_REQUIRED",
-          "需要授权；完成授权后重新准备并确认交易",
-          200,
-          value,
-        );
-      return value as QuoteDisplay;
-    }),
+        throw new ApiError("MEME_APPROVAL_REQUIRED", "需要授权，完成后将重新获取报价", 200, value);
+      return requireQuoteTerms(value as QuoteDisplay, input);
+    });
+  },
   approveTrade: (prerequisiteId: string) =>
     request<{ status: "REQUOTE_REQUIRED"; transactions: string[] }>(
       "/sapi/v1/meme/transactions/approval",
       { method: "POST", body: JSON.stringify({ prerequisiteId }) },
     ),
-  createOrder: (input: {
-    clientOrderId: string;
-    quoteId: string;
-    maxAmountIn: string;
-    minAmountOut: string;
-  }) => request<Order>("/sapi/v1/meme/orders", { method: "POST", body: JSON.stringify(input) }),
-  getOrders: (signal?: AbortSignal) =>
-    request<{ items: Order[]; nextCursor: string | null }>("/sapi/v1/meme/orders", { signal }),
-  getOrder: (orderId: string) => request<Order>(`/sapi/v1/meme/orders/${orderId}`),
   getWsTicket: (signal?: AbortSignal, publicMarket = false) =>
     (publicMarket ? requestPublicMarket : request)<{ ticket: string; expiresAt: number }>(
       "/sapi/v1/meme/ws-ticket",
       { method: "POST", signal },
     ),
-  planAssetConversion: (input: {
-    assetIn: "USDG" | "ETH" | "WETH" | "USDC";
-    assetOut: "USDG" | "ETH" | "WETH" | "USDC";
-    amountIn: string;
-    slippageBps: number;
-    simulate: boolean;
-  }) =>
-    request<TradePlan>("/sapi/v1/meme/transactions/conversion/plan", {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
-  planTrade: (input: {
-    side: "BUY" | "SELL";
-    tokenAddress: string;
-    quoteId?: string;
-    settlementAsset?: "USDG" | "ETH" | "WETH" | "USDC";
-    amountIn: string;
-    slippageBps: number;
-    simulate: boolean;
-  }) =>
-    request<TradePlan>("/sapi/v1/meme/transactions/plan", {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
 };
 
 export interface ApprovalRequired {
@@ -444,48 +332,81 @@ export const wsBaseUrl = resolveWsBaseUrl(
   window.location,
 );
 
-type AccountTradeInput = Parameters<typeof memeApi.executeMainAccountTrade>[0];
+export interface AccountTradeInput {
+  walletAddress: string;
+  clientExecutionId: string;
+  side: "BUY" | "SELL";
+  tokenAddress: string;
+  settlementAsset: Asset;
+  quoteId: string;
+  routeFingerprint?: string;
+  minAmountOut: string;
+  amountIn: string;
+  slippageBps: number;
+  feeConfigVersion: string;
+}
+
 async function executeAccountTrade(input: AccountTradeInput): Promise<AccountTransaction> {
-  if (!serverSignedTransactions)
-    return request<AccountTransaction>("/sapi/v1/meme/account/transactions", {
-      method: "POST",
-      body: JSON.stringify(input),
-    });
-  const pendingKey = `az:server-signed-pending:${input.tokenAddress.toLowerCase()}`;
-  const pendingId = localStorage.getItem(pendingKey);
+  const executionSession = sessionToken;
+  const pendingId = pendingExecutionId(input.walletAddress);
   if (pendingId) {
-    const existing = await request<AccountTransaction>(
-      `/sapi/v1/meme/account/transactions/${pendingId}`,
-    );
-    if (existing.status === "PENDING") return existing;
-    localStorage.removeItem(pendingKey);
+    const existing = await memeApi.getAccountTransaction(pendingId);
+    if (sessionToken !== executionSession) throw new Error("钱包已切换，请返回原钱包查看交易状态");
+    if (existing.status !== "CONFIRMED" && existing.status !== "FAILED") return existing;
+    forgetExecution(input.walletAddress, pendingId);
   }
-  const prepared = await request<{
-    record: AccountTransaction;
-    authorizationRequest: unknown;
-  }>("/sapi/v1/meme/privy/transactions", { method: "POST", body: JSON.stringify(input) });
-  if (!prepared.authorizationRequest) return prepared.record;
-  localStorage.setItem(pendingKey, prepared.record.executionId);
+  const { walletAddress, feeConfigVersion: _boundFeeVersion, ...body } = input;
+  // Save before POST: either prepare or submit can time out after reaching the server.
+  rememberExecution(walletAddress, input.clientExecutionId);
   try {
+    if (!serverSignedTransactions) {
+      const result = await request<AccountTransaction>("/sapi/v1/meme/account/transactions", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      rememberExecution(walletAddress, result.executionId);
+      if (result.status === "CONFIRMED" || result.status === "FAILED")
+        forgetExecution(walletAddress, result.executionId);
+      return result;
+    }
+    const prepared = await request<{ record: AccountTransaction; authorizationRequest: unknown }>(
+      "/sapi/v1/meme/privy/transactions",
+      { method: "POST", body: JSON.stringify(body) },
+    );
+    rememberExecution(walletAddress, prepared.record.executionId);
+    if (sessionToken !== executionSession) throw new Error("钱包已切换，请返回原钱包查看交易状态");
+    if (!prepared.authorizationRequest) {
+      if (prepared.record.status === "CONFIRMED" || prepared.record.status === "FAILED")
+        forgetExecution(walletAddress, prepared.record.executionId);
+      return prepared.record;
+    }
     const submitted = await request<AccountTransaction>(
       `/sapi/v1/meme/privy/transactions/${prepared.record.executionId}/submit`,
-      {
-        method: "POST",
-        body: JSON.stringify({}),
-      },
+      { method: "POST", body: JSON.stringify({}) },
     );
-    if (submitted.status !== "PENDING") localStorage.removeItem(pendingKey);
+    if (submitted.status === "CONFIRMED" || submitted.status === "FAILED")
+      forgetExecution(walletAddress, submitted.executionId);
     return submitted;
   } catch (cause) {
     if (
       cause instanceof ApiError &&
-      ["MEME_ROUTE_STALE", "MEME_PRIVY_SUBMISSION_REJECTED"].includes(cause.code)
+      [
+        "MEME_ROUTE_STALE",
+        "MEME_FEE_CONFIG_CHANGED",
+        "MEME_QUOTE_REQUEST_MISMATCH",
+        "MEME_UNAUTHORIZED",
+        "MEME_ATOMIC_BALANCE_INSUFFICIENT",
+        "MEME_TREASURY_APPROVAL_REQUIRED",
+        "MEME_PRIVY_WALLET_REQUIRED",
+        "MEME_PRIVY_SUBMISSION_REJECTED",
+        "MEME_MAIN_ACCOUNT_BUSY",
+        "MEME_MAIN_ACCOUNT_EXECUTION_DISABLED",
+        "MEME_USER_SEND_REQUIRED",
+      ].includes(cause.code)
     ) {
-      localStorage.removeItem(pendingKey);
-      throw cause;
+      const saved = pendingExecutionId(walletAddress);
+      if (saved) forgetExecution(walletAddress, saved);
     }
-    throw new Error(
-      `交易 ${prepared.record.executionId} 提交结果待确认，请在交易记录查看：${cause instanceof Error ? cause.message : String(cause)}`,
-    );
+    throw cause;
   }
 }

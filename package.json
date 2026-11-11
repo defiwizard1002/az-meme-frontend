@@ -19,7 +19,8 @@
     "lint:fix": "eslint . --fix --max-warnings 0",
     "check:push": "pnpm run format:check && pnpm run lint",
     "hooks:install": "node .githooks/install.mjs",
-    "prepare": "pnpm run hooks:install"
+    "prepare": "pnpm run hooks:install",
+    "test:phase-d": "vitest run src/App.phase-d.test.tsx src/Discover.test.tsx src/wallet-phase-d.test.tsx src/phase-d-trading.test.tsx src/token-details.test.tsx src/TokenRiskLabels.test.tsx src/WalletTrading.test.tsx src/transaction-tracker.test.ts src/market-snapshot.test.ts src/CandleChart.previous-close.test.ts"
   },
   "dependencies": {
     "lightweight-charts": "5.2.1",

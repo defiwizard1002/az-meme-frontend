@@ -36,15 +36,20 @@ describe("main-account transaction tracking", () => {
     expect(calls).toBe(2);
   });
 
-  it("treats an unknown submission result as terminal and never resubmits", async () => {
-    const loadTransaction = vi.fn().mockResolvedValue({ ...pending, status: "SUBMISSION_UNKNOWN" });
-    await expect(
-      pollTransactionUntilTerminal(pending.executionId, {
-        signal: new AbortController().signal,
-        loadTransaction,
-        onUpdate: vi.fn(),
-      }),
-    ).resolves.toMatchObject({ status: "SUBMISSION_UNKNOWN" });
-    expect(loadTransaction).toHaveBeenCalledTimes(1);
+  it("keeps unknown submissions pending until a verified final result without resubmitting", async () => {
+    vi.useFakeTimers();
+    const loadTransaction = vi
+      .fn()
+      .mockResolvedValueOnce({ ...pending, status: "SUBMISSION_UNKNOWN" })
+      .mockResolvedValueOnce({ ...pending, status: "CONFIRMED" });
+    const tracking = pollTransactionUntilTerminal(pending.executionId, {
+      signal: new AbortController().signal,
+      loadTransaction,
+      onUpdate: vi.fn(),
+      pollIntervalMs: 1000,
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(tracking).resolves.toMatchObject({ status: "CONFIRMED" });
+    expect(loadTransaction).toHaveBeenCalledTimes(2);
   });
 });

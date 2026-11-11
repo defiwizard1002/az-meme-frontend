@@ -3,6 +3,8 @@ import {
   CandlestickSeries,
   ColorType,
   createChart,
+  createSeriesMarkers,
+  type ISeriesMarkersPluginApi,
   CrosshairMode,
   HistogramSeries,
   type CandlestickData,
@@ -20,10 +22,19 @@ interface Props {
   gaps?: CandleSnapshot["gaps"];
   legacy?: boolean;
   symbol: string;
+  markers?: ChartTradeMarker[];
   refreshing?: boolean;
   historyRetry?: number;
   onLoadBefore?: (before: number) => Promise<HistoryLoadResult>;
 }
+
+export interface ChartTradeMarker {
+  time: number;
+  side: "BUY" | "SELL";
+  label: string;
+}
+
+const NO_MARKERS: ChartTradeMarker[] = [];
 
 export interface HistoryLoadResult {
   added: number;
@@ -138,6 +149,7 @@ export function CandleChart({
   symbol,
   refreshing = false,
   historyRetry = 0,
+  markers = NO_MARKERS,
   onLoadBefore,
 }: Props) {
   const data = useMemo(() => buildChartData(candles), [candles]);
@@ -146,6 +158,7 @@ export function CandleChart({
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const markerPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const previousDataRef = useRef<ChartData | null>(null);
   const fittedRef = useRef(false);
   const savedViewportRef = useRef<{
@@ -375,6 +388,7 @@ export function CandleChart({
       container.removeEventListener("wheel", markInteraction);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRange);
       chart.unsubscribeCrosshairMove?.(handleCrosshair);
+      markerPluginRef.current = null;
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
@@ -491,6 +505,24 @@ export function CandleChart({
     previousDataRef.current = data;
     checkHistoryRef.current?.();
   }, [data]);
+
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series || (markers.length === 0 && !markerPluginRef.current)) return;
+    const visibleTimes = new Set(data.candles.map((candle) => Number(candle.time)));
+    const visible = markers
+      .filter((marker) => visibleTimes.has(marker.time))
+      .sort((a, b) => a.time - b.time)
+      .map((marker) => ({
+        time: marker.time as UTCTimestamp,
+        position: marker.side === "BUY" ? ("belowBar" as const) : ("aboveBar" as const),
+        shape: marker.side === "BUY" ? ("arrowUp" as const) : ("arrowDown" as const),
+        color: marker.side === "BUY" ? "#39d98a" : "#ff4d79",
+        text: marker.label,
+      }));
+    if (!markerPluginRef.current) markerPluginRef.current = createSeriesMarkers(series, visible);
+    else markerPluginRef.current.setMarkers(visible);
+  }, [markers, data]);
 
   return (
     <figure

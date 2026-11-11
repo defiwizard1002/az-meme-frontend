@@ -1,5 +1,16 @@
 import type { AccountTransaction } from "./types";
 
+const pendingKey = (wallet: string) => `az:meme:pending-execution:${wallet.toLowerCase()}`;
+export function pendingExecutionId(wallet: string): string | null {
+  return localStorage.getItem(pendingKey(wallet));
+}
+export function rememberExecution(wallet: string, executionId: string): void {
+  localStorage.setItem(pendingKey(wallet), executionId);
+}
+export function forgetExecution(wallet: string, executionId: string): void {
+  if (pendingExecutionId(wallet) === executionId) localStorage.removeItem(pendingKey(wallet));
+}
+
 interface PollTransactionOptions {
   signal: AbortSignal;
   loadTransaction(executionId: string): Promise<AccountTransaction>;
@@ -10,7 +21,7 @@ interface PollTransactionOptions {
 }
 
 function isTerminal(transaction: AccountTransaction): boolean {
-  return transaction.status !== "PENDING";
+  return transaction.status === "CONFIRMED" || transaction.status === "FAILED";
 }
 
 function wait(ms: number, signal: AbortSignal): Promise<void> {

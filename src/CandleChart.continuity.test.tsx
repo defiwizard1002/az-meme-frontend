@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CandleChart } from "./CandleChart";
-import { mergeSnapshots } from "./App";
+import { mergeSnapshots } from "./token-api";
 import type { Candle, CandleSnapshot } from "./types";
 
 const engine = vi.hoisted(() => ({

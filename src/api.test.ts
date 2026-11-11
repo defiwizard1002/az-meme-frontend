@@ -1,17 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  ApiError,
-  azAuth,
-  memeApi,
-  resolveApiBaseUrl,
-  resolveWsBaseUrl,
-  setSessionToken,
-} from "./api";
+import { ApiError, memeApi, resolveApiBaseUrl, resolveWsBaseUrl, setSessionToken } from "./api";
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   setSessionToken(null);
+  localStorage.clear();
 });
 
 describe("runtime endpoint fallback", () => {
@@ -192,11 +186,11 @@ describe("HTTP envelopes", () => {
     vi.stubGlobal("fetch", fetch);
     setSessionToken("test-session");
     await expect(
-      memeApi.createOrder({
-        clientOrderId: "a",
-        quoteId: "b",
-        maxAmountIn: "1",
-        minAmountOut: "1",
+      memeApi.createQuote({
+        side: "BUY",
+        tokenAddress: "token",
+        settlementAsset: "USDG",
+        amountIn: "1",
       }),
     ).rejects.toEqual(new ApiError("MEME_UNAUTHORIZED", "Session expired", 401));
     expect((fetch.mock.calls[0]![1].headers as Headers).get("authorization")).toBe(
@@ -222,39 +216,6 @@ describe("bounded HTTP requests", () => {
     expect(vi.getTimerCount()).toBe(0);
     expect(remove).toHaveBeenCalledWith("abort", expect.any(Function));
     expect(controller.signal.aborted).toBe(false);
-  });
-
-  it("does not let canceled AZ login overwrite the retried session", async () => {
-    const envelope = (result: unknown) => new Response(JSON.stringify({ rc: 0, result }));
-    let finishOld!: (response: Response) => void;
-    let logins = 0;
-    const fetch = vi.fn().mockImplementation(async (input: string) => {
-      if (input.endsWith("/get-nonce")) return envelope({ message: "sign" });
-      if (input.endsWith("/login")) {
-        if (++logins === 1)
-          return new Promise<Response>((resolve) => {
-            finishOld = resolve;
-          });
-        return envelope({ accessToken: "new-session", expiresAt: 1 });
-      }
-      return envelope({});
-    });
-    vi.stubGlobal("fetch", fetch);
-    const controller = new AbortController();
-    const reason = new DOMException("old attempt", "AbortError");
-    const old = azAuth.loginMock(controller.signal).catch((cause) => cause);
-    await vi.waitFor(() => expect(logins).toBe(1));
-    controller.abort(reason);
-    await azAuth.loginMock();
-    finishOld(envelope({ accessToken: "old-session", expiresAt: 1 }));
-    expect(await old).toBe(reason);
-    await memeApi.getAccount();
-    expect(new Headers(fetch.mock.calls.at(-1)![1].headers).get("authorization")).toBe(
-      "Bearer new-session",
-    );
-    expect(
-      fetch.mock.calls.filter(([url]) => url.endsWith("/getDesensitizedUserInfo")),
-    ).toHaveLength(1);
   });
 
   it.each(["fetch", "body"] as const)(
@@ -394,6 +355,9 @@ describe("bounded HTTP requests", () => {
     void memeApi
       .executeMainAccountTrade({
         clientExecutionId: "same-id",
+        walletAddress: "0x1111111111111111111111111111111111111111",
+        minAmountOut: "1",
+        feeConfigVersion: "1",
         side: "BUY",
         tokenAddress: "token",
         settlementAsset: "USDG",

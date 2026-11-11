@@ -1,105 +1,113 @@
 import type { Token } from "./types";
 
+type Tone = "safe" | "warning" | "danger" | "neutral";
+interface RiskMetric {
+  label: string;
+  value: string;
+  tone: Tone;
+}
+const format = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+const yesNo = (value: boolean | null | undefined) =>
+  value === true ? "是" : value === false ? "否" : "未知";
+
+function riskMetrics(security: Token["security"]): RiskMetric[] {
+  const values: RiskMetric[] = (
+    [
+      ["Top 10 持仓", security.top10HolderPct, 30, 45],
+      ["Dev 持仓", security.devHoldingPct, 5, 10],
+      ["Rat 持仓", security.ratHoldingPct, 8, null],
+      ["Sniper 持仓", security.sniperHoldingPct, 15, null],
+      ["Bundler 持仓", security.bundlerHoldingPct, 10, 20],
+      ["Phishing 持仓", security.phishingHoldingPct, 10, 25],
+      ["买入税", security.buyTaxPct, 0, null],
+      ["卖出税", security.sellTaxPct, 0, 5],
+    ] as const
+  ).map(([label, raw, warn, red]) => {
+    const n = raw == null || raw.trim() === "" ? NaN : Number(raw);
+    const known = Number.isFinite(n) && n >= 0 && n <= 100;
+    return {
+      label,
+      value: known ? `${format.format(n)}%` : "未知",
+      tone: !known ? "neutral" : red !== null && n > red ? "danger" : n > warn ? "warning" : "safe",
+    };
+  });
+  const ratio =
+    security.rugRatio == null || security.rugRatio.trim() === "" ? NaN : Number(security.rugRatio);
+  const knownRatio = Number.isFinite(ratio) && ratio >= 0 && ratio <= 1;
+  values.push({
+    label: "Rug ratio",
+    value: knownRatio ? String(ratio) : "未知",
+    tone: !knownRatio ? "neutral" : ratio > 0.3 ? "danger" : ratio >= 0.1 ? "warning" : "safe",
+  });
+  for (const [label, value, bad] of [
+    ["貔貅", security.isHoneypot, true],
+    ["刷量", security.isWashTrading, true],
+    ["开源", security.isOpenSource, false],
+    ["放弃权限", security.isRenounced, false],
+  ] as const) {
+    values.push({
+      label,
+      value: yesNo(value),
+      tone: value == null ? "neutral" : value === bad ? (bad ? "danger" : "warning") : "safe",
+    });
+  }
+  return values;
+}
+export function safetySeverity(security: Token["security"]): Tone {
+  const tones = riskMetrics(security).map((metric) => metric.tone);
+  return tones.includes("danger")
+    ? "danger"
+    : tones.includes("warning")
+      ? "warning"
+      : tones.includes("neutral")
+        ? "neutral"
+        : "safe";
+}
 export function TokenRiskLabels({ security }: { security: Token["security"] }) {
+  const tone = safetySeverity(security);
   return (
-    <>
-      <span className={security.isHoneypot === true ? "security-danger" : "security-neutral"}>
-        貔貅：{security.isHoneypot === true ? "是" : security.isHoneypot === false ? "否" : "未知"}
-      </span>
-      <span className={security.isShowAlert === true ? "security-warning" : "security-neutral"}>
-        风险提示：
-        {security.isShowAlert === true ? "有" : security.isShowAlert === false ? "无" : "未知"}
-      </span>
-    </>
+    <span className={`security-${tone}`}>
+      {{ danger: "高风险", warning: "有风险项", neutral: "风险未知", safe: "已知项未见风险" }[tone]}
+    </span>
   );
 }
-
-const percentFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
-const countFormatter = new Intl.NumberFormat("en-US");
-
-function percent(value: string | null | undefined): string {
-  if (typeof value !== "string" || !/^\d+(?:\.\d+)?$/.test(value.trim())) return "未知";
-  const number = Number(value);
-  return Number.isFinite(number) && number >= 0 && number <= 100
-    ? `${percentFormatter.format(number)}%`
-    : "未知";
-}
-
-function count(value: number | null | undefined): string {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-    ? countFormatter.format(value)
-    : "未知";
-}
-
-function yesNo(value: boolean | null | undefined): string {
-  return value === true ? "是" : value === false ? "否" : "未知";
-}
-
-/** Missing provider fields deliberately remain unknown, including nullable booleans. */
 export function TokenRiskGrid({ token }: { token: Token }) {
   const security = token.security;
-  const sniperCount = count(security.sniperCount);
-  const sniperTotal = count(security.sniperTotal);
-  const snipers =
-    sniperCount !== "未知" &&
-    sniperTotal !== "未知" &&
-    security.sniperCount! <= security.sniperTotal!
-      ? `${sniperCount} / ${sniperTotal}`
-      : "未知";
-  const sniperHoldings = percent(security.sniperHoldingPct);
-  const burned = percent(security.liquidityBurnedPct);
-  const locked = percent(security.liquidityLockedPct);
-  const values = [
-    { label: "Top 10", value: percent(security.top10HolderPct) },
-    { label: "DEV", value: percent(security.devHoldingPct) },
-    { label: "持有人", value: count(token.holders) },
-    {
-      label: "狙击者",
-      value: snipers,
-      detail: sniperHoldings === "未知" ? undefined : `持仓 ${sniperHoldings}`,
-    },
-    { label: "老鼠仓", value: percent(security.ratHoldingPct) },
-    { label: "钓鱼钱包", value: percent(security.phishingHoldingPct) },
-    { label: "捆绑交易", value: percent(security.bundlerHoldingPct) },
-    { label: "DEX 付费", value: yesNo(security.dexPaid) },
-    {
-      label: "非貔貅",
-      value: yesNo(
-        security.isHoneypot === null || security.isHoneypot === undefined
-          ? null
-          : !security.isHoneypot,
-      ),
-      tone:
-        security.isHoneypot === true
-          ? "danger"
-          : security.isHoneypot === false
-            ? "safe"
-            : "neutral",
-    },
-    { label: "开源", value: yesNo(security.isOpenSource) },
-    { label: "弃权", value: yesNo(security.isRenounced) },
-    {
-      label: "LP 燃烧 / 锁定",
-      value: burned === "未知" && locked === "未知" ? "未知" : `${burned} / ${locked}`,
-    },
-  ];
+  const metrics = riskMetrics(security);
+  const incomplete = security.top10HolderPct == null || security.devHoldingPct == null;
   return (
-    <section className="token-risk-panel" aria-label="代币安全与持仓">
+    <section className="token-risk-panel panel" aria-label="Safety 安全信息">
       <div className="risk-grid-heading">
-        <h3>安全与持仓</h3>
-        <span className={security.isShowAlert === true ? "security-warning" : "security-neutral"}>
-          风险提示：
-          {security.isShowAlert === true ? "有" : security.isShowAlert === false ? "无" : "未知"}
-        </span>
+        <h3>Safety</h3>
+        <TokenRiskLabels security={security} />
       </div>
+      <p className="data-note">
+        GMGN ·{" "}
+        {token.safety?.updatedAt
+          ? new Date(token.safety.updatedAt).toLocaleString()
+          : "更新时间未知"}
+        {token.safety?.stale ? " · 数据待更新" : ""}
+      </p>
+      {incomplete && <p className="security-neutral">信息不完整：Top 10 或 Dev 持仓未知</p>}
+      {security.isHoneypot === true && <p className="security-danger">已识别貔貅，已禁止买入</p>}
       <dl className="risk-grid">
-        {values.map(({ label, value, tone, detail }) => (
+        {metrics.map(({ label, value, tone }) => (
           <div className="risk-metric" key={label}>
             <dt className="risk-metric-label">{label}</dt>
-            <dd className={`risk-metric-value security-${tone ?? "neutral"}`}>
-              {value}
-              {detail && <small className="risk-metric-detail">{detail}</small>}
-            </dd>
+            <dd className={`risk-metric-value security-${tone}`}>{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="data-note">成交量占比与持仓占比口径不同，以下数值不替代持仓风险。</p>
+      <dl className="risk-grid">
+        {[
+          ["Rat 成交量占比", security.ratVolumePct],
+          ["Bundler 成交量占比", security.bundlerVolumePct],
+          ["Phishing 成交量占比", security.phishingVolumePct],
+        ].map(([label, value]) => (
+          <div className="risk-metric" key={label}>
+            <dt>{label}</dt>
+            <dd>{value == null ? "未知" : `${format.format(Number(value))}%`}</dd>
           </div>
         ))}
       </dl>

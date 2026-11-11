@@ -1,112 +1,54 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import * as matchers from "@testing-library/jest-dom/matchers";
 import { afterEach, expect, it } from "vitest";
-import { TokenRiskGrid, TokenRiskLabels } from "./TokenRiskLabels";
+import { TokenRiskGrid, safetySeverity } from "./TokenRiskLabels";
 import type { Token } from "./types";
-
 expect.extend(matchers);
-
 afterEach(cleanup);
-
-it.each([
-  { isHoneypot: true, isShowAlert: true, honeypot: "是", alert: "有" },
-  { isHoneypot: false, isShowAlert: false, honeypot: "否", alert: "无" },
-  { isHoneypot: null, isShowAlert: null, honeypot: "未知", alert: "未知" },
-  { isHoneypot: null, isShowAlert: true, honeypot: "未知", alert: "有" },
-  { isHoneypot: undefined, isShowAlert: undefined, honeypot: "未知", alert: "未知" },
-])(
-  "renders independent risk states: $honeypot / $alert",
-  ({ isHoneypot, isShowAlert, honeypot, alert }) => {
-    render(<TokenRiskLabels security={{ isHoneypot, isShowAlert } as Token["security"]} />);
-    const honeypotLabel = screen.getByText(`貔貅：${honeypot}`);
-    const alertLabel = screen.getByText(`风险提示：${alert}`);
-    expect(honeypotLabel).toBeVisible();
-    expect(alertLabel).toBeVisible();
-    expect(honeypotLabel).toHaveClass(isHoneypot === true ? "security-danger" : "security-neutral");
-    expect(alertLabel).toHaveClass(isShowAlert === true ? "security-warning" : "security-neutral");
-  },
-);
-
-function metricValue(label: string) {
-  return within(screen.getByText(label).closest(".risk-metric") as HTMLElement).getByRole(
-    "definition",
+const token = (security: Partial<Token["security"]>) => ({ security }) as Token;
+const metric = (name: string) =>
+  within(screen.getByText(name).closest(".risk-metric") as HTMLElement).getByRole("definition");
+it("keeps known high risk visible when concentration is missing and distinguishes known zero", () => {
+  render(
+    <TokenRiskGrid token={token({ isHoneypot: true, top10HolderPct: null, devHoldingPct: "0" })} />,
   );
-}
-
-it("shows the 12 provider metrics using percentage points and the reported sniper fraction", () => {
-  const token = {
-    holders: 8100,
-    security: {
-      isHoneypot: false,
-      isShowAlert: false,
-      top10HolderPct: "16.248",
-      devHoldingPct: "0.278",
-      sniperCount: 27,
-      sniperTotal: 70,
-      ratHoldingPct: "0",
-      phishingHoldingPct: "2.345",
-      bundlerHoldingPct: null,
-      dexPaid: true,
-      isOpenSource: true,
-      isRenounced: false,
-      liquidityBurnedPct: "12.345",
-      liquidityLockedPct: "50",
-    },
-  } as unknown as Token;
-  render(<TokenRiskGrid token={token} />);
-  expect(screen.getAllByRole("definition")).toHaveLength(12);
-  expect(metricValue("Top 10")).toHaveTextContent("16.25%");
-  expect(metricValue("DEV")).toHaveTextContent("0.28%");
-  expect(metricValue("持有人")).toHaveTextContent("8,100");
-  expect(metricValue("狙击者")).toHaveTextContent("27 / 70");
-  expect(metricValue("老鼠仓")).toHaveTextContent("0%");
-  expect(metricValue("钓鱼钱包")).toHaveTextContent("2.35%");
-  expect(metricValue("捆绑交易")).toHaveTextContent("未知");
-  expect(metricValue("DEX 付费")).toHaveTextContent("是");
-  expect(metricValue("非貔貅")).toHaveTextContent("是");
-  expect(metricValue("开源")).toHaveTextContent("是");
-  expect(metricValue("弃权")).toHaveTextContent("否");
-  expect(metricValue("LP 燃烧 / 锁定")).toHaveTextContent("12.35% / 50%");
+  expect(screen.getByText("高风险")).toHaveClass("security-danger");
+  expect(screen.getByText(/信息不完整/)).toBeVisible();
+  expect(screen.getByText(/已禁止买入/)).toBeVisible();
+  expect(metric("Dev 持仓")).toHaveTextContent("0%");
+  expect(metric("Dev 持仓")).toHaveClass("security-safe");
+  expect(metric("Top 10 持仓")).toHaveTextContent("未知");
 });
-
-it("leaves missing and invalid provider values unknown rather than treating them as zero or safe", () => {
-  const token = {
-    security: {
-      top10HolderPct: "",
-      devHoldingPct: "unknown",
-      sniperCount: 27,
-      sniperTotal: null,
-      ratHoldingPct: null,
-      phishingHoldingPct: "-1",
-      bundlerHoldingPct: "101",
-      dexPaid: null,
-      isOpenSource: null,
-      isRenounced: null,
-      liquidityBurnedPct: null,
-      liquidityLockedPct: null,
-    },
-  } as unknown as Token;
-  render(<TokenRiskGrid token={token} />);
-  expect(screen.getAllByRole("definition").every((node) => node.textContent === "未知")).toBe(true);
+it("applies every documented threshold including boundary values and boolean risk", () => {
+  for (const [field, green, warning, red] of [
+    ["top10HolderPct", "30", "45", "45.01"],
+    ["devHoldingPct", "5", "10", "10.01"],
+    ["ratHoldingPct", "8", "100", null],
+    ["sniperHoldingPct", "15", "100", null],
+    ["bundlerHoldingPct", "10", "20", "20.01"],
+    ["phishingHoldingPct", "10", "25", "25.01"],
+    ["rugRatio", "0.099", "0.3", "0.301"],
+    ["buyTaxPct", "0", "100", null],
+    ["sellTaxPct", "0", "5", "5.001"],
+  ] as const) {
+    expect(safetySeverity(token({ [field]: green }).security)).toBe("neutral");
+    expect(safetySeverity(token({ [field]: warning }).security)).toBe("warning");
+    if (red) expect(safetySeverity(token({ [field]: red }).security)).toBe("danger");
+  }
+  expect(safetySeverity(token({ rugRatio: "0.1" }).security)).toBe("warning");
+  expect(safetySeverity(token({ isWashTrading: true }).security)).toBe("danger");
+  expect(safetySeverity(token({ isOpenSource: false }).security)).toBe("warning");
+  expect(safetySeverity(token({ isRenounced: false }).security)).toBe("warning");
 });
-
-it("keeps honeypot and provider alert independent while token metrics change", () => {
-  const { rerender } = render(
-    <TokenRiskGrid token={{ security: { isHoneypot: null, isShowAlert: true } } as Token} />,
+it("does not substitute volume fractions for holding risk and preserves unknown fields", () => {
+  render(
+    <TokenRiskGrid
+      token={token({ ratVolumePct: "95", bundlerVolumePct: "40", phishingVolumePct: "30" })}
+    />,
   );
-  expect(metricValue("非貔貅")).toHaveTextContent("未知");
-  expect(screen.getByText("风险提示：有")).toHaveClass("security-warning");
-  rerender(
-    <TokenRiskGrid token={{ security: { isHoneypot: false, isShowAlert: null } } as Token} />,
-  );
-  expect(metricValue("非貔貅")).toHaveTextContent("是");
-  expect(screen.getByText("风险提示：未知")).toHaveClass("security-neutral");
-});
-
-it("shows known sniper holdings while leaving the unavailable count fraction unknown", () => {
-  render(<TokenRiskGrid token={{ holders: 0, security: { sniperHoldingPct: "0.37" } } as Token} />);
-  expect(metricValue("持有人")).toHaveTextContent("0");
-  expect(metricValue("狙击者")).toHaveTextContent("未知");
-  expect(metricValue("狙击者")).toHaveTextContent("持仓 0.37%");
-  expect(metricValue("狙击者")).not.toHaveTextContent("/ 70");
+  expect(metric("Rat 持仓")).toHaveTextContent("未知");
+  expect(metric("Bundler 持仓")).toHaveTextContent("未知");
+  expect(metric("Rat 成交量占比")).toHaveTextContent("95%");
+  expect(metric("Bundler 成交量占比")).toHaveTextContent("40%");
+  expect(screen.getByText("风险未知")).toHaveClass("security-neutral");
 });

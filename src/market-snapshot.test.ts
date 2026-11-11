@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chooseNewerCandle, mergeSnapshots } from "./App.js";
+import { chooseNewerCandle, mergeSnapshots } from "./token-api.js";
 import { streamBatchItems, streamSequenceAction } from "./stream-batches.js";
 import type { Candle, CandleSnapshot } from "./types.js";
 

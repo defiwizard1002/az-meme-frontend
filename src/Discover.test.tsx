@@ -1,0 +1,50 @@
+import { describe, expect, it } from "vitest";
+import { lifecycleLabel, orderMarkets, reconcileMarkets } from "./discovery";
+import { money, percent, safeUrl } from "./display";
+import type { Token } from "./types";
+const token = (id: string, volume: string | null, age: number | null): Token =>
+  ({ tokenAddress: id, volume24hUsd: volume, ageSeconds: age }) as Token;
+describe("Discover ordering and honest missing values", () => {
+  it("orders new tokens by age, volume by descending value and missing values last", () => {
+    const a = token("a", "10", 30),
+      b = token("b", "20", 20),
+      c = token("c", null, null);
+    expect(orderMarkets([c, a, b], "ageSeconds", "asc").map((t) => t.tokenAddress)).toEqual([
+      "b",
+      "a",
+      "c",
+    ]);
+    expect(orderMarkets([c, a, b], "volume24hUsd", "desc").map((t) => t.tokenAddress)).toEqual([
+      "b",
+      "a",
+      "c",
+    ]);
+  });
+  it("freezes insertion and position while still updating quote-related token data", () => {
+    const a = token("a", "10", 30),
+      b = token("b", "20", 20),
+      c = token("c", "30", 10);
+    const changed = { ...a, security: { isHoneypot: true } } as Token;
+    const result = reconcileMarkets([a, b], [c, b, changed], true);
+    expect(result.items.map((t) => t.tokenAddress)).toEqual(["a", "b"]);
+    expect(result.items[0].security.isHoneypot).toBe(true);
+    expect(result.added).toBe(1);
+    expect(reconcileMarkets([a, b], [c, b, changed], false).items[0]).toBe(c);
+  });
+  it("never derives graduation from a missing progress value or an old stage", () => {
+    expect(lifecycleLabel({ stage: "GRADUATED" } as Token)).toBe("阶段未知");
+    expect(lifecycleLabel({ lifecycle: { state: "CURVE", progressPct: null } } as Token)).toBe(
+      "内盘 · 进度未知",
+    );
+    expect(
+      lifecycleLabel({ lifecycle: { state: "NEAR_GRADUATION", progressPct: "80" } } as Token),
+    ).toBe("即将毕业 · 80%");
+  });
+  it("distinguishes unknown from a known zero and rejects unsafe social URLs", () => {
+    expect(money(null)).toBe("—");
+    expect(money("0")).toBe("$0");
+    expect(percent(undefined)).toBe("—");
+    expect(safeUrl("javascript:alert(1)")).toBeUndefined();
+    expect(safeUrl("https://x.com/test")).toBe("https://x.com/test");
+  });
+});
