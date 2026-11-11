@@ -17,43 +17,51 @@ vi.mock("./Portfolio", () => ({ Portfolio: () => null }));
 vi.mock("./TradingPanel", () => ({ TradingPanel: () => null }));
 vi.mock("./TokenDetails", () => ({ TokenDetails: ({ token }: any) => <div>{token.symbol}</div> }));
 import App from "./App";
-beforeEach(() => {
+const prepareScenario1 = () => {
   window.location.hash = "";
   vi.clearAllMocks();
   api.getConfig.mockResolvedValue({ explorerBaseUrl: "" });
   vi.spyOn(window, "scrollTo").mockImplementation(() => {});
-});
-afterEach(() => {
+};
+beforeEach(prepareScenario1);
+const cleanScenario2 = () => {
   cleanup();
   vi.restoreAllMocks();
-});
-it("keeps public discovery available when account loading fails", async () => {
-  api.getAccount.mockRejectedValue(new Error("account unavailable"));
-  render(<App walletAddress={`0x${"1".repeat(40)}`} />);
-  expect(screen.getByText("Discover public")).toBeInTheDocument();
-  expect(await screen.findByText(/账户读取失败/)).toBeInTheDocument();
-  expect(screen.getByText("Discover public")).toBeInTheDocument();
-});
-it("ignores an old token response after navigation", async () => {
-  const a = `0x${"1".repeat(40)}`,
-    b = `0x${"2".repeat(40)}`;
-  let resolveA!: (value: any) => void;
-  api.getToken.mockImplementation((address: string) =>
-    address === a
-      ? new Promise((resolve) => {
-          resolveA = resolve;
-        })
-      : Promise.resolve({ tokenAddress: b, symbol: "TOKEN B" }),
-  );
-  window.location.hash = `token/${a}`;
-  render(<App />);
-  await waitFor(() => expect(api.getToken).toHaveBeenCalledWith(a));
-  act(() => {
-    window.location.hash = `token/${b}`;
-    window.dispatchEvent(new HashChangeEvent("hashchange"));
-  });
-  expect(await screen.findByText("TOKEN B")).toBeInTheDocument();
-  await act(async () => resolveA({ tokenAddress: a, symbol: "TOKEN A" }));
-  expect(screen.queryByText("TOKEN A")).not.toBeInTheDocument();
-  expect(screen.getByText("TOKEN B")).toBeInTheDocument();
+};
+afterEach(cleanScenario2);
+it("App.phase-d: 2 related scenarios", async () => {
+  // keeps public discovery available when account loading fails
+  await (async () => {
+    api.getAccount.mockRejectedValue(new Error("account unavailable"));
+    render(<App walletAddress={`0x${"1".repeat(40)}`} />);
+    expect(screen.getByText("Discover public")).toBeInTheDocument();
+    expect(await screen.findByText(/账户读取失败/)).toBeInTheDocument();
+    expect(screen.getByText("Discover public")).toBeInTheDocument();
+  })();
+  await cleanScenario2();
+  await prepareScenario1();
+  // ignores an old token response after navigation
+  await (async () => {
+    const a = `0x${"1".repeat(40)}`,
+      b = `0x${"2".repeat(40)}`;
+    let resolveA!: (value: any) => void;
+    api.getToken.mockImplementation((address: string) =>
+      address === a
+        ? new Promise((resolve) => {
+            resolveA = resolve;
+          })
+        : Promise.resolve({ tokenAddress: b, symbol: "TOKEN B" }),
+    );
+    window.location.hash = `token/${a}`;
+    render(<App />);
+    await waitFor(() => expect(api.getToken).toHaveBeenCalledWith(a));
+    act(() => {
+      window.location.hash = `token/${b}`;
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    expect(await screen.findByText("TOKEN B")).toBeInTheDocument();
+    await act(async () => resolveA({ tokenAddress: a, symbol: "TOKEN A" }));
+    expect(screen.queryByText("TOKEN A")).not.toBeInTheDocument();
+    expect(screen.getByText("TOKEN B")).toBeInTheDocument();
+  })();
 });

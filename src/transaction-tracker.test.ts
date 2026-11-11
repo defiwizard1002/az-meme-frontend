@@ -18,38 +18,44 @@ const pending: AccountTransaction = {
 };
 
 describe("main-account transaction tracking", () => {
-  afterEach(() => vi.useRealTimers());
+  const cleanScenario1 = () => vi.useRealTimers();
+  afterEach(cleanScenario1);
 
-  it("polls until the transaction is confirmed", async () => {
-    vi.useFakeTimers();
-    let calls = 0;
-    const tracking = pollTransactionUntilTerminal(pending.executionId, {
-      signal: new AbortController().signal,
-      pollIntervalMs: 1_000,
-      loadTransaction: async () => (++calls === 2 ? { ...pending, status: "CONFIRMED" } : pending),
-      onUpdate: vi.fn(),
-    });
+  it("main-account transaction tracking: 2 related scenarios", async () => {
+    // polls until the transaction is confirmed
+    await (async () => {
+      vi.useFakeTimers();
+      let calls = 0;
+      const tracking = pollTransactionUntilTerminal(pending.executionId, {
+        signal: new AbortController().signal,
+        pollIntervalMs: 1_000,
+        loadTransaction: async () =>
+          ++calls === 2 ? { ...pending, status: "CONFIRMED" } : pending,
+        onUpdate: vi.fn(),
+      });
 
-    await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(1_000);
 
-    await expect(tracking).resolves.toMatchObject({ status: "CONFIRMED" });
-    expect(calls).toBe(2);
-  });
-
-  it("keeps unknown submissions pending until a verified final result without resubmitting", async () => {
-    vi.useFakeTimers();
-    const loadTransaction = vi
-      .fn()
-      .mockResolvedValueOnce({ ...pending, status: "SUBMISSION_UNKNOWN" })
-      .mockResolvedValueOnce({ ...pending, status: "CONFIRMED" });
-    const tracking = pollTransactionUntilTerminal(pending.executionId, {
-      signal: new AbortController().signal,
-      loadTransaction,
-      onUpdate: vi.fn(),
-      pollIntervalMs: 1000,
-    });
-    await vi.advanceTimersByTimeAsync(1000);
-    await expect(tracking).resolves.toMatchObject({ status: "CONFIRMED" });
-    expect(loadTransaction).toHaveBeenCalledTimes(2);
+      await expect(tracking).resolves.toMatchObject({ status: "CONFIRMED" });
+      expect(calls).toBe(2);
+    })();
+    await cleanScenario1();
+    // keeps unknown submissions pending until a verified final result without resubmitting
+    await (async () => {
+      vi.useFakeTimers();
+      const loadTransaction = vi
+        .fn()
+        .mockResolvedValueOnce({ ...pending, status: "SUBMISSION_UNKNOWN" })
+        .mockResolvedValueOnce({ ...pending, status: "CONFIRMED" });
+      const tracking = pollTransactionUntilTerminal(pending.executionId, {
+        signal: new AbortController().signal,
+        loadTransaction,
+        onUpdate: vi.fn(),
+        pollIntervalMs: 1000,
+      });
+      await vi.advanceTimersByTimeAsync(1000);
+      await expect(tracking).resolves.toMatchObject({ status: "CONFIRMED" });
+      expect(loadTransaction).toHaveBeenCalledTimes(2);
+    })();
   });
 });

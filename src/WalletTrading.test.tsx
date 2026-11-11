@@ -49,48 +49,59 @@ function providerFixture() {
 
 let provider: ReturnType<typeof providerFixture>;
 
-beforeEach(() => {
+const prepareScenario1 = () => {
   provider = providerFixture();
   Object.defineProperty(window, "ethereum", { configurable: true, value: provider });
   vi.mocked(authenticateWallet).mockReset();
   vi.mocked(authenticateWallet).mockResolvedValue(undefined);
   vi.mocked(clearSessionToken).mockClear();
-});
+};
+beforeEach(prepareScenario1);
 
-afterEach(() => {
+const cleanScenario2 = () => {
   cleanup();
   delete (window as Window & { ethereum?: unknown }).ethereum;
   vi.restoreAllMocks();
-});
+};
+afterEach(cleanScenario2);
 
 describe("WalletTrading wallet authentication", () => {
-  it("only syncs the initial and changed account without signing", async () => {
-    render(<WalletTrading />);
+  it("WalletTrading wallet authentication: 2 related scenarios", async () => {
+    // only syncs the initial and changed account without signing
+    await (async () => {
+      render(<WalletTrading />);
 
-    await waitFor(() => expect(provider.request).toHaveBeenCalledWith({ method: "eth_accounts" }));
-    expect(screen.getByTestId("wallet-address")).toHaveTextContent("");
-    expect(vi.mocked(authenticateWallet)).not.toHaveBeenCalled();
+      await waitFor(() =>
+        expect(provider.request).toHaveBeenCalledWith({ method: "eth_accounts" }),
+      );
+      expect(screen.getByTestId("wallet-address")).toHaveTextContent("");
+      expect(vi.mocked(authenticateWallet)).not.toHaveBeenCalled();
 
-    provider.emit("accountsChanged", [address]);
-    expect(screen.getByTestId("wallet-address")).toHaveTextContent("");
-    expect(vi.mocked(authenticateWallet)).not.toHaveBeenCalled();
-  });
+      provider.emit("accountsChanged", [address]);
+      expect(screen.getByTestId("wallet-address")).toHaveTextContent("");
+      expect(vi.mocked(authenticateWallet)).not.toHaveBeenCalled();
+    })();
+    await cleanScenario2();
+    await prepareScenario1();
+    // authenticates once when the user clicks connect twice while busy
+    await (async () => {
+      let resolveAuthentication!: () => void;
+      vi.mocked(authenticateWallet).mockImplementation(
+        () => new Promise<void>((resolve) => (resolveAuthentication = resolve)),
+      );
+      render(<WalletTrading />);
+      await waitFor(() =>
+        expect(provider.request).toHaveBeenCalledWith({ method: "eth_accounts" }),
+      );
 
-  it("authenticates once when the user clicks connect twice while busy", async () => {
-    let resolveAuthentication!: () => void;
-    vi.mocked(authenticateWallet).mockImplementation(
-      () => new Promise<void>((resolve) => (resolveAuthentication = resolve)),
-    );
-    render(<WalletTrading />);
-    await waitFor(() => expect(provider.request).toHaveBeenCalledWith({ method: "eth_accounts" }));
+      const connect = screen.getByRole("button", { name: "连接钱包" });
+      fireEvent.click(connect);
+      fireEvent.click(connect);
 
-    const connect = screen.getByRole("button", { name: "连接钱包" });
-    fireEvent.click(connect);
-    fireEvent.click(connect);
-
-    await waitFor(() => expect(vi.mocked(authenticateWallet)).toHaveBeenCalledTimes(1));
-    expect(provider.request).toHaveBeenCalledWith({ method: "eth_requestAccounts" });
-    expect(vi.mocked(authenticateWallet)).toHaveBeenCalledWith(address, provider);
-    resolveAuthentication();
+      await waitFor(() => expect(vi.mocked(authenticateWallet)).toHaveBeenCalledTimes(1));
+      expect(provider.request).toHaveBeenCalledWith({ method: "eth_requestAccounts" });
+      expect(vi.mocked(authenticateWallet)).toHaveBeenCalledWith(address, provider);
+      resolveAuthentication();
+    })();
   });
 });

@@ -57,8 +57,9 @@ function assertEngineCandle(bar: ChartCandle): void {
 }
 
 describe("CandleChart renderability", () => {
-  afterEach(cleanup);
-  beforeEach(() => {
+  const cleanScenario1 = cleanup;
+  afterEach(cleanScenario1);
+  const prepareScenario2 = () => {
     vi.resetAllMocks();
     engine.setCandles.mockImplementation((bars: ChartCandle[]) => bars.forEach(assertEngineCandle));
     engine.updateCandle.mockImplementation(assertEngineCandle);
@@ -85,280 +86,313 @@ describe("CandleChart renderability", () => {
       }),
       remove: vi.fn(),
     });
-  });
+  };
+  beforeEach(prepareScenario2);
 
-  it("excludes the real huge decimal without a setData assertion, clamping, or rewriting raw candles", () => {
-    const candles = [
-      candle(100),
-      candle(160, { o: hugePrice, h: hugePrice, c: hugePrice }),
-      candle(220, { o: "0.02", c: "0.021" }),
-    ];
-    const original = structuredClone(candles);
-    expect(Number(hugePrice)).toBe(3.776570421343502e68);
-
-    expect(() => render(<CandleChart symbol="HUGE" candles={candles} />)).not.toThrow();
-
-    expect(engine.setCandles).toHaveBeenLastCalledWith([
-      { time: 100, open: 0.0184, high: 0.022, low: 0.017, close: 0.0195 },
-      { time: 220, open: 0.0195, high: 0.022, low: 0.017, close: 0.021 },
-    ]);
-    expect(engine.setVolumes.mock.lastCall?.[0].map((bar: ChartVolume) => bar.time)).toEqual([
-      100, 220,
-    ]);
-    expect(candles).toEqual(original);
-    expect(screen.queryByText(/无法渲染|已排除/)).not.toBeInTheDocument();
-    expect(screen.getByTestId("tradingview-chart")).toHaveAttribute(
-      "data-excluded-candle-count",
-      "1",
-    );
-  });
-
-  it.each(["o", "h", "l", "c"] as const)(
-    "checks %s independently for finite, positive, in-range conversion",
-    (field) => {
-      const invalid = [
-        hugePrice,
-        "90071992547410",
-        "1e309",
-        "NaN",
-        "Infinity",
-        "-Infinity",
-        "0",
-        "-1",
-        "1e-400",
-      ];
+  it("CandleChart renderability: 11 related scenarios", async () => {
+    // excludes the real huge decimal without a setData assertion, clamping, or rewriting raw candles
+    await (async () => {
       const candles = [
         candle(100),
-        ...invalid.map((value, index) => candle(160 + index * 60, { [field]: value })),
+        candle(160, { o: hugePrice, h: hugePrice, c: hugePrice }),
+        candle(220, { o: "0.02", c: "0.021" }),
+      ];
+      const original = structuredClone(candles);
+      expect(Number(hugePrice)).toBe(3.776570421343502e68);
+
+      expect(() => render(<CandleChart symbol="HUGE" candles={candles} />)).not.toThrow();
+
+      expect(engine.setCandles).toHaveBeenLastCalledWith([
+        { time: 100, open: 0.0184, high: 0.022, low: 0.017, close: 0.0195 },
+        { time: 220, open: 0.0195, high: 0.022, low: 0.017, close: 0.021 },
+      ]);
+      expect(engine.setVolumes.mock.lastCall?.[0].map((bar: ChartVolume) => bar.time)).toEqual([
+        100, 220,
+      ]);
+      expect(candles).toEqual(original);
+      expect(screen.queryByText(/无法渲染|已排除/)).not.toBeInTheDocument();
+      expect(screen.getByTestId("tradingview-chart")).toHaveAttribute(
+        "data-excluded-candle-count",
+        "1",
+      );
+    })();
+    await cleanScenario1();
+    await prepareScenario2();
+    // checks %s independently for finite, positive, in-range conversion
+    {
+      let firstVariant = true;
+      for (const field of ["o", "h", "l", "c"] as const) {
+        if (!firstVariant) {
+          await cleanScenario1();
+          await prepareScenario2();
+        }
+        firstVariant = false;
+        await (async () => {
+          const invalid = [
+            hugePrice,
+            "90071992547410",
+            "1e309",
+            "NaN",
+            "Infinity",
+            "-Infinity",
+            "0",
+            "-1",
+            "1e-400",
+          ];
+          const candles = [
+            candle(100),
+            ...invalid.map((value, index) => candle(160 + index * 60, { [field]: value })),
+          ];
+
+          expect(() => render(<CandleChart symbol="HUGE" candles={candles} />)).not.toThrow();
+
+          expect(engine.setCandles.mock.lastCall?.[0]).toHaveLength(1);
+          expect(screen.queryByRole("status")).not.toBeInTheDocument();
+          expect(screen.getByTestId("tradingview-chart")).toHaveAttribute(
+            "data-excluded-candle-count",
+            String(invalid.length),
+          );
+        })();
+      }
+    }
+    await cleanScenario1();
+    await prepareScenario2();
+    // keeps an empty chart when every candle is huge or non-finite
+    await (async () => {
+      const candles = [
+        candle(100, { o: hugePrice }),
+        candle(160, { h: "1e309" }),
+        candle(220, { l: "NaN" }),
+        candle(280, { c: "Infinity" }),
       ];
 
       expect(() => render(<CandleChart symbol="HUGE" candles={candles} />)).not.toThrow();
 
-      expect(engine.setCandles.mock.lastCall?.[0]).toHaveLength(1);
+      expect(engine.setCandles).toHaveBeenLastCalledWith([]);
+      expect(engine.setVolumes).toHaveBeenLastCalledWith([]);
+      expect(screen.getByLabelText("HUGE K 线图")).toBeInTheDocument();
+      expect(screen.getByText("暂无可渲染 K 线")).toBeVisible();
       expect(screen.queryByRole("status")).not.toBeInTheDocument();
       expect(screen.getByTestId("tradingview-chart")).toHaveAttribute(
         "data-excluded-candle-count",
-        String(invalid.length),
+        "4",
       );
-    },
-  );
+    })();
+    await cleanScenario1();
+    await prepareScenario2();
+    // preserves boundary prices and small positive prices exactly, with no notice for valid bars
+    await (async () => {
+      const prices = ["90071992547409.91", "0.000000000000000001", "0.018456789123456789"];
+      const candles = prices.map((price, index) =>
+        candle(100 + index * 60, {
+          o: price,
+          h: price,
+          l: price,
+          c: price,
+          previousClose: prices[index - 1] ?? null,
+        }),
+      );
 
-  it("keeps an empty chart when every candle is huge or non-finite", () => {
-    const candles = [
-      candle(100, { o: hugePrice }),
-      candle(160, { h: "1e309" }),
-      candle(220, { l: "NaN" }),
-      candle(280, { c: "Infinity" }),
-    ];
+      render(<CandleChart symbol="VALID" candles={candles} />);
 
-    expect(() => render(<CandleChart symbol="HUGE" candles={candles} />)).not.toThrow();
+      expect(engine.setCandles).toHaveBeenLastCalledWith([
+        {
+          time: 100,
+          open: Number(prices[0]),
+          high: Number(prices[0]),
+          low: Number(prices[0]),
+          close: Number(prices[0]),
+        },
+        {
+          time: 160,
+          open: Number(prices[0]),
+          high: Number(prices[0]),
+          low: Number(prices[1]),
+          close: Number(prices[1]),
+        },
+        {
+          time: 220,
+          open: Number(prices[1]),
+          high: Number(prices[2]),
+          low: Number(prices[1]),
+          close: Number(prices[2]),
+        },
+      ]);
+      expect(candles.map((bar) => bar.o)).toEqual(prices);
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    })();
+    await cleanScenario1();
+    await prepareScenario2();
+    // filters unsafe histogram values independently without discarding valid OHLC bars or substituting volume
+    await (async () => {
+      const volumes = ["0", "0.42", "90071992547409.91", hugePrice, "NaN", "1e309", "-1", null];
+      render(
+        <CandleChart
+          symbol="VALID"
+          candles={volumes.map((quoteVolume, index) => candle(100 + index * 60, { quoteVolume }))}
+        />,
+      );
 
-    expect(engine.setCandles).toHaveBeenLastCalledWith([]);
-    expect(engine.setVolumes).toHaveBeenLastCalledWith([]);
-    expect(screen.getByLabelText("HUGE K 线图")).toBeInTheDocument();
-    expect(screen.getByText("暂无可渲染 K 线")).toBeVisible();
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    expect(screen.getByTestId("tradingview-chart")).toHaveAttribute(
-      "data-excluded-candle-count",
-      "4",
-    );
-  });
+      expect(engine.setCandles.mock.lastCall?.[0]).toHaveLength(volumes.length);
+      expect(engine.setVolumes).toHaveBeenLastCalledWith([
+        { time: 100, value: 0, color: "#39d98a55" },
+        { time: 160, value: 0.42, color: "#39d98a55" },
+        { time: 220, value: chartBound, color: "#39d98a55" },
+      ]);
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    })();
+    await cleanScenario1();
+    await prepareScenario2();
+    // handles live invalid bars and their recovery without asserting in update or losing valid history
+    await (async () => {
+      const { rerender } = render(<CandleChart symbol="LIVE" candles={[candle(100)]} />);
+      expect(() =>
+        rerender(
+          <CandleChart symbol="LIVE" candles={[candle(100), candle(160, { o: hugePrice })]} />,
+        ),
+      ).not.toThrow();
+      expect(screen.getByTestId("tradingview-chart")).toHaveAttribute(
+        "data-excluded-candle-count",
+        "1",
+      );
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      expect(engine.updateCandle.mock.calls.every(([bar]) => bar.time === 100)).toBe(true);
 
-  it("preserves boundary prices and small positive prices exactly, with no notice for valid bars", () => {
-    const prices = ["90071992547409.91", "0.000000000000000001", "0.018456789123456789"];
-    const candles = prices.map((price, index) =>
-      candle(100 + index * 60, {
-        o: price,
-        h: price,
-        l: price,
-        c: price,
-        previousClose: prices[index - 1] ?? null,
-      }),
-    );
-
-    render(<CandleChart symbol="VALID" candles={candles} />);
-
-    expect(engine.setCandles).toHaveBeenLastCalledWith([
-      {
-        time: 100,
-        open: Number(prices[0]),
-        high: Number(prices[0]),
-        low: Number(prices[0]),
-        close: Number(prices[0]),
-      },
-      {
+      rerender(<CandleChart symbol="LIVE" candles={[candle(100), candle(160)]} />);
+      expect(engine.updateCandle).toHaveBeenCalledWith({
         time: 160,
-        open: Number(prices[0]),
-        high: Number(prices[0]),
-        low: Number(prices[1]),
-        close: Number(prices[1]),
-      },
-      {
-        time: 220,
-        open: Number(prices[1]),
-        high: Number(prices[2]),
-        low: Number(prices[1]),
-        close: Number(prices[2]),
-      },
-    ]);
-    expect(candles.map((bar) => bar.o)).toEqual(prices);
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
-
-  it("filters unsafe histogram values independently without discarding valid OHLC bars or substituting volume", () => {
-    const volumes = ["0", "0.42", "90071992547409.91", hugePrice, "NaN", "1e309", "-1", null];
-    render(
-      <CandleChart
-        symbol="VALID"
-        candles={volumes.map((quoteVolume, index) => candle(100 + index * 60, { quoteVolume }))}
-      />,
-    );
-
-    expect(engine.setCandles.mock.lastCall?.[0]).toHaveLength(volumes.length);
-    expect(engine.setVolumes).toHaveBeenLastCalledWith([
-      { time: 100, value: 0, color: "#39d98a55" },
-      { time: 160, value: 0.42, color: "#39d98a55" },
-      { time: 220, value: chartBound, color: "#39d98a55" },
-    ]);
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
-
-  it("handles live invalid bars and their recovery without asserting in update or losing valid history", () => {
-    const { rerender } = render(<CandleChart symbol="LIVE" candles={[candle(100)]} />);
-    expect(() =>
-      rerender(
-        <CandleChart symbol="LIVE" candles={[candle(100), candle(160, { o: hugePrice })]} />,
-      ),
-    ).not.toThrow();
-    expect(screen.getByTestId("tradingview-chart")).toHaveAttribute(
-      "data-excluded-candle-count",
-      "1",
-    );
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    expect(engine.updateCandle.mock.calls.every(([bar]) => bar.time === 100)).toBe(true);
-
-    rerender(<CandleChart symbol="LIVE" candles={[candle(100), candle(160)]} />);
-    expect(engine.updateCandle).toHaveBeenCalledWith({
-      time: 160,
-      open: 0.0195,
-      high: 0.022,
-      low: 0.017,
-      close: 0.0195,
-    });
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
-
-  it("replaces historical membership when a bar becomes non-renderable and another recovers at the same count", () => {
-    const { rerender } = render(
-      <CandleChart
-        symbol="LIVE"
-        candles={[candle(100), candle(160, { o: hugePrice }), candle(220)]}
-      />,
-    );
-    rerender(
-      <CandleChart
-        symbol="LIVE"
-        candles={[candle(100, { o: hugePrice }), candle(160), candle(220)]}
-      />,
-    );
-
-    expect(engine.setCandles.mock.lastCall?.[0].map((bar: ChartCandle) => bar.time)).toEqual([
-      160, 220,
-    ]);
-    expect(engine.setVolumes.mock.lastCall?.[0].map((bar: ChartVolume) => bar.time)).toEqual([
-      160, 220,
-    ]);
-    expect(screen.getByTestId("tradingview-chart")).toHaveAttribute(
-      "data-excluded-candle-count",
-      "1",
-    );
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
-
-  it("clears previously visible bars if all become non-renderable, then recovers", () => {
-    const { rerender } = render(<CandleChart symbol="LIVE" candles={[candle(100)]} />);
-    rerender(<CandleChart symbol="LIVE" candles={[candle(100, { c: hugePrice })]} />);
-    expect(engine.setCandles).toHaveBeenLastCalledWith([]);
-    expect(engine.setVolumes).toHaveBeenLastCalledWith([]);
-    rerender(<CandleChart symbol="LIVE" candles={[candle(100)]} />);
-    expect(engine.setCandles.mock.lastCall?.[0]).toHaveLength(1);
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
-
-  it("adds newly renderable historical volume even when the previous histogram was empty", () => {
-    const { rerender } = render(
-      <CandleChart
-        symbol="LIVE"
-        candles={[candle(100, { quoteVolume: hugePrice }), candle(160, { quoteVolume: null })]}
-      />,
-    );
-    rerender(
-      <CandleChart
-        symbol="LIVE"
-        candles={[candle(100, { quoteVolume: "0.42" }), candle(160, { quoteVolume: null })]}
-      />,
-    );
-
-    expect(engine.setVolumes).toHaveBeenLastCalledWith([
-      { time: 100, value: 0.42, color: "#39d98a55" },
-    ]);
-    expect(engine.setCandles.mock.lastCall?.[0]).toHaveLength(2);
-  });
-
-  it("removes a live histogram bar when its volume becomes non-renderable while preserving its OHLC", () => {
-    const { rerender } = render(<CandleChart symbol="LIVE" candles={[candle(100), candle(160)]} />);
-    expect(() =>
+        open: 0.0195,
+        high: 0.022,
+        low: 0.017,
+        close: 0.0195,
+      });
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    })();
+    await cleanScenario1();
+    await prepareScenario2();
+    // replaces historical membership when a bar becomes non-renderable and another recovers at the same count
+    await (async () => {
+      const { rerender } = render(
+        <CandleChart
+          symbol="LIVE"
+          candles={[candle(100), candle(160, { o: hugePrice }), candle(220)]}
+        />,
+      );
       rerender(
         <CandleChart
           symbol="LIVE"
-          candles={[candle(100), candle(160, { quoteVolume: hugePrice })]}
+          candles={[candle(100, { o: hugePrice }), candle(160), candle(220)]}
         />,
-      ),
-    ).not.toThrow();
+      );
 
-    expect(engine.setVolumes).toHaveBeenLastCalledWith([
-      { time: 100, value: 0.42, color: "#39d98a55" },
-    ]);
-    expect(engine.setCandles.mock.lastCall?.[0]).toHaveLength(2);
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
+      expect(engine.setCandles.mock.lastCall?.[0].map((bar: ChartCandle) => bar.time)).toEqual([
+        160, 220,
+      ]);
+      expect(engine.setVolumes.mock.lastCall?.[0].map((bar: ChartVolume) => bar.time)).toEqual([
+        160, 220,
+      ]);
+      expect(screen.getByTestId("tradingview-chart")).toHaveAttribute(
+        "data-excluded-candle-count",
+        "1",
+      );
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    })();
+    await cleanScenario1();
+    await prepareScenario2();
+    // clears previously visible bars if all become non-renderable, then recovers
+    await (async () => {
+      const { rerender } = render(<CandleChart symbol="LIVE" candles={[candle(100)]} />);
+      rerender(<CandleChart symbol="LIVE" candles={[candle(100, { c: hugePrice })]} />);
+      expect(engine.setCandles).toHaveBeenLastCalledWith([]);
+      expect(engine.setVolumes).toHaveBeenLastCalledWith([]);
+      rerender(<CandleChart symbol="LIVE" candles={[candle(100)]} />);
+      expect(engine.setCandles.mock.lastCall?.[0]).toHaveLength(1);
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    })();
+    await cleanScenario1();
+    await prepareScenario2();
+    // adds newly renderable historical volume even when the previous histogram was empty
+    await (async () => {
+      const { rerender } = render(
+        <CandleChart
+          symbol="LIVE"
+          candles={[candle(100, { quoteVolume: hugePrice }), candle(160, { quoteVolume: null })]}
+        />,
+      );
+      rerender(
+        <CandleChart
+          symbol="LIVE"
+          candles={[candle(100, { quoteVolume: "0.42" }), candle(160, { quoteVolume: null })]}
+        />,
+      );
 
-  it("preserves the viewport using only newly rendered history while loading from the original earliest timestamp", async () => {
-    const onLoadBefore = vi.fn(async () => ({ added: 2, exhausted: false }));
-    const { rerender } = render(
-      <CandleChart
-        symbol="HISTORY"
-        candles={[candle(100, { o: hugePrice }), candle(160), candle(220)]}
-        onLoadBefore={onLoadBefore}
-      />,
-    );
-    fireEvent.pointerDown(screen.getByTestId("tradingview-chart"));
-    engine.subscribe.mock.lastCall?.[0]({ from: 0, to: 2 });
-    await waitFor(() => expect(onLoadBefore).toHaveBeenCalledWith(99));
-    engine.visibleRange.mockReturnValue({ from: 0, to: 2 });
+      expect(engine.setVolumes).toHaveBeenLastCalledWith([
+        { time: 100, value: 0.42, color: "#39d98a55" },
+      ]);
+      expect(engine.setCandles.mock.lastCall?.[0]).toHaveLength(2);
+    })();
+    await cleanScenario1();
+    await prepareScenario2();
+    // removes a live histogram bar when its volume becomes non-renderable while preserving its OHLC
+    await (async () => {
+      const { rerender } = render(
+        <CandleChart symbol="LIVE" candles={[candle(100), candle(160)]} />,
+      );
+      expect(() =>
+        rerender(
+          <CandleChart
+            symbol="LIVE"
+            candles={[candle(100), candle(160, { quoteVolume: hugePrice })]}
+          />,
+        ),
+      ).not.toThrow();
 
-    rerender(
-      <CandleChart
-        symbol="HISTORY"
-        candles={[
-          candle(40),
-          candle(70, { o: hugePrice }),
-          candle(100, { o: hugePrice }),
-          candle(160),
-          candle(220),
-        ]}
-        onLoadBefore={onLoadBefore}
-      />,
-    );
+      expect(engine.setVolumes).toHaveBeenLastCalledWith([
+        { time: 100, value: 0.42, color: "#39d98a55" },
+      ]);
+      expect(engine.setCandles.mock.lastCall?.[0]).toHaveLength(2);
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    })();
+    await cleanScenario1();
+    await prepareScenario2();
+    // preserves the viewport using only newly rendered history while loading from the original earliest timestamp
+    await (async () => {
+      const onLoadBefore = vi.fn(async () => ({ added: 2, exhausted: false }));
+      const { rerender } = render(
+        <CandleChart
+          symbol="HISTORY"
+          candles={[candle(100, { o: hugePrice }), candle(160), candle(220)]}
+          onLoadBefore={onLoadBefore}
+        />,
+      );
+      fireEvent.pointerDown(screen.getByTestId("tradingview-chart"));
+      engine.subscribe.mock.lastCall?.[0]({ from: 0, to: 2 });
+      await waitFor(() => expect(onLoadBefore).toHaveBeenCalledWith(99));
+      engine.visibleRange.mockReturnValue({ from: 0, to: 2 });
 
-    expect(engine.setCandles.mock.lastCall?.[0].map((bar: ChartCandle) => bar.time)).toEqual([
-      40, 160, 220,
-    ]);
-    expect(engine.setVisibleRange).toHaveBeenLastCalledWith({ from: 1, to: 3 });
-    expect(screen.getByTestId("tradingview-chart")).toHaveAttribute(
-      "data-excluded-candle-count",
-      "2",
-    );
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      rerender(
+        <CandleChart
+          symbol="HISTORY"
+          candles={[
+            candle(40),
+            candle(70, { o: hugePrice }),
+            candle(100, { o: hugePrice }),
+            candle(160),
+            candle(220),
+          ]}
+          onLoadBefore={onLoadBefore}
+        />,
+      );
+
+      expect(engine.setCandles.mock.lastCall?.[0].map((bar: ChartCandle) => bar.time)).toEqual([
+        40, 160, 220,
+      ]);
+      expect(engine.setVisibleRange).toHaveBeenLastCalledWith({ from: 1, to: 3 });
+      expect(screen.getByTestId("tradingview-chart")).toHaveAttribute(
+        "data-excluded-candle-count",
+        "2",
+      );
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    })();
   });
 });
