@@ -48,7 +48,7 @@ export function UserSettings({
           )}
           {!state.loading && !state.error && (
             <>
-              <QuickAmounts key={state.quickBuyAmounts.join(",")} />
+              <QuickAmounts />
               <h3>关注钱包 ({state.followed.size})</h3>
               {!state.followed.size && <p className="empty-state">尚未关注钱包</p>}
               <ul className="settings-list">

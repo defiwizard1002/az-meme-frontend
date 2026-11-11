@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ActivityFeed } from "./ActivityFeed";
 import { WalletProfile } from "./WalletProfile";
 import { UserStateProvider, useUserState } from "./user-state";
-import { parseQuickBuyAmounts } from "./UserSettings";
+import { parseQuickBuyAmounts, UserSettings } from "./UserSettings";
 import { walletApi } from "./wallet-api";
 import type { ActivityPage, WalletProfileData } from "./wallet-types";
 
@@ -229,4 +229,25 @@ it("wallet-phase-d: 4 related scenarios", async () => {
     fireEvent.mouseLeave(sellCell);
     expect(screen.getByText("$2,200")).toBeVisible();
   })();
+});
+
+it("settings keeps its saved confirmation after the persisted amounts update", async () => {
+  render(
+    <UserStateProvider userId="fresh-test-user">
+      <UserSettings onWallet={() => {}} onToken={() => {}} />
+    </UserStateProvider>,
+  );
+  const input = await screen.findByRole("textbox", { name: "买入预设" });
+  fireEvent.change(input, { target: { value: "1.25, 2" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存快捷金额" }));
+  await waitFor(() =>
+    expect(walletApi.saveState).toHaveBeenCalledWith(
+      "SETTINGS",
+      "preferences",
+      { quickBuyAmounts: ["1.25", "2"] },
+      expect.any(AbortSignal),
+    ),
+  );
+  expect(await screen.findByText("快捷金额已保存")).toBeVisible();
+  expect(input).toHaveValue("1.25, 2");
 });

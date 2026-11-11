@@ -744,7 +744,17 @@ function TokenWorkspace({
     <section className="token-details" aria-label="Token 详情">
       <header className="token-header panel">
         <div className="token-heading">
-          {token.logo && <img className="token-logo" src={token.logo} alt="" />}
+          {token.logo && (
+            <img
+              key={token.logo}
+              className="token-logo"
+              src={token.logo}
+              alt=""
+              onError={(event) => {
+                event.currentTarget.hidden = true;
+              }}
+            />
+          )}
           <div>
             <h2>
               {token.symbol ?? addressLabel(address)} <small>{token.name}</small>
