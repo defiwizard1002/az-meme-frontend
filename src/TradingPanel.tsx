@@ -70,7 +70,9 @@ function TradingForm({
   const callbacks = useRef({ onAccountRefresh, onExecutionChange });
   callbacks.current = { onAccountRefresh, onExecutionChange };
   const treasury =
-    account?.quoteBalances.find((balance) => balance.asset === "USDG")?.available ?? null;
+    account?.fundingModel === "SHARED_TREASURY"
+      ? (account.treasury?.balances.find((balance) => balance.asset === "USDG")?.available ?? null)
+      : null;
   const honeypot = token.security?.isHoneypot === true;
   const symbol = token.symbol ?? token.tokenAddress.slice(0, 8);
 

@@ -53,7 +53,16 @@ const token = {
   security: { isHoneypot: false },
 } as Token;
 const account: AccountSummary = {
-  quoteBalances: [{ asset: "USDG", available: "1000", frozen: "0" }],
+  fundingModel: "SHARED_TREASURY",
+  treasury: {
+    address: `0x${"9".repeat(40)}`,
+    balances: [{ asset: "USDG", available: "1000", frozen: "0" }],
+  },
+  quoteBalances: [{ asset: "USDG", available: "0", frozen: "0" }],
+  walletAssets: {
+    address: wallet,
+    balances: [{ asset: "USDG", available: "0", frozen: "0" }],
+  },
   positions: [],
 };
 
@@ -73,6 +82,49 @@ const cleanScenario2 = () => {
 afterEach(cleanScenario2);
 
 describe("phase D trading", () => {
+  it("uses platform funds for BUY even when the user's balance differs, and keeps missing funds unknown", async () => {
+    const createQuote = vi
+      .spyOn(memeApi, "createQuote")
+      .mockResolvedValue({ ...terms, amountIn: "1" });
+    const props = { token, walletAddress: wallet, onAccountRefresh: vi.fn() };
+    const funded = {
+      ...account,
+      treasury: {
+        ...account.treasury!,
+        balances: [{ asset: "USDG" as const, available: "2.661567", frozen: "0" }],
+      },
+    };
+    const { rerender } = render(<TradingPanel {...props} account={funded} />);
+    fireEvent.change(screen.getByLabelText("交易金额"), { target: { value: "1" } });
+    expect(screen.getByText(/平台共享资金：2.661567 USDG/)).toBeInTheDocument();
+    await waitFor(() => expect(createQuote).toHaveBeenCalledTimes(1));
+    expect(createQuote).toHaveBeenCalledWith(
+      expect.objectContaining({ amountIn: "1", purpose: "ESTIMATE" }),
+      expect.any(AbortSignal),
+    );
+    const userFunded: AccountSummary = {
+      ...account,
+      quoteBalances: [{ asset: "USDG", available: "1000", frozen: "0" }],
+      walletAssets: {
+        address: wallet,
+        balances: [{ asset: "USDG", available: "1000", frozen: "0" }],
+      },
+      treasury: {
+        ...account.treasury!,
+        balances: [{ asset: "USDG", available: "0.5", frozen: "0" }],
+      },
+    };
+    rerender(<TradingPanel {...props} account={userFunded} />);
+    expect(screen.getByText("共享资金余额不足")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "刷新报价" })).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(createQuote).toHaveBeenCalledTimes(1);
+    rerender(<TradingPanel {...props} account={{ ...userFunded, treasury: undefined }} />);
+    expect(screen.getByText(/平台共享资金：未知 USDG/)).toBeInTheDocument();
+    expect(screen.getByText("共享资金余额尚未加载，暂时无法买入")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "刷新报价" })).toBeNull();
+  });
+
   it("phase D trading: 4 related scenarios", async () => {
     // uses server net amounts and refuses absent terms, expiry or changed preparation
     await (async () => {

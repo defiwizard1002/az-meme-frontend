@@ -165,6 +165,8 @@ export interface Trade {
 }
 
 export interface AccountSummary {
+  fundingModel?: "SHARED_TREASURY";
+  treasury?: { address: string; balances: AccountSummary["quoteBalances"] };
   walletAssets?: { address: string; balances: AccountSummary["quoteBalances"] };
   quoteBalances: Array<{ asset: Asset; available: string; frozen: string }>;
   positions: Array<{
