@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lifecycleLabel, orderMarkets, reconcileMarkets } from "./discovery";
+import { lifecycleLabel, orderMarkets, reconcileMarkets, mergeLiveToken } from "./discovery";
 import { money, percent, safeUrl } from "./display";
 import type { Token } from "./types";
 const token = (id: string, volume: string | null, age: number | null): Token =>
@@ -29,6 +29,30 @@ describe("Discover ordering and honest missing values", () => {
     expect(result.items.map((t) => t.tokenAddress)).toEqual(["a", "b"]);
     expect(result.items[0].security.isHoneypot).toBe(true);
     expect(result.added).toBe(1);
+    const live = {
+      ...a,
+      chainId: 4663,
+      priceObservedAt: 200,
+      liveRevision: "2",
+      marketCapUsd: "10",
+    };
+    expect(
+      mergeLiveToken(live, {
+        tokenAddress: "a",
+        chainId: 4663,
+        priceObservedAt: 199,
+        marketCapUsd: "5",
+      }),
+    ).toBe(live);
+    expect(
+      mergeLiveToken(live, {
+        tokenAddress: "a",
+        chainId: 4663,
+        priceObservedAt: 201,
+        liveRevision: "3",
+        marketCapUsd: null,
+      }),
+    ).toMatchObject({ marketCapUsd: null, liveRevision: "3" });
     expect(reconcileMarkets([a, b], [c, b, changed], false).items[0]).toBe(c);
   });
   it("never derives graduation from a missing progress value or an old stage", () => {

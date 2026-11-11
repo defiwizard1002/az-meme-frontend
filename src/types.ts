@@ -2,6 +2,10 @@ export type Interval = "1s" | "30s" | "1m" | "5m" | "15m" | "1h" | "4h" | "1d";
 export type Asset = "WETH" | "ETH" | "USDC" | "USDT" | "USDG";
 
 export interface Token {
+  priceObservedAt?: number;
+  priceSource?: "CHAIN" | "GMGN";
+  liveRevision?: string;
+  asOfBlock?: number;
   chainId: number;
   tokenAddress: string;
   symbol: string | null;

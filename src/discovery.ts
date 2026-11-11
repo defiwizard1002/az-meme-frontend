@@ -55,3 +55,23 @@ export function lifecycleLabel(token: Token): string {
     ? `${text} · ${life.progressPct == null ? "进度未知" : `${life.progressPct}%`}`
     : text;
 }
+
+/** Apply committed price patches without regressing a newer observation. */
+export function mergeLiveToken(current: Token, patch: Partial<Token>): Token {
+  if (
+    patch.tokenAddress?.toLowerCase() !== current.tokenAddress.toLowerCase() ||
+    (patch.chainId !== undefined && patch.chainId !== current.chainId)
+  )
+    return current;
+  if (
+    patch.priceObservedAt !== undefined &&
+    current.priceObservedAt !== undefined &&
+    (patch.priceObservedAt < current.priceObservedAt ||
+      (patch.priceObservedAt === current.priceObservedAt &&
+        patch.liveRevision &&
+        current.liveRevision &&
+        BigInt(patch.liveRevision) <= BigInt(current.liveRevision)))
+  )
+    return current;
+  return { ...current, ...patch };
+}

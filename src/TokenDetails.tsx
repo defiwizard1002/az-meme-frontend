@@ -1,3 +1,4 @@
+import { mergeLiveToken } from "./discovery";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { memeApi, wsBaseUrl } from "./api";
 import { CandleChart, type ChartTradeMarker, type HistoryLoadResult } from "./CandleChart";
@@ -156,8 +157,7 @@ function TokenWorkspace({
             ),
           );
           const merged = {
-            ...value,
-            ...liveFieldsRef.current,
+            ...mergeLiveToken(value, { ...liveFieldsRef.current, chainId, tokenAddress: address }),
             security: {
               ...detailRef.current.security,
               ...Object.fromEntries(
@@ -421,13 +421,20 @@ function TokenWorkspace({
             if (action === "DUPLICATE") return;
             sequences.set(message.channel, { epoch: message.epoch, sequence: message.sequence });
             if (message.channel === marketChannel) {
-              const incoming = message.data as Token;
+              const incoming = streamBatchItems(message.data as Token | { items: Token[] }).find(
+                (item) => item.tokenAddress?.toLowerCase() === address,
+              );
+              if (!incoming) return;
               if (incoming.chainId !== chainId || incoming.tokenAddress.toLowerCase() !== address)
                 throw Error("行情与当前代币不匹配");
               const fields = Object.fromEntries(
                 (
                   [
                     "priceUsd",
+                    "priceObservedAt",
+                    "priceSource",
+                    "liveRevision",
+                    "asOfBlock",
                     "priceQuote",
                     "marketCapUsd",
                     "liquidityUsd",
@@ -443,19 +450,25 @@ function TokenWorkspace({
                     "lifecycle",
                   ] as const
                 )
-                  .filter((key) => incoming[key] != null)
+                  .filter((key) => key in incoming)
                   .map((key) => [key, incoming[key]]),
               ) as Partial<Token>;
               if (fields.stage === "UNKNOWN") delete fields.stage;
               if (fields.lifecycle?.state === "UNKNOWN") delete fields.lifecycle;
-              liveFieldsRef.current = { ...liveFieldsRef.current, ...fields };
               const security = {
                 ...detailRef.current.security,
                 ...Object.fromEntries(
                   Object.entries(incoming.security ?? {}).filter(([, value]) => value != null),
                 ),
               };
-              const merged = { ...detailRef.current, ...fields, security };
+              const merged = mergeLiveToken(detailRef.current, {
+                ...fields,
+                security,
+                chainId,
+                tokenAddress: address,
+              });
+              if (merged === detailRef.current) return;
+              liveFieldsRef.current = { ...liveFieldsRef.current, ...fields };
               detailRef.current = merged;
               setDetail(merged);
               setMarketLive(true);

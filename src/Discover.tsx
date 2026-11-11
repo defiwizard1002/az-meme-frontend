@@ -1,3 +1,4 @@
+import { mergeLiveToken } from "./discovery";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { request, requestPublicMarket, memeApi, wsBaseUrl } from "./api";
 import { useUserState } from "./user-state";
@@ -142,7 +143,7 @@ export default function Discover({
           setItems((current) =>
             current.map((t) => {
               const updated = incoming.get(t.tokenAddress.toLowerCase());
-              return updated ? { ...t, ...updated } : t;
+              return updated ? mergeLiveToken(t, updated) : t;
             }),
           );
         };

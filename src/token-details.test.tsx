@@ -297,15 +297,21 @@ it("repairs missing stream batches, retains live candles over older reads, and r
     instances[0]!.message(
       1,
       {
-        chainId: 4663,
-        tokenAddress: a,
-        priceUsd: "2",
-        marketCapUsd: "2000",
-        name: null,
-        symbol: null,
-        website: null,
-        tradeStatus: "TRADABLE",
-        security: { isHoneypot: true, top10HolderPct: null },
+        items: [
+          {
+            chainId: 4663,
+            tokenAddress: a,
+            priceUsd: "2",
+            priceObservedAt: 2000,
+            liveRevision: "2",
+            marketCapUsd: "2000",
+            name: null,
+            symbol: null,
+            website: null,
+            tradeStatus: "TRADABLE",
+            security: { isHoneypot: true, top10HolderPct: null },
+          },
+        ],
       },
       `market:${a}`,
     ),
@@ -321,11 +327,41 @@ it("repairs missing stream batches, retains live candles over older reads, and r
       security: expect.objectContaining({ isHoneypot: true, top10HolderPct: "20" }),
     }),
   );
+  await act(async () =>
+    instances[0]!.message(
+      2,
+      {
+        items: [
+          {
+            chainId: 4663,
+            tokenAddress: a,
+            priceUsd: "9",
+            priceObservedAt: 1000,
+            liveRevision: "1",
+          },
+        ],
+      },
+      `market:${a}`,
+    ),
+  );
+  expect(update).toHaveBeenLastCalledWith(expect.objectContaining({ priceUsd: "2" }));
   const detailReads = vi.mocked(tokenApi.detail).mock.calls.length;
   await act(async () =>
     instances[0]!.message(
-      3,
-      { chainId: 4663, tokenAddress: a, priceUsd: "3", security: { isHoneypot: null } },
+      4,
+      {
+        items: [
+          {
+            chainId: 4663,
+            tokenAddress: a,
+            priceUsd: "3",
+            marketCapUsd: null,
+            priceObservedAt: 3000,
+            liveRevision: "3",
+            security: { isHoneypot: null },
+          },
+        ],
+      },
       `market:${a}`,
     ),
   );
@@ -333,6 +369,7 @@ it("repairs missing stream batches, retains live candles over older reads, and r
   expect(update).toHaveBeenLastCalledWith(
     expect.objectContaining({
       priceUsd: "3",
+      marketCapUsd: null,
       symbol: "TEST",
       website: "https://example.test",
       security: expect.objectContaining({ isHoneypot: true, top10HolderPct: "20" }),
