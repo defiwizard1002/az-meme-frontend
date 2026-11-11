@@ -1,17 +1,20 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WalletTrading from "./WalletTrading";
-import { authenticateWallet, clearSessionToken } from "./api";
+import { authenticateWallet, clearSessionToken, restoreWalletSession } from "./api";
 
 vi.mock("./api", () => ({
   authenticateWallet: vi.fn(),
   clearSessionToken: vi.fn(),
+  restoreWalletSession: vi.fn(),
   configureServerSignedTransactions: vi.fn(),
 }));
 
 vi.mock("./App", () => ({
   default: (props: {
     walletAddress?: string;
+    accountIdentity?: string;
+    onLogout?: () => void;
     connectionError?: string;
     onConnect?: () => Promise<boolean> | void;
   }) => (
@@ -19,12 +22,15 @@ vi.mock("./App", () => ({
       <button type="button" onClick={() => void props.onConnect?.()}>
         连接钱包
       </button>
+      <button onClick={props.onLogout}>退出</button>
+      <span data-testid="user-id">{props.accountIdentity ?? ""}</span>
       <span data-testid="wallet-address">{props.walletAddress ?? ""}</span>
       <span data-testid="wallet-error">{props.connectionError ?? ""}</span>
     </div>
   ),
 }));
 
+const tradingAddress = "0x2222222222222222222222222222222222222222";
 const address = "0x1111111111111111111111111111111111111111";
 
 function providerFixture() {
@@ -55,6 +61,8 @@ const prepareScenario1 = () => {
   vi.mocked(authenticateWallet).mockReset();
   vi.mocked(authenticateWallet).mockResolvedValue(undefined);
   vi.mocked(clearSessionToken).mockClear();
+  vi.mocked(restoreWalletSession).mockReset();
+  vi.mocked(restoreWalletSession).mockResolvedValue(null);
 };
 beforeEach(prepareScenario1);
 
@@ -66,7 +74,7 @@ const cleanScenario2 = () => {
 afterEach(cleanScenario2);
 
 describe("WalletTrading wallet authentication", () => {
-  it("WalletTrading wallet authentication: 2 related scenarios", async () => {
+  it("WalletTrading explicit login, session restoration and account isolation", async () => {
     // only syncs the initial and changed account without signing
     await (async () => {
       render(<WalletTrading />);
@@ -101,7 +109,53 @@ describe("WalletTrading wallet authentication", () => {
       await waitFor(() => expect(vi.mocked(authenticateWallet)).toHaveBeenCalledTimes(1));
       expect(provider.request).toHaveBeenCalledWith({ method: "eth_requestAccounts" });
       expect(vi.mocked(authenticateWallet)).toHaveBeenCalledWith(address, provider);
-      resolveAuthentication();
+      vi.mocked(restoreWalletSession).mockResolvedValue({
+        userId: "privy-user",
+        accountId: tradingAddress,
+        loginAddress: address,
+      });
+      await act(async () => resolveAuthentication());
+      expect(screen.getByTestId("wallet-address")).toHaveTextContent(tradingAddress);
+      expect(screen.getByTestId("user-id")).toHaveTextContent("privy-user");
     })();
+    await cleanScenario2();
+    await prepareScenario1();
+    // Reload restores only the authenticated server account, without another signature.
+    vi.mocked(restoreWalletSession).mockResolvedValue({
+      userId: "privy-user",
+      accountId: tradingAddress,
+      loginAddress: address,
+    });
+    render(<WalletTrading />);
+    await waitFor(() =>
+      expect(screen.getByTestId("wallet-address")).toHaveTextContent(tradingAddress),
+    );
+    expect(screen.getByTestId("user-id")).toHaveTextContent("privy-user");
+    expect(authenticateWallet).not.toHaveBeenCalled();
+    expect(provider.request).not.toHaveBeenCalledWith({ method: "eth_requestAccounts" });
+    fireEvent.click(screen.getByRole("button", { name: "退出" }));
+    expect(clearSessionToken).toHaveBeenCalled();
+    expect(screen.getByTestId("wallet-address")).toBeEmptyDOMElement();
+    expect(screen.getByTestId("user-id")).toBeEmptyDOMElement();
+    await cleanScenario2();
+    await prepareScenario1();
+    // An account change while reload validation is pending cannot restore the old user's UI.
+    let finishRestore!: (value: Awaited<ReturnType<typeof restoreWalletSession>>) => void;
+    vi.mocked(restoreWalletSession).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishRestore = resolve;
+        }),
+    );
+    render(<WalletTrading />);
+    await waitFor(() => expect(restoreWalletSession).toHaveBeenCalledWith(address));
+    await act(async () => provider.emit("accountsChanged", [tradingAddress]));
+    await act(async () =>
+      finishRestore({ userId: "old-user", accountId: tradingAddress, loginAddress: address }),
+    );
+    expect(screen.getByTestId("wallet-address")).toBeEmptyDOMElement();
+    expect(screen.getByTestId("user-id")).toBeEmptyDOMElement();
+    expect(clearSessionToken).toHaveBeenCalled();
+    expect(authenticateWallet).not.toHaveBeenCalled();
   });
 });

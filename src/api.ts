@@ -205,6 +205,33 @@ export function request<T>(path: string, init?: RequestInit): Promise<T> {
 export function requestPublicMarket<T>(path: string, init?: RequestInit): Promise<T> {
   return send(apiBaseUrl, "MEME", path, init, true);
 }
+export interface WalletSession {
+  userId: string;
+  accountId: string;
+  loginAddress: string | null;
+}
+
+export async function restoreWalletSession(address: string): Promise<WalletSession | null> {
+  const token = sessionToken;
+  if (!token) return null;
+  try {
+    const session = await request<WalletSession>("/sapi/v1/meme/auth/session");
+    if (token !== sessionToken) return null;
+    if (session.loginAddress?.toLowerCase() !== address.toLowerCase()) {
+      clearSessionToken();
+      return null;
+    }
+    return session;
+  } catch (cause) {
+    if (token !== sessionToken) return null;
+    if (cause instanceof ApiError && cause.status === 401) {
+      clearSessionToken();
+      return null;
+    }
+    throw cause;
+  }
+}
+
 export async function authenticateWallet(address: string, provider: WalletProvider): Promise<void> {
   const nonce = await request<{ message: string }>("/sapi/v1/meme/auth/wallet/nonce", {
     method: "POST",

@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, memeApi, resolveApiBaseUrl, resolveWsBaseUrl, setSessionToken } from "./api";
+import {
+  ApiError,
+  memeApi,
+  restoreWalletSession,
+  resolveApiBaseUrl,
+  resolveWsBaseUrl,
+  setSessionToken,
+} from "./api";
 const cleanScenario1 = () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -11,6 +18,36 @@ afterEach(cleanScenario1);
 
 describe("runtime endpoint fallback", () => {
   it("runtime endpoint fallback: 3 related scenarios", async () => {
+    // Saved credentials are checked against the server's signed login identity and trading account.
+    const loginAddress = `0x${"1".repeat(40)}`;
+    const accountId = `0x${"2".repeat(40)}`;
+    const session = { userId: "privy-user", accountId, loginAddress };
+    const fetch = vi
+      .fn()
+      .mockImplementation(async () => new Response(JSON.stringify({ rc: 0, result: session })));
+    vi.stubGlobal("fetch", fetch);
+    setSessionToken("saved-session");
+    expect(await restoreWalletSession(loginAddress)).toEqual(session);
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/auth/session"),
+      expect.objectContaining({ headers: expect.any(Headers) }),
+    );
+    expect(fetch.mock.calls[0]![1].headers.get("authorization")).toBe("Bearer saved-session");
+    expect(await restoreWalletSession(accountId)).toBeNull();
+    expect(localStorage.getItem("az:meme:wallet-session")).toBeNull();
+    fetch.mockClear();
+    expect(await restoreWalletSession(loginAddress)).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    setSessionToken("expired");
+    fetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({ rc: 401, error: { code: "MEME_UNAUTHORIZED", message: "Expired" } }),
+        { status: 401 },
+      ),
+    );
+    expect(await restoreWalletSession(loginAddress)).toBeNull();
+    expect(localStorage.getItem("az:meme:wallet-session")).toBeNull();
+    await cleanScenario1();
     // keeps REST requests relative for empty API config
     await (async () => {
       for (const configuredUrl of [undefined, ""]) {

@@ -34,7 +34,7 @@ function route(): { page: Page; address?: string } {
   };
 }
 export default function App(props: AppProps) {
-  const identity = props.walletAddress?.toLowerCase() ?? null;
+  const identity = props.accountIdentity ?? props.walletAddress?.toLowerCase() ?? null;
   return (
     <UserStateProvider key={identity ?? "guest"} userId={identity}>
       <Workspace {...props} />

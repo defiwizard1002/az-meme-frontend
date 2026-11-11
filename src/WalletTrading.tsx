@@ -4,6 +4,8 @@ import {
   authenticateWallet,
   clearSessionToken,
   configureServerSignedTransactions,
+  restoreWalletSession,
+  type WalletSession,
   type WalletProvider,
 } from "./api";
 
@@ -21,11 +23,11 @@ export default function WalletTrading({
   onConnection?: (props: Partial<ComponentProps<typeof App>>) => void;
 }) {
   const provider = typeof window === "undefined" ? undefined : window.ethereum;
-  const [address, setAddress] = useState<string>();
+  const [session, setSession] = useState<WalletSession | null>(null);
   const [pending, setPending] = useState(true);
   const [error, setError] = useState<string>();
   const connectingRef = useRef(false);
-  const addressRef = useRef<string | undefined>(undefined);
+  const identityVersion = useRef(0);
   const detectedAddressRef = useRef<string | undefined>(undefined);
 
   const connect = useCallback(async (): Promise<boolean> => {
@@ -46,13 +48,14 @@ export default function WalletTrading({
         clearSessionToken();
         detectedAddressRef.current = next;
       }
+      const version = ++identityVersion.current;
       await authenticateWallet(next, provider);
-      if (detectedAddressRef.current?.toLowerCase() !== next.toLowerCase()) {
+      const authenticated = await restoreWalletSession(next);
+      if (version !== identityVersion.current || !authenticated) {
         clearSessionToken();
         return false;
       }
-      addressRef.current = next;
-      setAddress(next);
+      setSession(authenticated);
       return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -70,49 +73,55 @@ export default function WalletTrading({
       setError("未检测到浏览器钱包，请先安装并解锁钱包扩展");
       return;
     }
-    const syncAddress = (accounts: unknown) => {
+    let active = true;
+    const syncAddress = async (accounts: unknown) => {
+      const version = ++identityVersion.current;
       const next =
         Array.isArray(accounts) && typeof accounts[0] === "string" ? accounts[0] : undefined;
-      if (!next) {
-        clearSessionToken();
-        detectedAddressRef.current = undefined;
-        addressRef.current = undefined;
-        setAddress(undefined);
-        setPending(false);
-        setError(undefined);
-        return;
-      }
       if (
-        detectedAddressRef.current &&
-        detectedAddressRef.current.toLowerCase() !== next.toLowerCase()
+        !next ||
+        (detectedAddressRef.current &&
+          detectedAddressRef.current.toLowerCase() !== next.toLowerCase())
       ) {
         clearSessionToken();
-        addressRef.current = undefined;
-        setAddress(undefined);
+        setSession(null);
       }
       detectedAddressRef.current = next;
-      setPending(false);
       setError(undefined);
+      if (next) {
+        const restored = await restoreWalletSession(next);
+        if (!active || version !== identityVersion.current) return;
+        setSession(restored);
+      }
+      setPending(false);
     };
-    const onAccountsChanged = (accounts: unknown) => syncAddress(accounts);
-    provider.on?.("accountsChanged", onAccountsChanged);
-    void provider
-      .request({ method: "eth_accounts" })
-      .then((accounts) => {
-        syncAddress(accounts);
-      })
-      .catch((cause) => {
+    const sync = (accounts: unknown) => {
+      void syncAddress(accounts).catch((cause) => {
+        if (!active) return;
         setPending(false);
         setError(cause instanceof Error ? cause.message : String(cause));
       });
-    return () => provider.removeListener?.("accountsChanged", onAccountsChanged);
+    };
+    provider.on?.("accountsChanged", sync);
+    void provider
+      .request({ method: "eth_accounts" })
+      .then(sync)
+      .catch((cause) => {
+        if (!active) return;
+        setPending(false);
+        setError(cause instanceof Error ? cause.message : String(cause));
+      });
+    return () => {
+      active = false;
+      provider.removeListener?.("accountsChanged", sync);
+    };
   }, [provider, serverSignedTransactions]);
 
   const props = useMemo<ComponentProps<typeof App>>(
     () => ({
       walletRequired: true,
-      walletAddress: address,
-      accountIdentity: address,
+      walletAddress: session?.accountId,
+      accountIdentity: session?.userId,
       connectionPending: pending,
       connectionStatus: pending ? "正在连接浏览器钱包" : undefined,
       connectionRetryable: Boolean(error),
@@ -120,10 +129,11 @@ export default function WalletTrading({
       onConnect: connect,
       onLogout: () => {
         clearSessionToken();
-        setAddress(undefined);
+        ++identityVersion.current;
+        setSession(null);
       },
     }),
-    [address, pending, error, connect],
+    [session, pending, error, connect],
   );
   useEffect(() => onConnection?.(props), [onConnection, props]);
   return onConnection ? null : <App {...props} />;

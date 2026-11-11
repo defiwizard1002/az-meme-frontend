@@ -7,7 +7,8 @@ expect.extend(matchers);
 // Use the browser environment's actual Storage for session persistence assertions.
 Object.defineProperty(globalThis, "localStorage", {
   configurable: true,
-  value: (globalThis as typeof globalThis & { jsdom: { window: Window } }).jsdom.window.localStorage,
+  value: (globalThis as typeof globalThis & { jsdom: { window: Window } }).jsdom.window
+    .localStorage,
 });
 
 class ResizeObserverMock implements ResizeObserver {
