@@ -385,6 +385,7 @@ async function executeAccountTrade(input: AccountTradeInput): Promise<AccountTra
   const { walletAddress, feeConfigVersion: _boundFeeVersion, ...body } = input;
   // Save before POST: either prepare or submit can time out after reaching the server.
   rememberExecution(walletAddress, input.clientExecutionId);
+  let recordCreated = false;
   try {
     if (!serverSignedTransactions) {
       const result = await request<AccountTransaction>("/sapi/v1/meme/account/transactions", {
@@ -400,6 +401,7 @@ async function executeAccountTrade(input: AccountTradeInput): Promise<AccountTra
       "/sapi/v1/meme/privy/transactions",
       { method: "POST", body: JSON.stringify(body) },
     );
+    recordCreated = true;
     rememberExecution(walletAddress, prepared.record.executionId);
     if (sessionToken !== executionSession) throw new Error("钱包已切换，请返回原钱包查看交易状态");
     if (!prepared.authorizationRequest) {
@@ -416,23 +418,30 @@ async function executeAccountTrade(input: AccountTradeInput): Promise<AccountTra
     return submitted;
   } catch (cause) {
     if (
+      !recordCreated &&
       cause instanceof ApiError &&
-      [
-        "MEME_ROUTE_STALE",
-        "MEME_FEE_CONFIG_CHANGED",
-        "MEME_QUOTE_REQUEST_MISMATCH",
-        "MEME_UNAUTHORIZED",
-        "MEME_ATOMIC_BALANCE_INSUFFICIENT",
-        "MEME_TREASURY_APPROVAL_REQUIRED",
-        "MEME_PRIVY_WALLET_REQUIRED",
-        "MEME_PRIVY_SUBMISSION_REJECTED",
-        "MEME_MAIN_ACCOUNT_BUSY",
-        "MEME_MAIN_ACCOUNT_EXECUTION_DISABLED",
-        "MEME_USER_SEND_REQUIRED",
-      ].includes(cause.code)
+      ((typeof cause.details === "object" &&
+        cause.details !== null &&
+        "executionStage" in cause.details &&
+        cause.details.executionStage === "NOT_CREATED") ||
+        [
+          "MEME_ROUTE_STALE",
+          "MEME_FEE_CONFIG_CHANGED",
+          "MEME_QUOTE_REQUEST_MISMATCH",
+          "MEME_UNAUTHORIZED",
+          "MEME_ATOMIC_BALANCE_INSUFFICIENT",
+          "MEME_ATOMIC_SIMULATION_FAILED",
+          "MEME_TREASURY_APPROVAL_REQUIRED",
+          "MEME_PRIVY_WALLET_REQUIRED",
+          "MEME_PRIVY_SUBMISSION_REJECTED",
+          "MEME_MAIN_ACCOUNT_BUSY",
+          "MEME_MAIN_ACCOUNT_EXECUTION_DISABLED",
+          "MEME_USER_SEND_REQUIRED",
+        ].includes(cause.code))
     ) {
-      const saved = pendingExecutionId(walletAddress);
-      if (saved) forgetExecution(walletAddress, saved);
+      // Only a known pre-create rejection retires this attempt. Once a record exists,
+      // even an authentication error must leave its ID available for receipt recovery.
+      forgetExecution(walletAddress, input.clientExecutionId);
     }
     throw cause;
   }
