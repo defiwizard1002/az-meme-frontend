@@ -1,3 +1,4 @@
+import { percent } from "./display";
 import type { Token } from "./types";
 export type MarketSort =
   | "ageSeconds"
@@ -52,7 +53,7 @@ export function lifecycleLabel(token: Token): string {
   };
   const text = labels[life.state] ?? "阶段未知";
   return life.state === "CURVE" || life.state === "NEAR_GRADUATION"
-    ? `${text} · ${life.progressPct == null ? "进度未知" : `${life.progressPct}%`}`
+    ? `${text} · ${life.progressPct == null ? "进度未知" : percent(life.progressPct)}`
     : text;
 }
 

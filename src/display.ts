@@ -3,6 +3,7 @@ export function amount(value: Numeric): string {
   if (value === null || value === undefined || value === "" || !Number.isFinite(Number(value)))
     return "—";
   const n = Number(value);
+  if (n !== 0 && Math.abs(n) < 1) return price(value);
   return Intl.NumberFormat("en-US", {
     notation: Math.abs(n) >= 100_000 ? "compact" : "standard",
     maximumSignificantDigits: 6,
