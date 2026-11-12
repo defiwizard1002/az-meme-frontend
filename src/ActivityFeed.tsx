@@ -331,7 +331,11 @@ function FilteredFeed({
   );
 }
 
-export function ActivityRibbon({ onWallet, onToken }: ActivityLinks) {
+export function ActivityRibbon({
+  onWallet,
+  onToken,
+  onSmartMoney,
+}: ActivityLinks & { onSmartMoney?: () => void }) {
   const [items, setItems] = useState<WalletActivity[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -370,6 +374,13 @@ export function ActivityRibbon({ onWallet, onToken }: ActivityLinks) {
       window.clearInterval(interval);
     };
   }, []);
+  useEffect(() => {
+    const rotation = window.setInterval(() => {
+      if (!hover.current)
+        setItems((current) => (current.length > 1 ? [...current.slice(1), current[0]] : current));
+    }, 6000);
+    return () => window.clearInterval(rotation);
+  }, []);
   return (
     <section
       className="activity-ribbon"
@@ -385,34 +396,39 @@ export function ActivityRibbon({ onWallet, onToken }: ActivityLinks) {
         }
       }}
     >
-      <strong>最新动态</strong>
-      {loading && <span className="muted">正在读取…</span>}
-      {error && <span className="muted">{error}</span>}
-      {!loading && !error && !items.length && <span className="muted">暂无最近动态</span>}
-      {items.map((item) => (
-        <span className="activity-ribbon-item" key={item.eventId}>
-          <button
-            type="button"
-            className="text-button"
-            title={item.address}
-            onClick={() => onWallet(item.address)}
-          >
-            {shortAddress(item.address)}
-          </button>
-          <span className={item.kind === "BUY" ? "positive" : "negative"}>
-            {item.kind === "BUY" ? "买入" : "卖出"}
+      <strong className="live-label">● Live</strong>
+      <div className="ticker-track">
+        {loading && <span className="muted">正在读取…</span>}
+        {error && <span className="muted">{error}</span>}
+        {!loading && !error && !items.length && <span className="muted">暂无最近动态</span>}
+        {items.map((item) => (
+          <span className="activity-ribbon-item" key={item.eventId}>
+            <button
+              type="button"
+              className="text-button"
+              title={item.address}
+              onClick={() => onWallet(item.address)}
+            >
+              {shortAddress(item.address)}
+            </button>
+            <span className={item.kind === "BUY" ? "positive" : "negative"}>
+              {item.kind === "BUY" ? "bought" : "sold"}
+            </span>
+            <button
+              type="button"
+              className="text-button"
+              title={item.token}
+              onClick={() => onToken(item.token)}
+            >
+              {shortAddress(item.token)}
+            </button>
+            <span>{item.amountUsd == null ? "金额未知" : money(item.amountUsd)}</span>
           </span>
-          <button
-            type="button"
-            className="text-button"
-            title={item.token}
-            onClick={() => onToken(item.token)}
-          >
-            {shortAddress(item.token)}
-          </button>
-          <span>{item.amountUsd == null ? "金额未知" : `${money(item.amountUsd)} U`}</span>
-        </span>
-      ))}
+        ))}
+      </div>
+      <button type="button" className="text-button ticker-link" onClick={onSmartMoney}>
+        Smart money ›
+      </button>
     </section>
   );
 }

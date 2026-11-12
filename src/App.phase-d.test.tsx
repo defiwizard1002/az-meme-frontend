@@ -77,3 +77,18 @@ it("App.phase-d: 2 related scenarios", async () => {
     expect(window.location.hash).toBe(`#token/0x${"3".repeat(40)}`);
   })();
 });
+
+it("shows real account totals and leaves incomplete PnL unknown", async () => {
+  api.getAccount.mockResolvedValue({
+    quoteBalances: [{ asset: "USDG", available: "12" }],
+    positions: [{ valueUsd: "30", costUsd: null }],
+  });
+  const { container } = render(<App walletAddress={`0x${"1".repeat(40)}`} />);
+  await waitFor(() =>
+    expect(container.querySelector(".account-overview")).toHaveTextContent("$30"),
+  );
+  expect(container.querySelector(".account-overview")).toHaveTextContent("Unrealized Pnl—");
+  cleanup();
+  render(<App />);
+  expect(document.querySelector(".account-overview")).toHaveTextContent("Available—");
+});

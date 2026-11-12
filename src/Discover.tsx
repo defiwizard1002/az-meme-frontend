@@ -21,12 +21,12 @@ export default function Discover({
 }) {
   const user = useUserState();
   const [tab, setTab] = useState<"hot" | "new" | "watchlist">("hot");
-  const [period, setPeriod] = useState<"1h" | "24h">("24h");
+  const [period, setPeriod] = useState<"1h" | "24h">("1h");
   const [stage, setStage] = useState("ALL");
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<{ field: MarketSort; direction: "asc" | "desc" }>({
-    field: "volume24hUsd",
+    field: "volume1hUsd",
     direction: "desc",
   });
   const [items, setItems] = useState<Token[]>([]);
@@ -393,34 +393,34 @@ export default function Discover({
           <table className="data-table">
             <thead>
               <tr>
-                <th>自选</th>
-                <th>代币</th>
-                <th>{column("年龄", "ageSeconds")}</th>
-                <th>{column("价格", "priceUsd")}</th>
-                <th>{column("涨幅", period === "1h" ? "change1h" : "change24h")}</th>
-                <th>{column("市值", "marketCapUsd")}</th>
-                <th>{column("成交额", period === "1h" ? "volume1hUsd" : "volume24hUsd")}</th>
-                <th>{column("流动性", "liquidityUsd")}</th>
-                <th>{column("持有人", "holders")}</th>
+                <th>Token</th>
+                <th>{column("Age", "ageSeconds")}</th>
+                <th>{column("Price", "priceUsd")}</th>
+                <th>{column(`${period} change`, period === "1h" ? "change1h" : "change24h")}</th>
+                <th>{column("Market cap", "marketCapUsd")}</th>
+                <th>
+                  {column(`${period} volume`, period === "1h" ? "volume1hUsd" : "volume24hUsd")}
+                </th>
+                <th>{column("Liquidity", "liquidityUsd")}</th>
+                <th>{column("Holders", "holders")}</th>
                 <th>
                   {column("Smart", "smartMoneyCount")} / {column("KOL", "kolCount")}
                 </th>
-                <th>快捷买入</th>
+                <th>Quick buy</th>
               </tr>
             </thead>
             <tbody>
               {visible.map((token) => (
                 <tr key={`${token.chainId}:${token.tokenAddress}`}>
-                  <td>
+                  <td className="market-token-cell">
                     <button
+                      className="watch-button"
                       aria-label={`自选 ${token.symbol || token.tokenAddress}`}
                       aria-pressed={user.watchlist.has(token.tokenAddress.toLowerCase())}
                       onClick={() => watch(token)}
                     >
                       {user.watchlist.has(token.tokenAddress.toLowerCase()) ? "★" : "☆"}
                     </button>
-                  </td>
-                  <td>
                     <button className="token-link" onClick={() => onToken(token)}>
                       <span className="token-avatar">
                         {token.symbol?.slice(0, 1) || "?"}
@@ -460,7 +460,19 @@ export default function Discover({
                   <td>
                     {amount(token.smartMoneyCount)} / {amount(token.kolCount)}
                   </td>
-                  <td>
+                  <td className="quick-buy-cell">
+                    <select
+                      aria-label={`USDG amount ${token.symbol || token.tokenAddress}`}
+                      value={quickAmount}
+                      disabled={!user.quickBuyAmounts.length}
+                      onChange={(event) => setSelectedAmount(event.target.value)}
+                    >
+                      {user.quickBuyAmounts.map((value) => (
+                        <option key={value} value={value}>
+                          {value} USDG
+                        </option>
+                      ))}
+                    </select>
                     <button
                       className="quick-buy-button"
                       disabled={
@@ -478,11 +490,8 @@ export default function Discover({
                       {pendingToken === token.tokenAddress
                         ? "处理中…"
                         : quickAmount
-                          ? `买入 ${quickAmount} U`
+                          ? "Buy"
                           : "请设置快捷金额"}
-                    </button>
-                    <button className="buy-button" onClick={() => onToken(token)}>
-                      Buy
                     </button>
                   </td>
                 </tr>

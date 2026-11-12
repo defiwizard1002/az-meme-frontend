@@ -9,7 +9,7 @@ import { UserSettings } from "./UserSettings";
 import { TokenDetails } from "./TokenDetails";
 import { TradingPanel } from "./TradingPanel";
 import { Portfolio } from "./Portfolio";
-import { amount, shortAddress } from "./display";
+import { amount, money, shortAddress } from "./display";
 import type { AccountSummary, Token } from "./types";
 import "./styles.css";
 
@@ -176,6 +176,15 @@ function Workspace({
       })().catch(() => {});
     return () => controller.abort();
   }, [walletAddress, revision]);
+  const positionValue =
+    summary && summary.positions.every((position) => position.valueUsd != null)
+      ? summary.positions.reduce((total, position) => total + Number(position.valueUsd), 0)
+      : null;
+  const unrealizedPnl =
+    positionValue != null && summary?.positions.every((position) => position.costUsd != null)
+      ? positionValue -
+        summary.positions.reduce((total, position) => total + Number(position.costUsd), 0)
+      : null;
   return (
     <div className={`app-shell page-${location.page}`}>
       <header className="app-header">
@@ -203,22 +212,26 @@ function Workspace({
           ))}
         </nav>
         <div className="account-nav">
-          {summary && (
-            <div className="account-overview">
-              <span>
-                Available
-                <strong>
-                  {amount(
-                    summary.quoteBalances.find((balance) => balance.asset === "USDG")?.available,
-                  )}{" "}
-                  <small>USDG</small>
-                </strong>
-              </span>
-              <span>
-                Positions<strong>{summary.positions.length}</strong>
-              </span>
-            </div>
-          )}
+          <div
+            className="account-overview"
+            aria-label={walletAddress ? "账户概览" : "连接钱包后查看账户概览"}
+          >
+            <span>
+              Available
+              <strong>
+                {amount(
+                  summary?.quoteBalances.find((balance) => balance.asset === "USDG")?.available,
+                )}{" "}
+                <small>USDG</small>
+              </strong>
+            </span>
+            <span>
+              Positions<strong>{money(positionValue)}</strong>
+            </span>
+            <span>
+              Unrealized Pnl<strong>{money(unrealizedPnl)}</strong>
+            </span>
+          </div>
           {walletAddress ? (
             <>
               <button onClick={() => setProfile(walletAddress)}>
@@ -233,7 +246,11 @@ function Workspace({
           )}
         </div>
       </header>
-      <ActivityRibbon onWallet={setProfile} onToken={openToken} />
+      <ActivityRibbon
+        onWallet={setProfile}
+        onToken={openToken}
+        onSmartMoney={() => navigate("activity")}
+      />
       <main>
         {connectionError && <p className="notice">{connectionError}</p>}
         {accountError && (
