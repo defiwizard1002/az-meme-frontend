@@ -264,13 +264,43 @@ function Workspace({
         {location.page === "settings" && <UserSettings onWallet={setProfile} onToken={openToken} />}
         {location.page === "portfolio" &&
           (walletAddress ? (
-            <Portfolio
-              walletAddress={walletAddress}
-              explorerBaseUrl={explorer}
-              onSell={(address) => trade(address, "SELL")}
-              onToken={openToken}
-              refreshKey={revision}
-            />
+            <>
+              <dl className="portfolio-summary" aria-label="账户概览">
+                <div>
+                  <dt>Meme Bot account · USDG</dt>
+                  <dd>
+                    {amount(
+                      summary?.quoteBalances.find((balance) => balance.asset === "USDG")?.available,
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt>已记录持仓</dt>
+                  <dd>{summary ? summary.positions.length : "—"}</dd>
+                </div>
+                <div>
+                  <dt>持仓价值 · USD</dt>
+                  <dd>
+                    {summary?.positions.length &&
+                    summary.positions.every((position) => position.valueUsd !== null)
+                      ? amount(
+                          summary.positions.reduce(
+                            (total, position) => total + Number(position.valueUsd),
+                            0,
+                          ),
+                        )
+                      : "—"}
+                  </dd>
+                </div>
+              </dl>
+              <Portfolio
+                walletAddress={walletAddress}
+                explorerBaseUrl={explorer}
+                onSell={(address) => trade(address, "SELL")}
+                onToken={openToken}
+                refreshKey={revision}
+              />
+            </>
           ) : (
             <section className="panel empty-state">
               <h1>Positions / Orders</h1>

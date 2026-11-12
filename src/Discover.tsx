@@ -244,6 +244,7 @@ export default function Discover({
         {visible.map((token) => (
           <button
             className="market-rail-token"
+            data-token-address={token.tokenAddress}
             key={token.tokenAddress}
             onClick={() => onToken(token)}
           >
