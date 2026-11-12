@@ -279,22 +279,12 @@ function TradingForm({
 
   useEffect(() => {
     if (!quickRequest || lastQuick.current === quickRequest.id) return;
-    if (quickRequest.side === "SELL" || quickRequest.amountIn === undefined) {
-      lastQuick.current = quickRequest.id;
-      setSide(quickRequest.side);
-      setApproval(null);
-      setAmount(quickRequest.amountIn ?? "");
-      onQuickRequestConsumed?.(quickRequest.id);
-      return;
-    }
-    if (!walletAddress || !account || busyRef.current || pendingId) return;
     lastQuick.current = quickRequest.id;
-    const input = quickRequest.amountIn;
-    setSide("BUY");
-    setAmount(input);
+    setSide(quickRequest.side);
+    setApproval(null);
+    setAmount(quickRequest.amountIn ?? "");
     onQuickRequestConsumed?.(quickRequest.id);
-    void submit("BUY", input);
-  }, [quickRequest, walletAddress, account, pendingId, submit, onQuickRequestConsumed]);
+  }, [quickRequest, onQuickRequestConsumed]);
 
   async function approve() {
     if (!approval || busyRef.current || approval.expiresAt <= Date.now()) return;

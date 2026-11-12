@@ -240,9 +240,9 @@ describe("phase D trading", () => {
     })();
     await cleanScenario2();
     await prepareScenario1();
-    // quick buy prepares and executes once using the server minimum, with no extra confirmation
+    // quick buy only fills the amount and requests an unsigned estimate
     await (async () => {
-      vi.spyOn(memeApi, "createQuote").mockResolvedValue(terms);
+      const createQuote = vi.spyOn(memeApi, "createQuote").mockResolvedValue(terms);
       const execute = vi.spyOn(memeApi, "executeMainAccountTrade").mockResolvedValue({
         executionId: "done",
         tokenSymbol: "MEME",
@@ -264,10 +264,10 @@ describe("phase D trading", () => {
           quickRequest={{ id: "quick-1", side: "BUY", amountIn: "100" }}
         />,
       );
-      await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
-      expect(execute).toHaveBeenCalledWith(
-        expect.objectContaining({ minAmountOut: "80", slippageBps: 2000, feeConfigVersion: "1" }),
-      );
+      await waitFor(() => expect(createQuote).toHaveBeenCalled());
+      expect(screen.getByLabelText("交易金额")).toHaveValue("100");
+      expect(createQuote.mock.calls.every(([input]) => input.purpose === "ESTIMATE")).toBe(true);
+      expect(execute).not.toHaveBeenCalled();
       expect(screen.queryByRole("dialog")).toBeNull();
       expect(screen.getByText(/共享资金/)).toBeInTheDocument();
     })();
