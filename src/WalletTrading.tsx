@@ -34,7 +34,7 @@ export default function WalletTrading({
     if (connectingRef.current) return false;
     if (!provider) {
       setPending(false);
-      setError("未检测到浏览器钱包，请先安装并解锁钱包扩展");
+      setError(undefined);
       return false;
     }
     connectingRef.current = true;
@@ -70,7 +70,7 @@ export default function WalletTrading({
     configureServerSignedTransactions(serverSignedTransactions);
     if (!provider) {
       setPending(false);
-      setError("未检测到浏览器钱包，请先安装并解锁钱包扩展");
+      setError(undefined);
       return;
     }
     let active = true;

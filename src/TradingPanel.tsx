@@ -145,10 +145,10 @@ function TradingForm({
         if (honeypot) return "已识别为 Honeypot，禁止买入";
         if (compareAmounts(input, "1") < 0 || compareAmounts(input, "9999999") > 0)
           return "买入金额须为 1–9,999,999 U";
-        if (treasury === null) return "共享资金余额尚未加载，暂时无法买入";
+        if (treasury === null) return "余额加载中";
         if (compareAmounts(input, treasury) > 0) return "共享资金余额不足";
       } else {
-        if (ownBalance === null) return "当前钱包的代币余额未知，暂时无法卖出";
+        if (ownBalance === null) return "余额未知";
         if (compareAmounts(input, ownBalance) > 0) return "当前钱包代币余额不足";
       }
       if (token.tradeStatus === "UNSUPPORTED_POOL_TYPE") return "当前代币暂不支持交易";
@@ -425,7 +425,9 @@ function TradingForm({
           刷新报价
         </button>
       )}
-      {(error || invalid) && <p role={error ? "alert" : "status"}>{error ?? invalid}</p>}
+      {(error || (walletAddress && invalid)) && (
+        <p role={error ? "alert" : "status"}>{error ?? invalid}</p>
+      )}
       {pendingId && (
         <p role="status">交易 {pendingId} 处理中，正在查询同一笔交易，请勿重复提交。</p>
       )}

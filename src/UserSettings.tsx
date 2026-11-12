@@ -34,7 +34,6 @@ export function UserSettings({
   return (
     <section className="panel user-settings">
       <h2>用户设置</h2>
-      <p className="muted">关注、备注、自选和快捷金额仅属于当前登录账户。</p>
       {!state.authenticated ? (
         <p className="empty-state">连接钱包后可保存设置。</p>
       ) : (

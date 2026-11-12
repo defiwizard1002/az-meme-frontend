@@ -136,7 +136,7 @@ describe("phase D trading", () => {
     expect(createQuote).toHaveBeenCalledTimes(1);
     rerender(<TradingPanel {...props} account={{ ...userFunded, treasury: undefined }} />);
     expect(screen.getByText(/平台共享资金：未知 USDG/)).toBeInTheDocument();
-    expect(screen.getByText("共享资金余额尚未加载，暂时无法买入")).toBeInTheDocument();
+    expect(screen.getByText("余额加载中")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "刷新报价" })).toBeNull();
   });
 

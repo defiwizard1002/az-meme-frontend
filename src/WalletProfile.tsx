@@ -288,9 +288,7 @@ function PrivateProfile({
   const [error, setError] = useState<string | null>(null);
   return (
     <section className="private-profile">
-      {!state.authenticated ? (
-        <p className="muted">登录后可关注钱包和保存私有备注。</p>
-      ) : (
+      {!state.authenticated ? null : (
         <>
           {(error || state.error) && <p role="alert">{error ?? state.error}</p>}
           <button

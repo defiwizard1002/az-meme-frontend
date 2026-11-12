@@ -74,6 +74,27 @@ const cleanScenario2 = () => {
 afterEach(cleanScenario2);
 
 describe("WalletTrading wallet authentication", () => {
+  it("guest without an extension keeps connect available without a warning", async () => {
+    delete window.ethereum;
+    render(<WalletTrading />);
+    const connect = screen.getByRole("button", { name: "连接钱包" });
+    expect(connect).toBeEnabled();
+    expect(screen.getByTestId("wallet-error")).toBeEmptyDOMElement();
+    fireEvent.click(connect);
+    expect(screen.getByTestId("wallet-error")).toBeEmptyDOMElement();
+    expect(authenticateWallet).not.toHaveBeenCalled();
+  });
+
+  it("keeps real authentication failures visible", async () => {
+    vi.mocked(authenticateWallet).mockRejectedValue(new Error("User rejected request"));
+    render(<WalletTrading />);
+    await waitFor(() => expect(provider.request).toHaveBeenCalledWith({ method: "eth_accounts" }));
+    fireEvent.click(screen.getByRole("button", { name: "连接钱包" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("wallet-error")).toHaveTextContent("User rejected request"),
+    );
+  });
+
   it("WalletTrading explicit login, session restoration and account isolation", async () => {
     // only syncs the initial and changed account without signing
     await (async () => {

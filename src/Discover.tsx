@@ -355,7 +355,7 @@ export default function Discover({
       )}
       {(stale || frozen) && (
         <div className="notice">
-          {stale && <span>显示上次更新的数据。 </span>}
+          {stale && <span>数据待更新</span>}
           {frozen && (
             <button
               onClick={() => {
