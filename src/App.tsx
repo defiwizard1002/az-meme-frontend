@@ -9,7 +9,7 @@ import { UserSettings } from "./UserSettings";
 import { TokenDetails } from "./TokenDetails";
 import { TradingPanel } from "./TradingPanel";
 import { Portfolio } from "./Portfolio";
-import { shortAddress } from "./display";
+import { amount, shortAddress } from "./display";
 import type { AccountSummary, Token } from "./types";
 import "./styles.css";
 
@@ -177,10 +177,12 @@ function Workspace({
     return () => controller.abort();
   }, [walletAddress, revision]);
   return (
-    <div className="app-shell">
+    <div className={`app-shell page-${location.page}`}>
       <header className="app-header">
         <button className="brand" onClick={() => navigate("discover")} aria-label="Memebot 首页">
-          <span className="brand-mark">A</span> Memebot
+          <span>Meme</span>
+          <span className="chain-label">● Robinhood Chain</span>
+          <small>Get in early. Dodge the rugs.</small>
         </button>
         <nav aria-label="主导航">
           {(
@@ -201,7 +203,22 @@ function Workspace({
           ))}
         </nav>
         <div className="account-nav">
-          <span className="chain-label">Robinhood</span>
+          {summary && (
+            <div className="account-overview">
+              <span>
+                Available
+                <strong>
+                  {amount(
+                    summary.quoteBalances.find((balance) => balance.asset === "USDG")?.available,
+                  )}{" "}
+                  <small>USDG</small>
+                </strong>
+              </span>
+              <span>
+                Positions<strong>{summary.positions.length}</strong>
+              </span>
+            </div>
+          )}
           {walletAddress ? (
             <>
               <button onClick={() => setProfile(walletAddress)}>
@@ -274,43 +291,51 @@ function Workspace({
               </p>
             )}
             {token && token.tokenAddress.toLowerCase() === location.address ? (
-              <TokenDetails
-                key={token.tokenAddress.toLowerCase()}
-                token={token}
-                walletAddress={walletAddress}
-                follows={[...user.followed]}
-                onProfile={setProfile}
-                watched={user.watchlist.has(token.tokenAddress.toLowerCase())}
-                onWatch={() => {
-                  if (!user.authenticated) {
-                    void connect();
-                    return;
-                  }
-                  void user
-                    .setWatchlist(
-                      token.tokenAddress,
-                      !user.watchlist.has(token.tokenAddress.toLowerCase()),
-                    )
-                    .catch((cause) =>
-                      setTokenError(cause instanceof Error ? cause.message : "自选保存失败"),
-                    );
-                }}
-                onTokenUpdate={onTokenUpdate}
-              >
-                <TradingPanel
-                  key={`${walletAddress ?? "guest"}:${token.tokenAddress}`}
-                  token={token}
-                  account={summary}
-                  walletAddress={walletAddress}
-                  onConnect={connect}
-                  onAccountRefresh={refreshAccount}
-                  quickRequest={
-                    quick?.tokenAddress === token.tokenAddress.toLowerCase() ? quick : null
-                  }
-                  onQuickRequestConsumed={consumeQuick}
-                  onExecutionChange={refreshAccount}
+              <div className="trading-screen">
+                <Discover
+                  compact
+                  onToken={openToken}
+                  onQuickBuy={(value, amountIn) => trade(value.tokenAddress, "BUY", amountIn)}
+                  onConnect={() => void connect()}
                 />
-              </TokenDetails>
+                <TokenDetails
+                  key={token.tokenAddress.toLowerCase()}
+                  token={token}
+                  walletAddress={walletAddress}
+                  follows={[...user.followed]}
+                  onProfile={setProfile}
+                  watched={user.watchlist.has(token.tokenAddress.toLowerCase())}
+                  onWatch={() => {
+                    if (!user.authenticated) {
+                      void connect();
+                      return;
+                    }
+                    void user
+                      .setWatchlist(
+                        token.tokenAddress,
+                        !user.watchlist.has(token.tokenAddress.toLowerCase()),
+                      )
+                      .catch((cause) =>
+                        setTokenError(cause instanceof Error ? cause.message : "自选保存失败"),
+                      );
+                  }}
+                  onTokenUpdate={onTokenUpdate}
+                >
+                  <TradingPanel
+                    key={`${walletAddress ?? "guest"}:${token.tokenAddress}`}
+                    token={token}
+                    account={summary}
+                    walletAddress={walletAddress}
+                    onConnect={connect}
+                    onAccountRefresh={refreshAccount}
+                    quickRequest={
+                      quick?.tokenAddress === token.tokenAddress.toLowerCase() ? quick : null
+                    }
+                    onQuickRequestConsumed={consumeQuick}
+                    onExecutionChange={refreshAccount}
+                  />
+                </TokenDetails>
+              </div>
             ) : (
               !tokenError && (
                 <p role="status" className="empty-state">

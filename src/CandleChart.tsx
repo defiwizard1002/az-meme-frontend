@@ -193,7 +193,7 @@ export function CandleChart({
       width: container.clientWidth,
       height: container.clientHeight || 360,
       layout: {
-        background: { type: ColorType.Solid, color: "#0f1011" },
+        background: { type: ColorType.Solid, color: "#08070c" },
         textColor: "#8a8f98",
         fontFamily: "SFMono-Regular, Menlo, monospace",
         fontSize: 11,

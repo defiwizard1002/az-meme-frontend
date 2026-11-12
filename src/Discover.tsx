@@ -11,11 +11,13 @@ export default function Discover({
   onQuickBuy,
   onConnect,
   pendingToken,
+  compact = false,
 }: {
   onToken: (token: Token) => void;
   onQuickBuy: (token: Token, amount: string) => void;
   onConnect: () => void;
   pendingToken?: string;
+  compact?: boolean;
 }) {
   const user = useUserState();
   const [tab, setTab] = useState<"hot" | "new" | "watchlist">("hot");
@@ -215,6 +217,62 @@ export default function Discover({
     },
     [user, onConnect],
   );
+  if (compact)
+    return (
+      <aside className="market-rail" aria-label="交易页代币列表">
+        <div className="tabs" aria-label="交易页发现列表">
+          {(
+            [
+              ["hot", "Trending"],
+              ["new", "New"],
+              ["watchlist", "Watchlist"],
+            ] as const
+          ).map(([value, label]) => (
+            <button key={value} aria-pressed={tab === value} onClick={() => changeTab(value)}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {loading && <p role="status">加载代币…</p>}
+        {error && (
+          <p role="alert">
+            {error}
+            <button onClick={() => setRetry((n) => n + 1)}>重试</button>
+          </p>
+        )}
+        {!loading && !error && !visible.length && <p className="empty-state">暂无符合条件的代币</p>}
+        {visible.map((token) => (
+          <button
+            className="market-rail-token"
+            key={token.tokenAddress}
+            onClick={() => onToken(token)}
+          >
+            <span className="token-avatar">
+              {token.symbol?.slice(0, 1) || "?"}
+              {token.logo && (
+                <img
+                  src={token.logo}
+                  alt=""
+                  onError={(event) => {
+                    event.currentTarget.style.display = "none";
+                  }}
+                />
+              )}
+            </span>
+            <span>
+              <strong>{token.symbol || shortAddress(token.tokenAddress)}</strong>
+              <small>{money(token.priceUsd)}</small>
+            </span>
+            <span>
+              <strong>{money(token.marketCapUsd)}</strong>
+              <small className={Number(token.change24h) < 0 ? "negative" : "positive"}>
+                {percent(token.change24h)}
+              </small>
+            </span>
+          </button>
+        ))}
+      </aside>
+    );
   return (
     <section className="panel discover">
       <div className="section-heading">
@@ -363,6 +421,18 @@ export default function Discover({
                   </td>
                   <td>
                     <button className="token-link" onClick={() => onToken(token)}>
+                      <span className="token-avatar">
+                        {token.symbol?.slice(0, 1) || "?"}
+                        {token.logo && (
+                          <img
+                            src={token.logo}
+                            alt=""
+                            onError={(event) => {
+                              event.currentTarget.style.display = "none";
+                            }}
+                          />
+                        )}
+                      </span>
                       <strong>{token.symbol || shortAddress(token.tokenAddress)}</strong>
                       <span>{token.name || "名称未知"}</span>
                     </button>
@@ -391,7 +461,7 @@ export default function Discover({
                   </td>
                   <td>
                     <button
-                      className="buy-button"
+                      className="quick-buy-button"
                       disabled={
                         !quickAmount ||
                         token.security?.isHoneypot === true ||
@@ -409,6 +479,9 @@ export default function Discover({
                         : quickAmount
                           ? `买入 ${quickAmount} U`
                           : "请设置快捷金额"}
+                    </button>
+                    <button className="buy-button" onClick={() => onToken(token)}>
+                      Buy
                     </button>
                   </td>
                 </tr>

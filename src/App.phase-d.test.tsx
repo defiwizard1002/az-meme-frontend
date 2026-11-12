@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({ getConfig: vi.fn(), getToken: vi.fn(), getAccount: vi.fn() }));
 vi.mock("./api", () => ({ memeApi: api }));
@@ -9,7 +9,16 @@ vi.mock("./user-state", () => ({
   UserStateProvider: ({ children }: any) => children,
   useUserState: () => ({ followed: new Set(), watchlist: new Set(), authenticated: false }),
 }));
-vi.mock("./Discover", () => ({ default: () => <div>Discover public</div> }));
+vi.mock("./Discover", () => ({
+  default: ({ compact, onToken }: any) =>
+    compact ? (
+      <button onClick={() => onToken({ tokenAddress: `0x${"3".repeat(40)}`, symbol: "TOKEN C" })}>
+        Rail token
+      </button>
+    ) : (
+      <div>Discover public</div>
+    ),
+}));
 vi.mock("./ActivityFeed", () => ({ ActivityRibbon: () => null, ActivityFeed: () => null }));
 vi.mock("./WalletProfile", () => ({ WalletProfile: () => null }));
 vi.mock("./UserSettings", () => ({ UserSettings: () => null }));
@@ -61,7 +70,10 @@ it("App.phase-d: 2 related scenarios", async () => {
     });
     expect(await screen.findByText("TOKEN B")).toBeInTheDocument();
     await act(async () => resolveA({ tokenAddress: a, symbol: "TOKEN A" }));
+    expect(screen.getByRole("button", { name: "Rail token" })).toBeInTheDocument();
     expect(screen.queryByText("TOKEN A")).not.toBeInTheDocument();
     expect(screen.getByText("TOKEN B")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Rail token" }));
+    expect(window.location.hash).toBe(`#token/0x${"3".repeat(40)}`);
   })();
 });
