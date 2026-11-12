@@ -16,6 +16,28 @@ const cleanScenario1 = () => {
 };
 afterEach(cleanScenario1);
 
+it("unsigned estimate timeout does not claim a transaction may have been broadcast", async () => {
+  vi.useFakeTimers();
+  const fetch = vi.fn().mockImplementation(() => new Promise(() => {}));
+  vi.stubGlobal("fetch", fetch);
+  let failure: unknown;
+  void memeApi
+    .createQuote({
+      purpose: "ESTIMATE",
+      side: "BUY",
+      tokenAddress: `0x${"1".repeat(40)}`,
+      settlementAsset: "USDG",
+      amountIn: "1",
+    })
+    .catch((cause) => {
+      failure = cause;
+    });
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect(failure).toMatchObject({ code: "MEME_REQUEST_TIMEOUT" });
+  expect((failure as Error).message).not.toContain("广播");
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
 describe("runtime endpoint fallback", () => {
   it("runtime endpoint fallback: 3 related scenarios", async () => {
     // Saved credentials are checked against the server's signed login identity and trading account.

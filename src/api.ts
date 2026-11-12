@@ -141,6 +141,7 @@ async function send<T>(
   path: string,
   init?: RequestInit,
   publicMarket = false,
+  readOnlyRequest = false,
 ): Promise<T> {
   init?.signal?.throwIfAborted();
   const headers = new Headers(init?.headers);
@@ -149,7 +150,8 @@ async function send<T>(
   const cancel = () => controller.abort(init?.signal?.reason);
   let response: Response | undefined;
   const timer = setTimeout(() => {
-    const mutation = !["GET", "HEAD"].includes((init?.method ?? "GET").toUpperCase());
+    const mutation =
+      !readOnlyRequest && !["GET", "HEAD"].includes((init?.method ?? "GET").toUpperCase());
     controller.abort(
       new ApiError(
         `${prefix}_${response && !response.ok ? "REQUEST_FAILED" : "REQUEST_TIMEOUT"}`,
@@ -312,11 +314,18 @@ export const memeApi = {
   executeMainAccountTrade: (input: AccountTradeInput) => executeAccountTrade(input),
   createQuote: (input: QuoteRequest, signal?: AbortSignal) => {
     const { feeConfigVersion: _boundFeeVersion, ...body } = input;
-    return request<QuoteDisplay | ApprovalRequired>("/sapi/v1/meme/quotes", {
-      method: "POST",
-      body: JSON.stringify(body),
-      signal,
-    }).then((value): ValidQuote => {
+    return send<QuoteDisplay | ApprovalRequired>(
+      apiBaseUrl,
+      "MEME",
+      "/sapi/v1/meme/quotes",
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+        signal,
+      },
+      false,
+      input.purpose === "ESTIMATE",
+    ).then((value): ValidQuote => {
       if ("status" in value && value.status === "APPROVAL_REQUIRED")
         throw new ApiError("MEME_APPROVAL_REQUIRED", "需要授权，完成后将重新获取报价", 200, value);
       return requireQuoteTerms(value as QuoteDisplay, input);
