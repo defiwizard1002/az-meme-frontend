@@ -344,9 +344,7 @@ function TradingForm({
           卖出
         </button>
       </div>
-      <p className="muted">
-        平台共享资金：{treasury ?? "未知"} USDG。买入代币进入你的钱包，卖出所得返回平台。
-      </p>
+      <p className="muted">平台共享资金：{treasury ?? "未知"} USDG</p>
       {side === "SELL" && (
         <p>
           当前钱包余额：{ownBalance ?? "未知"} {symbol}
@@ -384,7 +382,6 @@ function TradingForm({
           ))}
         </div>
       )}
-      <p className="muted">平台额度无限制 · 自动滑点使用最新有效 K 线价格</p>
       {quote && (
         <dl className="quote-details">
           <dt>预计到账</dt>

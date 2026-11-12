@@ -141,15 +141,15 @@ it("token-details: 5 related scenarios", async () => {
     render(<TokenDetails token={token} onProfile={() => {}} follows={[]} walletAddress={a} />);
     fireEvent.click(screen.getByRole("tab", { name: "Holders" }));
     await screen.findByText("Dev");
-    expect(screen.getByText(/最多前 100 名/)).toBeVisible();
-    expect(screen.getByText(/不代表其余额为零/)).toBeVisible();
+    expect(screen.queryByText(/最多前 100 名/)).toBeNull();
+    expect(screen.queryByText(/不代表其余额为零/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "加载更多持有人" }));
     await waitFor(() => expect(load).toHaveBeenCalledWith(a, "50", expect.any(AbortSignal)));
     fireEvent.click(screen.getByRole("button", { name: "Following" }));
     await waitFor(() =>
       expect(local).toHaveBeenCalledWith(a, "FOLLOWING", undefined, expect.any(AbortSignal)),
     );
-    expect(await screen.findByText(/本地持有人暂不可用/)).toBeVisible();
+    expect(await screen.findByText(/持有人暂不可用/)).toBeVisible();
     expect(screen.queryByText("Dev")).toBeNull();
   })();
   await cleanScenario2();

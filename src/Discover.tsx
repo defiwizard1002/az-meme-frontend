@@ -505,9 +505,6 @@ export default function Discover({
           )}
         </div>
       )}
-      <p className="source-note">
-        GMGN 行情每 15 分钟更新；本地成交实时更新。— 表示暂无数据，Smart / KOL 仅使用人工名单。
-      </p>
     </section>
   );
 }

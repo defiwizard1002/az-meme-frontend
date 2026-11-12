@@ -125,10 +125,6 @@ function PortfolioAccount({
         <h2>我的资产与订单</h2>
         <button onClick={() => setRevision((value) => value + 1)}>刷新</button>
       </header>
-      <p className="muted">
-        钱包 {shortAddress(walletAddress)}{" "}
-        的代币持仓。平台共享资金不计入个人资产，卖出所得返回平台。
-      </p>
       <div className="tabs" role="tablist" aria-label="资产与订单">
         <button role="tab" aria-selected={tab === "positions"} onClick={() => setTab("positions")}>
           Positions
@@ -141,9 +137,7 @@ function PortfolioAccount({
         <>
           {positionError && <p role="alert">{positionError}</p>}
           {!positions && !positionError && <p role="status">正在读取持仓…</p>}
-          {positions?.length === 0 && (
-            <p className="empty">暂无已记录持仓。未跟踪的资产不视为余额为零。</p>
-          )}
+          {positions?.length === 0 && <p className="empty">暂无持仓</p>}
           {positions && positions.length > 0 && (
             <div className="table-scroll">
               <table>
@@ -219,7 +213,6 @@ function PortfolioAccount({
               {paging ? "正在读取…" : "更多持仓"}
             </button>
           )}
-          <p className="muted">— 表示数据未知。数量、成本和估值以各自更新时间为准。</p>
         </>
       ) : (
         <>
@@ -310,9 +303,6 @@ function PortfolioAccount({
               </table>
             </div>
           )}
-          <p className="muted">
-            显示最近 50 笔订单。实际到账与费用来自已核验的成交结果；缺失字段不使用报价替代。
-          </p>
         </>
       )}
       {shareText !== null && (

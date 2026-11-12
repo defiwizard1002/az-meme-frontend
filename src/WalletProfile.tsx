@@ -148,42 +148,6 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
       )}
       {profile && (
         <>
-          <section className="profile-coverage">
-            <strong>
-              {
-                { UNTRACKED: "尚未跟踪", PENDING_SNAPSHOT: "等待余额快照", TRACKING: "正在跟踪" }[
-                  profile.trackingStatus
-                ]
-              }
-            </strong>
-            <p>
-              覆盖时长：
-              {profile.coverageMs == null
-                ? "未知"
-                : `${(profile.coverageMs / 3_600_000).toFixed(1)} 小时`}
-            </p>
-            <p className="muted">
-              {profile.windowComplete
-                ? "已覆盖完整的滚动 168 小时"
-                : "7 日数据尚不完整，以下仅代表已覆盖部分。"}
-            </p>
-            {profile.trackingStartedAt != null && (
-              <p className="muted">
-                开始跟踪：{new Date(profile.trackingStartedAt).toLocaleString()}
-              </p>
-            )}
-            {profile.window && (
-              <p className="muted">
-                统计窗口：{new Date(profile.window.fromMs).toLocaleString()} –{" "}
-                {new Date(profile.window.toMs).toLocaleString()}
-              </p>
-            )}
-            <p className="muted">
-              {profile.coverage === "LOCAL_TOKEN_DIRECTORY"
-                ? "余额覆盖已收录的代币；其他资产未知。"
-                : "余额覆盖范围未知。"}
-            </p>
-          </section>
           <div className="stat-grid">
             <div>
               <span>7 日已实现盈亏</span>
@@ -200,9 +164,6 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
             <div>
               <span>7 日胜率</span>
               <strong>{winRate}</strong>
-              <small className="muted">
-                {stats ? `${stats.computableCycles} 个可计算的已结束周期` : "可计算周期未知"}
-              </small>
             </div>
             <div>
               <span>7 日买入 / 卖出</span>
@@ -258,7 +219,7 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
         </table>
       </div>
       {!loading && !positions.some((position) => position.quantityAtomic !== "0") && (
-        <p className="empty-state">当前页无已记录持仓</p>
+        <p className="empty-state">暂无持仓</p>
       )}
       {positionCursor && (
         <button type="button" disabled={paging !== null} onClick={morePositions}>
@@ -306,7 +267,7 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
           </tbody>
         </table>
       </div>
-      {!loading && !activities.length && <p className="empty-state">当前覆盖范围内无已记录活动</p>}
+      {!loading && !activities.length && <p className="empty-state">暂无动态</p>}
       {activityCursor && (
         <button type="button" disabled={paging !== null} onClick={moreActivities}>
           更多交易

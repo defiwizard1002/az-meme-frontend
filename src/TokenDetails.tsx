@@ -118,7 +118,6 @@ function TokenWorkspace({
   const [markerCursor, setMarkerCursor] = useState<ActivityCursor | null>(null);
   const [markerLoading, setMarkerLoading] = useState(false);
   const [markerError, setMarkerError] = useState<string | null>(null);
-  const [markersComplete, setMarkersComplete] = useState(false);
   const moreMarkersRef = useRef<() => void>(() => {});
 
   const chartCache = useRef(new Map<Interval, CandleSnapshot>());
@@ -569,7 +568,7 @@ function TokenWorkspace({
     if (earliestCandle === undefined || !candles?.length) {
       setHistoricalMarkers([]);
       setMarkerCursor(null);
-      setMarkersComplete(false);
+
       setMarkerLoading(false);
       setMarkerError(null);
       return;
@@ -581,7 +580,7 @@ function TokenWorkspace({
     let loading = false;
     setHistoricalMarkers([]);
     setMarkerCursor(null);
-    setMarkersComplete(false);
+
     const load = () => {
       if (loading || controller.signal.aborted) return;
       loading = true;
@@ -601,12 +600,11 @@ function TokenWorkspace({
           ]);
           cursor = page.nextCursor ?? undefined;
           setMarkerCursor(page.nextCursor);
-          setMarkersComplete(page.complete && page.nextCursor === null);
+
           setMarkerError(null);
         })
         .catch(() => {
-          if (!controller.signal.aborted)
-            setMarkerError("历史钱包标记暂不可用，仅显示已加载成交中的标记");
+          if (!controller.signal.aborted) setMarkerError("历史标记暂不可用");
         })
         .finally(() => {
           loading = false;
@@ -625,7 +623,7 @@ function TokenWorkspace({
     setHolders(null);
     if (holderScope === "FOLLOWING" && !walletAddress) {
       setHoldersLoading(false);
-      setHoldersError("登录后查看关注钱包的本地持仓");
+      setHoldersError("登录后查看关注钱包持仓");
       return () => controller.abort();
     }
     setHoldersLoading(true);
@@ -644,9 +642,7 @@ function TokenWorkspace({
       .catch(() => {
         if (!controller.signal.aborted)
           setHoldersError(
-            holderScope === "ALL"
-              ? "持有人加载失败，请重试"
-              : "本地持有人暂不可用，未返回持仓结果，请稍后重试",
+            holderScope === "ALL" ? "持有人加载失败，请重试" : "持有人暂不可用，请重试",
           );
       })
       .finally(() => {
@@ -813,16 +809,16 @@ function TokenWorkspace({
           ))}
         </dl>
         <p className="data-note">
-          {marketLive ? "实时行情 · " : ""}GMGN 资料 · {date(token.updatedAt)}
+          {marketLive ? "实时行情 · " : ""}
+          {date(token.updatedAt)}
           {token.stale ? " · 数据待更新" : ""}
-          {token.coverage?.complete === false ? " · 部分信息未知" : ""}
         </p>
         <div className="lifecycle">
           <span>
             {token.launchpad ?? "协议未知"} · {lifecycleLabel}
           </span>
           <span>
-            本地进度：
+            进度：
             {lifecycle?.progressPct == null ? "未知" : `${amount(lifecycle.progressPct)}%`}
           </span>
           {lifecycle?.progressPct != null && (
@@ -883,13 +879,7 @@ function TokenWorkspace({
               onLoadBefore={(before) => loadBeforeRef.current(before)}
             />
             <p className="data-note">
-              链上成交 · 标记使用本地名单。
-              {markerError ??
-                (markerLoading
-                  ? "正在加载历史钱包标记"
-                  : markersComplete
-                    ? "已加载当前时间范围的钱包标记"
-                    : "标记尚不完整，未出现不代表没有交易")}
+              {markerError ?? (markerLoading ? "正在加载…" : null)}
               {markerCursor && (
                 <button disabled={markerLoading} onClick={() => moreMarkersRef.current()}>
                   加载更多历史标记
@@ -918,9 +908,6 @@ function TokenWorkspace({
             </div>
             {tab === "trades" ? (
               <div role="tabpanel" aria-label="成交">
-                <p className="data-note">
-                  钱包标签来自本地名单。同钱包次数仅统计已加载交易；无法确认归属的钱包显示未知。
-                </p>
                 <div className="table-scroll">
                   <table>
                     <thead>
@@ -1019,11 +1006,6 @@ function TokenWorkspace({
                     刷新持有人
                   </button>
                 </div>
-                <p className="data-note">
-                  {holderScope === "ALL"
-                    ? `GMGN · ${date(holders?.updatedAt)}${holders?.stale ? " · 数据待更新" : ""} · 最多前 100 名，非完整持有人名单；未出现的钱包不代表其余额为零。`
-                    : `本地跟踪持仓 · ${date(holders?.updatedAt)} · 与 GMGN 快照更新时间不同；尚未跟踪或数量不完整时显示未知。`}
-                </p>
                 <div className="table-scroll">
                   <table>
                     <thead>

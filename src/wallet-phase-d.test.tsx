@@ -129,7 +129,8 @@ it("wallet-phase-d: 4 related scenarios", async () => {
         <WalletProfile address={address} onClose={vi.fn()} onToken={vi.fn()} />
       </UserStateProvider>,
     );
-    expect(await screen.findByText("等待余额快照")).toBeVisible();
+    expect(await screen.findByText("暂无持仓")).toBeVisible();
+    expect(screen.queryByText("等待余额快照")).toBeNull();
     expect(screen.getByLabelText("7 日已实现盈亏")).toHaveTextContent("未知");
     expect(screen.getByLabelText("7 日买入 / 卖出")).toHaveTextContent("未知");
     fireEvent.click(screen.getByRole("button", { name: "更多持仓" }));

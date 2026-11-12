@@ -74,21 +74,12 @@ export function TokenRiskLabels({ security }: { security: Token["security"] }) {
 export function TokenRiskGrid({ token }: { token: Token }) {
   const security = token.security;
   const metrics = riskMetrics(security);
-  const incomplete = security.top10HolderPct == null || security.devHoldingPct == null;
   return (
     <section className="token-risk-panel panel" aria-label="Safety 安全信息">
       <div className="risk-grid-heading">
         <h3>Safety</h3>
         <TokenRiskLabels security={security} />
       </div>
-      <p className="data-note">
-        GMGN ·{" "}
-        {token.safety?.updatedAt
-          ? new Date(token.safety.updatedAt).toLocaleString()
-          : "更新时间未知"}
-        {token.safety?.stale ? " · 数据待更新" : ""}
-      </p>
-      {incomplete && <p className="security-neutral">信息不完整：Top 10 或 Dev 持仓未知</p>}
       {security.isHoneypot === true && <p className="security-danger">已识别貔貅，已禁止买入</p>}
       <dl className="risk-grid">
         {metrics.map(({ label, value, tone }) => (
@@ -98,7 +89,6 @@ export function TokenRiskGrid({ token }: { token: Token }) {
           </div>
         ))}
       </dl>
-      <p className="data-note">成交量占比与持仓占比口径不同，以下数值不替代持仓风险。</p>
       <dl className="risk-grid">
         {[
           ["Rat 成交量占比", security.ratVolumePct],

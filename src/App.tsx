@@ -395,7 +395,6 @@ function Workspace({
       </main>
       <footer className="app-footer">
         <span>Robinhood Chain · Memebot</span>
-        <span>买入使用平台资金，卖出所得返回平台；钱包持仓归当前用户。</span>
       </footer>
       {profile && (
         <WalletProfile

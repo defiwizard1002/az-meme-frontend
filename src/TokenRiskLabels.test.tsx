@@ -18,7 +18,7 @@ it("TokenRiskLabels: 3 related scenarios", async () => {
       />,
     );
     expect(screen.getByText("高风险")).toHaveClass("security-danger");
-    expect(screen.getByText(/信息不完整/)).toBeVisible();
+    expect(screen.queryByText(/信息不完整/)).toBeNull();
     expect(screen.getByText(/已禁止买入/)).toBeVisible();
     expect(metric("Dev 持仓")).toHaveTextContent("0%");
     expect(metric("Dev 持仓")).toHaveClass("security-safe");
