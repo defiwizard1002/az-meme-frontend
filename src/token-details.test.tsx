@@ -413,3 +413,34 @@ const chartPage = (items: Candle[]): CandleSnapshot => ({
   asOfBlock: 1,
   items,
 });
+
+it("keeps logo out of layout until loaded, hides failures and resets for each URL", async () => {
+  vi.mocked(tokenApi.detail).mockReturnValue(new Promise(() => {}));
+  const first = { ...token, logo: "https://images.example/first.png" };
+  const { container, rerender } = render(<TokenDetails token={first} onProfile={vi.fn()} />);
+  await screen.findByRole("button", { name: `查看钱包 ${b}` });
+  const logo = () => container.querySelector(".token-logo") as HTMLImageElement;
+  expect(logo()).not.toBeVisible();
+  expect(screen.getByRole("heading", { name: "TEST Test" })).toBeVisible();
+  expect(screen.getByText(a)).toBeVisible();
+  fireEvent.load(logo());
+  expect(logo()).toBeVisible();
+  fireEvent.error(logo());
+  expect(logo()).not.toBeVisible();
+  fireEvent.load(logo());
+  expect(logo()).toBeVisible();
+  const old = logo();
+  rerender(
+    <TokenDetails
+      token={{ ...first, logo: "https://images.example/second.png" }}
+      onProfile={vi.fn()}
+    />,
+  );
+  expect(logo()).not.toBe(old);
+  expect(logo()).not.toBeVisible();
+  fireEvent.load(logo());
+  expect(logo()).toBeVisible();
+  rerender(<TokenDetails token={first} onProfile={vi.fn()} />);
+  expect(logo()).not.toBeVisible();
+  expect(screen.getByRole("heading", { name: "TEST Test" })).toBeVisible();
+});

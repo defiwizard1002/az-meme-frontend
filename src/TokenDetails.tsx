@@ -750,8 +750,12 @@ function TokenWorkspace({
               className="token-logo"
               src={token.logo}
               alt=""
+              style={{ display: "none" }}
+              onLoad={(event) => {
+                event.currentTarget.style.display = "";
+              }}
               onError={(event) => {
-                event.currentTarget.hidden = true;
+                event.currentTarget.style.display = "none";
               }}
             />
           )}
