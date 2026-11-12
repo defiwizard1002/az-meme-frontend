@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatUnits } from "viem";
-import { approvalDetails, memeApi, type ApprovalRequired } from "./api";
+import { ApiError, approvalDetails, memeApi, type ApprovalRequired } from "./api";
 import {
   compareAmounts,
   preparationInput,
@@ -55,7 +55,7 @@ function TradingForm({
   const [quote, setQuote] = useState<ValidQuote | null>(null);
   const [busy, setBusy] = useState(false);
   const [quoting, setQuoting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | Error | null>(null);
   const [approval, setApproval] = useState<ApprovalRequired | null>(null);
   const [ownBalance, setOwnBalance] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState(() =>
@@ -179,8 +179,7 @@ function TradingForm({
           setError(null);
         })
         .catch((cause) => {
-          if (!controller.signal.aborted)
-            setError(cause instanceof Error ? cause.message : String(cause));
+          if (!controller.signal.aborted) setError(cause instanceof Error ? cause : String(cause));
         })
         .finally(() => {
           if (!controller.signal.aborted) setQuoting(false);
@@ -306,6 +305,17 @@ function TradingForm({
     }
   }
 
+  const errorMessage = error instanceof Error ? error.message : error;
+  const errorCode = error instanceof ApiError ? error.code : undefined;
+  const quoteStatus =
+    (
+      {
+        MEME_REFERENCE_UNAVAILABLE: "该代币流动性不足，暂不支持报价",
+        MEME_LOCAL_STATE_UNAVAILABLE: "行情同步中，请稍后重试",
+        MEME_UNAUTHORIZED: "请先连接钱包",
+      } as Record<string, string>
+    )[errorCode ?? ""] ??
+    (/Privy login required/i.test(errorMessage ?? "") ? "请先连接钱包" : undefined);
   const invalid = invalidReason(side, amount);
   const expired = quote !== null && quote.expiresAt <= now;
   const transactionState =
@@ -426,7 +436,13 @@ function TradingForm({
         </button>
       )}
       {(error || (walletAddress && invalid)) && (
-        <p role={error ? "alert" : "status"}>{error ?? invalid}</p>
+        <p
+          role={quoteStatus ? "status" : error ? "alert" : "status"}
+          className={quoteStatus ? "muted" : undefined}
+          title={quoteStatus ? (errorCode ?? errorMessage ?? undefined) : undefined}
+        >
+          {quoteStatus ?? errorMessage ?? invalid}
+        </p>
       )}
       {pendingId && (
         <p role="status">交易 {pendingId} 处理中，正在查询同一笔交易，请勿重复提交。</p>

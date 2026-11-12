@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import TradingPanel from "./TradingPanel";
 import Portfolio from "./Portfolio";
-import { configureServerSignedTransactions, memeApi, setSessionToken } from "./api";
+import { ApiError, configureServerSignedTransactions, memeApi, setSessionToken } from "./api";
 import { preparationInput, requirePreparedQuote, requireQuoteTerms } from "./quote-flow";
 import { forgetExecution, pendingExecutionId } from "./transaction-tracker";
 import { walletApi } from "./wallet-api";
@@ -358,4 +358,38 @@ describe("phase D trading", () => {
       expect(screen.getByText("失败")).toBeInTheDocument();
     })();
   });
+});
+
+it("quote errors show short states, preserve codes in title and keep buying disabled", async () => {
+  for (const [code, message, text] of [
+    [
+      "MEME_REFERENCE_UNAVAILABLE",
+      "Live candle reference is unavailable",
+      "该代币流动性不足，暂不支持报价",
+    ],
+    ["MEME_LOCAL_STATE_UNAVAILABLE", "Local state unavailable", "行情同步中，请稍后重试"],
+    ["MEME_UNAUTHORIZED", "Unauthorized", "请先连接钱包"],
+    ["OTHER_LOGIN", "Privy login required", "请先连接钱包"],
+    ["UNKNOWN_ERROR", "Unexpected service failure", "Unexpected service failure"],
+  ]) {
+    vi.spyOn(memeApi, "createQuote").mockRejectedValue(new ApiError(code, message, 409));
+    render(
+      <TradingPanel
+        token={token}
+        walletAddress={wallet}
+        account={account}
+        onAccountRefresh={vi.fn()}
+      />,
+    );
+    const line = await screen.findByText(text);
+    if (code !== "UNKNOWN_ERROR") {
+      expect(line).toHaveClass("muted");
+      expect(line).toHaveAttribute("title", code);
+      expect(line).toHaveAttribute("role", "status");
+    }
+    expect(screen.queryByText(code)).toBeNull();
+    expect(screen.getByRole("button", { name: "买入 MEME" })).toBeDisabled();
+    cleanup();
+    vi.restoreAllMocks();
+  }
 });
