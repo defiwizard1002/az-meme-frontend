@@ -25,6 +25,7 @@ interface Props {
   symbol: string;
   markers?: ChartTradeMarker[];
   refreshing?: boolean;
+  failed?: boolean;
   historyRetry?: number;
   onLoadBefore?: (before: number) => Promise<HistoryLoadResult>;
 }
@@ -149,6 +150,7 @@ export function CandleChart({
   legacy = false,
   symbol,
   refreshing = false,
+  failed = false,
   historyRetry = 0,
   markers = NO_MARKERS,
   onLoadBefore,
@@ -541,10 +543,8 @@ export function CandleChart({
         data-first-candle-time={data.candles[0]?.time}
         data-history-loading={historyLoading ? "true" : "false"}
       />
-      {data.candles.length === 0 && !refreshing && (
-        <div className="chart-empty">
-          {candles.length === 0 ? "暂无成交 K 线" : "暂无可渲染 K 线"}
-        </div>
+      {data.candles.length === 0 && !refreshing && !failed && (
+        <div className="chart-empty">{candles.length === 0 ? "暂无 K 线" : "暂无可渲染 K 线"}</div>
       )}
       {gaps.some((gap) => gap.reason === "PRICING_SUPPRESSED") && (
         <figcaption className="chart-availability" role="status">

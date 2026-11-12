@@ -116,11 +116,13 @@ describe("CandleChart", () => {
         remove: vi.fn(),
       });
 
-      render(<CandleChart symbol="NEW" candles={[]} />);
+      const { rerender } = render(<CandleChart symbol="NEW" candles={[]} />);
 
       expect(screen.getByTestId("tradingview-chart")).toBeInTheDocument();
-      expect(screen.getByText("暂无成交 K 线")).toBeInTheDocument();
+      expect(screen.getByText("暂无 K 线")).toBeInTheDocument();
       expect(chartMocks.setData).toHaveBeenCalledWith([]);
+      rerender(<CandleChart symbol="NEW" candles={[]} failed />);
+      expect(screen.queryByText("暂无 K 线")).not.toBeInTheDocument();
     })();
     await cleanScenario1();
     await prepareScenario2();
@@ -144,6 +146,7 @@ describe("CandleChart", () => {
       });
 
       render(<CandleChart symbol="JEV" candles={[]} refreshing />);
+      expect(screen.queryByText("暂无 K 线")).not.toBeInTheDocument();
 
       expect(
         screen.getByRole("status", { name: "正在加载行情" }).querySelectorAll("span"),

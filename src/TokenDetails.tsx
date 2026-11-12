@@ -253,7 +253,7 @@ function TokenWorkspace({
         })
         .catch(() => {
           if (active) {
-            setChartError("K 线更新失败，正在重试");
+            setChartError("K 线加载失败");
             setChartLoading(false);
             candleDirty = true;
           }
@@ -874,6 +874,7 @@ function TokenWorkspace({
               gaps={snapshot?.gaps}
               symbol={token.symbol ?? addressLabel(address)}
               refreshing={chartLoading}
+              failed={chartError !== null}
               markers={markers}
               historyRetry={retry}
               onLoadBefore={(before) => loadBeforeRef.current(before)}
