@@ -1,3 +1,4 @@
+import { amount as displayAmount, money, price } from "./display";
 import { mergeLiveToken } from "./discovery";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { memeApi, wsBaseUrl } from "./api";
@@ -27,9 +28,8 @@ interface Props {
   children?: ReactNode;
 }
 const EMPTY_FOLLOWS: readonly string[] = [];
-const decimalFormat = new Intl.NumberFormat("en-US", { maximumSignificantDigits: 7 });
 const amount = (value: string | number | null | undefined, unit = "") =>
-  value == null ? "未知" : `${unit}${decimalFormat.format(Number(value))}`;
+  unit === "$" ? money(value) : displayAmount(value);
 const addressLabel = (value: string) => `${value.slice(0, 6)}…${value.slice(-4)}`;
 const date = (value: number | null | undefined) =>
   value ? new Date(value).toLocaleString() : "更新时间未知";
@@ -930,7 +930,7 @@ function TokenWorkspace({
                           <td className={trade.side === "BUY" ? "positive" : "negative"}>
                             {trade.side === "BUY" ? "买入" : "卖出"}
                           </td>
-                          <td>{amount(trade.notionalUsd)}</td>
+                          <td>{price(trade.notionalUsd)}</td>
                           <td>{amount(trade.marketCapUsd, "$")}</td>
                           <td>
                             {trade.wallets?.length

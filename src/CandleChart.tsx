@@ -1,3 +1,4 @@
+import { price } from "./display";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CandlestickSeries,
@@ -203,6 +204,7 @@ export function CandleChart({
         vertLines: { color: "#191a1b" },
         horzLines: { color: "#191a1b" },
       },
+      localization: { priceFormatter: price },
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: {
         autoScale: true,

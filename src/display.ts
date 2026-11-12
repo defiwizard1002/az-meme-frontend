@@ -8,8 +8,19 @@ export function amount(value: Numeric): string {
     maximumSignificantDigits: 6,
   }).format(n);
 }
+// Shared USD/price display only; source values and quote terms remain unchanged.
+export function price(value: Numeric): string {
+  if (value === null || value === undefined || value === "" || !Number.isFinite(Number(value)))
+    return "—";
+  const n = Number(value);
+  if (n === 0 || Math.abs(n) >= 1)
+    return Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(n);
+  const rounded = Number(n.toPrecision(4));
+  const plain = Intl.NumberFormat("en-US", { maximumSignificantDigits: 4 }).format(rounded);
+  return (plain.split(".")[1]?.length ?? 0) <= 12 ? plain : rounded.toExponential();
+}
 export function money(value: Numeric): string {
-  const formatted = amount(value);
+  const formatted = price(value);
   return formatted === "—" ? formatted : `$${formatted}`;
 }
 export function percent(value: Numeric): string {
