@@ -131,8 +131,8 @@ it("wallet-phase-d: 4 related scenarios", async () => {
     );
     expect(await screen.findByText("暂无持仓")).toBeVisible();
     expect(screen.queryByText("等待余额快照")).toBeNull();
-    expect(screen.getByLabelText("7 日已实现盈亏")).toHaveTextContent("未知");
-    expect(screen.getByLabelText("7 日买入 / 卖出")).toHaveTextContent("未知");
+    expect(screen.getByLabelText("7 日已实现盈亏")).toHaveTextContent("—");
+    expect(screen.getByLabelText("7 日买入 / 卖出")).toHaveTextContent("—");
     fireEvent.click(screen.getByRole("button", { name: "更多持仓" }));
     await waitFor(() =>
       expect(walletApi.positions).toHaveBeenLastCalledWith(address, token, expect.any(AbortSignal)),
@@ -179,11 +179,11 @@ it("wallet-phase-d: 4 related scenarios", async () => {
         />
       </UserStateProvider>,
     );
-    await screen.findByText("$2,100");
+    await screen.findByText("$2.1K");
     expect(screen.getByRole("button", { name: "卖出" })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("钱包分类"), { target: { value: "KOL" } });
-    fireEvent.change(screen.getByLabelText("买卖方向"), { target: { value: "SELL" } });
-    fireEvent.change(screen.getByLabelText("成交金额"), { target: { value: "2000" } });
+    fireEvent.click(screen.getByRole("button", { name: "KOL" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sells" }));
+    fireEvent.click(screen.getByRole("button", { name: "≥ $2K" }));
     await waitFor(() =>
       expect(walletApi.feed).toHaveBeenLastCalledWith(
         expect.objectContaining({ scope: "KOL", side: "SELL", minUsd: "2000" }),
@@ -226,9 +226,9 @@ it("wallet-phase-d: 4 related scenarios", async () => {
       refreshers.at(-1)!();
     });
     expect(screen.getByText(/1 条新动态/)).toBeVisible();
-    expect(screen.queryByText("$2,200")).not.toBeInTheDocument();
+    expect(screen.queryByText("$2.2K")).not.toBeInTheDocument();
     fireEvent.mouseLeave(sellCell);
-    expect(screen.getByText("$2,200")).toBeVisible();
+    expect(screen.getByText("$2.2K")).toBeVisible();
   })();
 });
 

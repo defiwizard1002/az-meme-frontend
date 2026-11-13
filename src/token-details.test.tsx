@@ -99,6 +99,11 @@ it("token-details: 5 related scenarios", async () => {
     await screen.findByRole("button", { name: `查看钱包 ${b}` });
     fireEvent.click(screen.getByRole("button", { name: `查看钱包 ${b}` }));
     expect(profile).toHaveBeenCalledWith(b);
+    expect(screen.queryByRole("columnheader", { name: "同钱包次数" })).toBeNull();
+    expect(screen.getAllByRole("columnheader")).toHaveLength(5);
+    fireEvent.click(screen.getByRole("tab", { name: "Safety" }));
+    expect(screen.getByRole("tabpanel", { name: "Safety" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: "Positions" })).toBeVisible();
     for (const period of ["1s", "30s", "1m", "5m", "15m", "1h", "4h", "1d"])
       expect(screen.getByRole("button", { name: period })).toBeVisible();
     for (const label of ["Smart", "KOL", "My Trades"])
@@ -426,7 +431,7 @@ it("keeps logo out of layout until loaded, hides failures and resets for each UR
   const logo = () => container.querySelector(".token-logo") as HTMLImageElement;
   expect(logo()).not.toBeVisible();
   expect(screen.getByRole("heading", { name: "TEST Test" })).toBeVisible();
-  expect(screen.getByText(a)).toBeVisible();
+  expect(screen.getByTitle(a)).toBeVisible();
   fireEvent.load(logo());
   expect(logo()).toBeVisible();
   fireEvent.error(logo());

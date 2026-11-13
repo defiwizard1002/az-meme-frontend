@@ -24,8 +24,14 @@ export function money(value: Numeric): string {
   const formatted = price(value);
   return formatted === "—" ? formatted : `$${formatted}`;
 }
+export function compactMoney(value: Numeric): string {
+  if (value === null || value === undefined || value === "" || !Number.isFinite(Number(value)))
+    return "—";
+  if (Math.abs(Number(value)) < 1000) return money(value);
+  return `$${Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 }).format(Number(value))}`;
+}
 export function percent(value: Numeric): string {
-  const formatted = amount(value);
+  const formatted = price(value);
   return formatted === "—" ? formatted : `${formatted}%`;
 }
 export function shortAddress(value: string): string {

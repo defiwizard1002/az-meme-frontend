@@ -82,6 +82,48 @@ const cleanScenario2 = () => {
 afterEach(cleanScenario2);
 
 describe("phase D trading", () => {
+  it("bounds quote display without changing exact estimate terms", async () => {
+    const exact = {
+      ...terms,
+      amountIn: "10",
+      targetOut: "6727.535235270868079007",
+      expectedAmountOut: "6727.535235270868079007",
+      minOut: "6054.196429241525011357",
+      minAmountOut: "6054.196429241525011357",
+    };
+    const create = vi.spyOn(memeApi, "createQuote").mockResolvedValue(exact);
+    const execute = vi.spyOn(memeApi, "executeMainAccountTrade");
+    render(
+      <TradingPanel
+        token={token}
+        quickBuyAmounts={["10", "20"]}
+        account={account}
+        walletAddress={wallet}
+        onAccountRefresh={vi.fn()}
+      />,
+    );
+    expect(await screen.findByText("6,727.54 MEME")).toHaveAttribute(
+      "title",
+      `${exact.targetOut} MEME`,
+    );
+    expect(screen.getByText("6,054.2 MEME")).toHaveAttribute("title", `${exact.minOut} MEME`);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: "ESTIMATE", amountIn: "10" }),
+      expect.any(AbortSignal),
+    );
+    create.mockResolvedValue({ ...exact, amountIn: "20" });
+    fireEvent.click(screen.getByRole("button", { name: "20" }));
+    expect(screen.getByLabelText("交易金额")).toHaveValue("20");
+    await waitFor(() =>
+      expect(create).toHaveBeenLastCalledWith(
+        expect.objectContaining({ purpose: "ESTIMATE", amountIn: "20" }),
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(exact.minOut).toBe("6054.196429241525011357");
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("quotes unknown public support using treasury funds, blocks explicit unsupported pools, and keeps missing funds unknown", async () => {
     const createQuote = vi
       .spyOn(memeApi, "createQuote")
@@ -356,6 +398,19 @@ describe("phase D trading", () => {
       expect(screen.getByText("Receipt rejected")).toBeInTheDocument();
       expect(screen.queryByText("999 MEME")).toBeNull();
       expect(screen.getByText("失败")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Filled" }));
+      expect(screen.queryByText("Receipt rejected")).toBeNull();
+      expect(screen.getByText("暂无订单")).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Failed" }));
+      expect(screen.getByText("Receipt rejected")).toBeVisible();
+      cleanup();
+      vi.mocked(memeApi.getAccountTransactions).mockClear();
+      render(
+        <Portfolio walletAddress={wallet} tokenFilter={`0x${"3".repeat(40)}`} onSell={vi.fn()} />,
+      );
+      expect(await screen.findByText("暂无持仓")).toBeVisible();
+      expect(screen.queryByRole("tab", { name: "Orders" })).toBeNull();
+      expect(memeApi.getAccountTransactions).not.toHaveBeenCalled();
     })();
   });
 });

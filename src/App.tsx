@@ -367,6 +367,8 @@ function Workspace({
                       );
                   }}
                   onTokenUpdate={onTokenUpdate}
+                  explorerBaseUrl={explorer}
+                  onSell={(address) => trade(address, "SELL")}
                 >
                   <TradingPanel
                     key={`${walletAddress ?? "guest"}:${token.tokenAddress}`}
@@ -374,6 +376,7 @@ function Workspace({
                     account={summary}
                     walletAddress={walletAddress}
                     onConnect={connect}
+                    quickBuyAmounts={user.quickBuyAmounts}
                     onAccountRefresh={refreshAccount}
                     quickRequest={
                       quick?.tokenAddress === token.tokenAddress.toLowerCase() ? quick : null

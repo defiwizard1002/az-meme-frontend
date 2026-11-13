@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatUnits } from "viem";
+import { price, percent } from "./display";
 import { ApiError, approvalDetails, memeApi, type ApprovalRequired } from "./api";
 import {
   compareAmounts,
@@ -28,6 +29,7 @@ export interface TradingPanelProps {
   onConnect?: () => Promise<boolean>;
   onAccountRefresh: () => void;
   quickRequest?: QuickTradeRequest | null;
+  quickBuyAmounts?: readonly string[];
   onQuickRequestConsumed?: (id: string) => void;
   onExecutionChange?: () => void;
 }
@@ -47,6 +49,7 @@ function TradingForm({
   onConnect,
   onAccountRefresh,
   quickRequest,
+  quickBuyAmounts = [],
   onQuickRequestConsumed,
   onExecutionChange,
 }: TradingPanelProps) {
@@ -374,6 +377,23 @@ function TradingForm({
           }}
         />
       </label>
+      {side === "BUY" && quickBuyAmounts.length > 0 && (
+        <div className="presets" aria-label="买入预设金额">
+          {quickBuyAmounts.map((value) => (
+            <button
+              key={value}
+              disabled={busy || Boolean(pendingId)}
+              onClick={() => {
+                setAmount(value);
+                setApproval(null);
+                setError(null);
+              }}
+            >
+              {value}
+            </button>
+          ))}
+        </div>
+      )}
       {side === "SELL" && (
         <div className="presets">
           {[25, 50, 100].map((pct) => (
@@ -395,19 +415,25 @@ function TradingForm({
       {quote && (
         <dl className="quote-details">
           <dt>预计到账</dt>
-          <dd>
-            {quote.targetOut} {side === "BUY" ? symbol : "USDG"}
+          <dd
+            className="quote-amount"
+            title={`${quote.targetOut} ${side === "BUY" ? symbol : "USDG"}`}
+          >
+            {price(quote.targetOut)} {side === "BUY" ? symbol : "USDG"}
           </dd>
           <dt>最低到账</dt>
-          <dd>
-            {quote.minOut} {side === "BUY" ? symbol : "USDG"}
+          <dd
+            className="quote-amount"
+            title={`${quote.minOut} ${side === "BUY" ? symbol : "USDG"}`}
+          >
+            {price(quote.minOut)} {side === "BUY" ? symbol : "USDG"}
           </dd>
           <dt>滑点</dt>
           <dd>{(quote.slippageBps / 100).toFixed(2)}%</dd>
           <dt>平台费用</dt>
           <dd>
-            {quote.fees.find((fee) => fee.type === "SERVICE")?.amount} USDG（
-            {Number(quote.effectiveFeeBps) / 100}%）
+            {price(quote.fees.find((fee) => fee.type === "SERVICE")?.amount)} USDG（
+            {percent(Number(quote.effectiveFeeBps) / 100)}）
           </dd>
           <dt>最佳路径</dt>
           <dd>

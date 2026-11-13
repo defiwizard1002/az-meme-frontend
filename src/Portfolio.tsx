@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { formatUnits } from "viem";
 import { memeApi } from "./api";
-import { money, safeUrl, shortAddress } from "./display";
+import { amount, price, compactMoney, money, safeUrl, shortAddress } from "./display";
 import { forgetExecution, pendingExecutionId } from "./transaction-tracker";
 import { walletApi } from "./wallet-api";
 import type { WalletPosition } from "./wallet-types";
@@ -13,6 +13,7 @@ export interface PortfolioProps {
   onSell: (tokenAddress: string) => void;
   onToken?: (tokenAddress: string) => void;
   refreshKey?: number;
+  tokenFilter?: string;
 }
 
 export function Portfolio(props: PortfolioProps) {
@@ -38,9 +39,11 @@ function PortfolioAccount({
   onSell,
   onToken,
   refreshKey,
+  tokenFilter,
 }: PortfolioProps & { walletAddress: string }) {
   const [tab, setTab] = useState<"positions" | "orders">("positions");
   const [positions, setPositions] = useState<WalletPosition[] | null>(null);
+  const [orderFilter, setOrderFilter] = useState<"ALL" | "CONFIRMED" | "FAILED">("ALL");
   const [orders, setOrders] = useState<AccountTransaction[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [positionError, setPositionError] = useState<string | null>(null);
@@ -92,12 +95,12 @@ function PortfolioAccount({
           timer = setTimeout(loadOrders, 5000);
         });
     };
-    loadOrders();
+    if (!tokenFilter) loadOrders();
     return () => {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [walletAddress, refreshKey, revision]);
+  }, [walletAddress, refreshKey, revision, tokenFilter]);
 
   function loadMore() {
     if (!cursor || paging) return;
@@ -118,6 +121,12 @@ function PortfolioAccount({
         if (!signal.aborted) setPaging(false);
       });
   }
+  const visiblePositions = positions?.filter(
+    (position) => !tokenFilter || position.token.toLowerCase() === tokenFilter.toLowerCase(),
+  );
+  const visibleOrders = orders?.filter(
+    (order) => orderFilter === "ALL" || order.status === orderFilter,
+  );
   const explorer = safeUrl(explorerBaseUrl)?.replace(/\/$/, "");
   return (
     <section className="panel portfolio">
@@ -125,20 +134,26 @@ function PortfolioAccount({
         <h2>我的资产与订单</h2>
         <button onClick={() => setRevision((value) => value + 1)}>刷新</button>
       </header>
-      <div className="tabs" role="tablist" aria-label="资产与订单">
-        <button role="tab" aria-selected={tab === "positions"} onClick={() => setTab("positions")}>
-          Positions
-        </button>
-        <button role="tab" aria-selected={tab === "orders"} onClick={() => setTab("orders")}>
-          Orders
-        </button>
-      </div>
+      {!tokenFilter && (
+        <div className="tabs" role="tablist" aria-label="资产与订单">
+          <button
+            role="tab"
+            aria-selected={tab === "positions"}
+            onClick={() => setTab("positions")}
+          >
+            Positions
+          </button>
+          <button role="tab" aria-selected={tab === "orders"} onClick={() => setTab("orders")}>
+            Orders
+          </button>
+        </div>
+      )}
       {tab === "positions" ? (
         <>
           {positionError && <p role="alert">{positionError}</p>}
           {!positions && !positionError && <p role="status">正在读取持仓…</p>}
-          {positions?.length === 0 && <p className="empty">暂无持仓</p>}
-          {positions && positions.length > 0 && (
+          {visiblePositions?.length === 0 && <p className="empty">暂无持仓</p>}
+          {visiblePositions && visiblePositions.length > 0 && (
             <div className="table-scroll">
               <table>
                 <thead>
@@ -154,7 +169,7 @@ function PortfolioAccount({
                   </tr>
                 </thead>
                 <tbody>
-                  {positions.map((position) => {
+                  {visiblePositions.map((position) => {
                     const quantity =
                       position.quantityAtomic === null
                         ? null
@@ -176,11 +191,11 @@ function PortfolioAccount({
                           <small>{new Date(position.updatedAt).toLocaleString()}</small>
                         </td>
                         <td title={quantity ?? "数量未知"}>
-                          {quantity ?? "—"}
+                          {amount(quantity)}
                           {!position.quantityComplete && <small>数量不完整</small>}
                         </td>
-                        <td>{money(position.averageEntryMarketCapUsd)}</td>
-                        <td>{money(position.currentMarketCapUsd)}</td>
+                        <td>{compactMoney(position.averageEntryMarketCapUsd)}</td>
+                        <td>{compactMoney(position.currentMarketCapUsd)}</td>
                         <td>{money(position.valueUsd)}</td>
                         <td>
                           {money(position.unrealizedPnlUsd)}
@@ -216,10 +231,27 @@ function PortfolioAccount({
         </>
       ) : (
         <>
+          <div className="tabs" aria-label="订单状态">
+            {(
+              [
+                ["ALL", "All"],
+                ["CONFIRMED", "Filled"],
+                ["FAILED", "Failed"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                aria-pressed={orderFilter === value}
+                onClick={() => setOrderFilter(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           {orderError && <p role="alert">{orderError}</p>}
           {!orders && !orderError && <p role="status">正在读取订单…</p>}
-          {orders?.length === 0 && <p className="empty">暂无订单</p>}
-          {orders && orders.length > 0 && (
+          {visibleOrders?.length === 0 && <p className="empty">暂无订单</p>}
+          {visibleOrders && visibleOrders.length > 0 && (
             <div className="table-scroll">
               <table>
                 <thead>
@@ -234,7 +266,7 @@ function PortfolioAccount({
                   </tr>
                 </thead>
                 <tbody>
-                  {orders.map((order) => {
+                  {visibleOrders.map((order) => {
                     const status =
                       order.status === "CONFIRMED"
                         ? "已成交"
@@ -262,18 +294,18 @@ function PortfolioAccount({
                           </span>
                         </td>
                         <td>
-                          {order.settlement?.amountIn ?? order.amountIn}{" "}
+                          {price(order.settlement?.amountIn ?? order.amountIn)}{" "}
                           {order.side === "BUY" ? order.settlementAsset : order.tokenSymbol}
                         </td>
                         <td>
                           {order.status === "CONFIRMED" && order.settlement
-                            ? `${order.settlement.amountOut} ${order.side === "BUY" ? order.tokenSymbol : order.settlementAsset}`
+                            ? `${price(order.settlement.amountOut)} ${order.side === "BUY" ? order.tokenSymbol : order.settlementAsset}`
                             : "—"}
                         </td>
                         <td>{money(order.settlement?.marketCapUsd)}</td>
                         <td>
                           {order.settlement
-                            ? `${order.settlement.fee.amount} ${order.settlement.fee.asset}`
+                            ? `${price(order.settlement.fee.amount)} ${order.settlement.fee.asset}`
                             : "—"}
                         </td>
                         <td>

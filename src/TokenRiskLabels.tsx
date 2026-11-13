@@ -8,7 +8,7 @@ interface RiskMetric {
 }
 const format = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 const yesNo = (value: boolean | null | undefined) =>
-  value === true ? "是" : value === false ? "否" : "未知";
+  value === true ? "是" : value === false ? "否" : "—";
 
 function riskMetrics(security: Token["security"]): RiskMetric[] {
   const values: RiskMetric[] = (
@@ -27,7 +27,7 @@ function riskMetrics(security: Token["security"]): RiskMetric[] {
     const known = Number.isFinite(n) && n >= 0 && n <= 100;
     return {
       label,
-      value: known ? `${format.format(n)}%` : "未知",
+      value: known ? `${format.format(n)}%` : "—",
       tone: !known ? "neutral" : red !== null && n > red ? "danger" : n > warn ? "warning" : "safe",
     };
   });
@@ -36,7 +36,7 @@ function riskMetrics(security: Token["security"]): RiskMetric[] {
   const knownRatio = Number.isFinite(ratio) && ratio >= 0 && ratio <= 1;
   values.push({
     label: "Rug ratio",
-    value: knownRatio ? String(ratio) : "未知",
+    value: knownRatio ? String(ratio) : "—",
     tone: !knownRatio ? "neutral" : ratio > 0.3 ? "danger" : ratio >= 0.1 ? "warning" : "safe",
   });
   for (const [label, value, bad] of [

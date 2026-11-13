@@ -62,13 +62,13 @@ describe("Discover ordering and honest missing values", () => {
 
     // never derives graduation from a missing progress value or an old stage
     await (async () => {
-      expect(lifecycleLabel({ stage: "GRADUATED" } as Token)).toBe("阶段未知");
+      expect(lifecycleLabel({ stage: "GRADUATED" } as Token)).toBe("—");
       expect(lifecycleLabel({ lifecycle: { state: "CURVE", progressPct: null } } as Token)).toBe(
-        "内盘 · 进度未知",
+        "On curve",
       );
       expect(
         lifecycleLabel({ lifecycle: { state: "NEAR_GRADUATION", progressPct: "80" } } as Token),
-      ).toBe("即将毕业 · 80%");
+      ).toBe("Graduating soon");
     })();
 
     // distinguishes unknown from a known zero and rejects unsafe social URLs

@@ -2,7 +2,7 @@ import { mergeLiveToken } from "./discovery";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { request, requestPublicMarket, memeApi, wsBaseUrl } from "./api";
 import { useUserState } from "./user-state";
-import { age, amount, money, percent, shortAddress } from "./display";
+import { age, amount, money, compactMoney, percent, shortAddress } from "./display";
 import { lifecycleLabel, orderMarkets, reconcileMarkets, type MarketSort } from "./discovery";
 import type { Token } from "./types";
 
@@ -265,9 +265,11 @@ export default function Discover({
               <small>{money(token.priceUsd)}</small>
             </span>
             <span>
-              <strong>{money(token.marketCapUsd)}</strong>
-              <small className={Number(token.change24h) < 0 ? "negative" : "positive"}>
-                {percent(token.change24h)}
+              <strong title={token.marketCapUsd ?? undefined}>
+                {compactMoney(token.marketCapUsd)} <span className="muted">MC</span>
+              </strong>
+              <small className={Number(token.change1h) < 0 ? "negative" : "positive"}>
+                {percent(token.change1h)} <span className="muted">1h</span>
               </small>
             </span>
           </button>
@@ -342,10 +344,10 @@ export default function Discover({
       {tab === "new" && (
         <div className="tabs lifecycle-filters">
           {[
-            ["ALL", "全部"],
-            ["CURVE", "内盘"],
-            ["NEAR_GRADUATION", "即将毕业"],
-            ["GRADUATED", "已毕业"],
+            ["ALL", "All"],
+            ["CURVE", "On curve"],
+            ["NEAR_GRADUATION", "Graduating soon"],
+            ["GRADUATED", "Graduated"],
           ].map(([value, label]) => (
             <button key={value} aria-pressed={stage === value} onClick={() => setStage(value)}>
               {label}
@@ -453,9 +455,17 @@ export default function Discover({
                   >
                     {percent(period === "1h" ? token.change1h : token.change24h)}
                   </td>
-                  <td>{money(token.marketCapUsd)}</td>
-                  <td>{money(period === "1h" ? token.volume1hUsd : token.volume24hUsd)}</td>
-                  <td>{money(token.liquidityUsd)}</td>
+                  <td title={token.marketCapUsd ?? undefined}>
+                    {compactMoney(token.marketCapUsd)}
+                  </td>
+                  <td
+                    title={(period === "1h" ? token.volume1hUsd : token.volume24hUsd) ?? undefined}
+                  >
+                    {compactMoney(period === "1h" ? token.volume1hUsd : token.volume24hUsd)}
+                  </td>
+                  <td title={token.liquidityUsd ?? undefined}>
+                    {compactMoney(token.liquidityUsd)}
+                  </td>
                   <td>{amount(token.holders)}</td>
                   <td>
                     {amount(token.smartMoneyCount)} / {amount(token.kolCount)}

@@ -11,7 +11,7 @@ it("formats USD and prices without long decimal tails", () => {
   expect(price("0.000000001234567")).toBe("0.000000001235");
   expect(money("-0.00000000000019856")).toBe("$-1.986e-13");
   expect(amount("0.00000000000004761905")).toBe("4.762e-14");
-  expect(percent("40.8651753632579711904761904761")).toBe("40.8652%");
+  expect(percent("40.8651753632579711904761904761")).toBe("40.87%");
   expect(money(0)).toBe("$0");
   for (const value of [null, undefined, "", "invalid", Infinity]) {
     expect(money(value)).toBe("—");
@@ -27,4 +27,11 @@ it("matches the E2E display fixtures", () => {
     expect(price(input)).toBe(fixture.price);
     expect(money(input)).toBe(fixture.money);
   }
+});
+
+it("bounds percentage precision and preserves missing values", () => {
+  expect(percent("6.07738")).toBe("6.08%");
+  expect(percent("-0.0007364")).toBe("-0.0007364%");
+  expect(percent(null)).toBe("—");
+  expect(percent(0)).toBe("0%");
 });

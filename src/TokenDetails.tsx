@@ -1,5 +1,6 @@
 import Views from "./Callout";
-import { amount as displayAmount, money, price } from "./display";
+import { Portfolio } from "./Portfolio";
+import { amount as displayAmount, money, price, percent, compactMoney } from "./display";
 import { mergeLiveToken } from "./discovery";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { memeApi, wsBaseUrl } from "./api";
@@ -27,10 +28,12 @@ interface Props {
   watched?: boolean;
   onTokenUpdate?: (token: Token) => void;
   children?: ReactNode;
+  onSell?: (address: string) => void;
+  explorerBaseUrl?: string;
 }
 const EMPTY_FOLLOWS: readonly string[] = [];
 const amount = (value: string | number | null | undefined, unit = "") =>
-  unit === "$" ? money(value) : displayAmount(value);
+  unit === "$" ? compactMoney(value) : displayAmount(value);
 const addressLabel = (value: string) => `${value.slice(0, 6)}…${value.slice(-4)}`;
 const date = (value: number | null | undefined) =>
   value ? new Date(value).toLocaleString() : "更新时间未知";
@@ -87,6 +90,8 @@ function TokenWorkspace({
   watched = false,
   onTokenUpdate,
   children,
+  onSell,
+  explorerBaseUrl,
 }: Props) {
   const address = initial.tokenAddress.toLowerCase();
   const chainId = initial.chainId;
@@ -98,7 +103,7 @@ function TokenWorkspace({
   const [marketLive, setMarketLive] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [interval, setInterval] = useState<Interval>("1m");
-  const [tab, setTab] = useState<"views" | "trades" | "holders">("views");
+  const [tab, setTab] = useState<"views" | "trades" | "holders" | "safety" | "positions">("views");
   const [snapshot, setSnapshot] = useState<CandleSnapshot | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [tradeCursor, setTradeCursor] = useState<string | null>(null);
@@ -713,17 +718,6 @@ function TokenWorkspace({
         grouped.set(`${trade.txHash}:${trade.side}`, trade);
     return buildTradeMarkers([...grouped.values()], interval, walletAddress, markerFilters);
   }, [trades, historicalMarkers, interval, walletAddress, markerFilters]);
-  const walletCounts = useMemo(() => {
-    const counts = new Map<string, Set<string>>();
-    for (const trade of trades)
-      for (const wallet of trade.wallets ?? []) {
-        const key = wallet.address.toLowerCase(),
-          ids = counts.get(key) ?? new Set<string>();
-        ids.add(trade.txHash);
-        counts.set(key, ids);
-      }
-    return counts;
-  }, [trades]);
   const holderRows = holders?.items ?? [];
   const lifecycle = token.lifecycle;
   const lifecycleLabel = lifecycle
@@ -760,7 +754,7 @@ function TokenWorkspace({
             <h2>
               {token.symbol ?? addressLabel(address)} <small>{token.name}</small>
             </h2>
-            <code>{address}</code>
+            <code title={address}>{addressLabel(address)}</code>
             <button
               type="button"
               onClick={() =>
@@ -797,7 +791,7 @@ function TokenWorkspace({
         </nav>
         <dl className="token-stats">
           {[
-            ["价格", amount(token.priceUsd, "$")],
+            ["价格", money(token.priceUsd)],
             ["市值", amount(token.marketCapUsd, "$")],
             ["流动性", amount(token.liquidityUsd, "$")],
             ["24h 成交额", amount(token.volume24hUsd, "$")],
@@ -820,7 +814,7 @@ function TokenWorkspace({
           </span>
           <span>
             进度：
-            {lifecycle?.progressPct == null ? "未知" : `${amount(lifecycle.progressPct)}%`}
+            {percent(lifecycle?.progressPct)}
           </span>
           {lifecycle?.progressPct != null && (
             <progress max={100} value={Number(lifecycle.progressPct)} aria-label="毕业进度" />
@@ -910,8 +904,31 @@ function TokenWorkspace({
               >
                 Holders
               </button>
+              <button role="tab" aria-selected={tab === "safety"} onClick={() => setTab("safety")}>
+                Safety
+              </button>
+              <button
+                role="tab"
+                aria-selected={tab === "positions"}
+                onClick={() => setTab("positions")}
+              >
+                Positions
+              </button>
             </div>
-            {tab === "views" ? (
+            {tab === "safety" ? (
+              <div role="tabpanel" aria-label="Safety">
+                <TokenRiskGrid token={token} />
+              </div>
+            ) : tab === "positions" ? (
+              <div role="tabpanel" aria-label="Positions">
+                <Portfolio
+                  walletAddress={walletAddress ?? undefined}
+                  tokenFilter={address}
+                  explorerBaseUrl={explorerBaseUrl}
+                  onSell={onSell ?? (() => {})}
+                />
+              </div>
+            ) : tab === "views" ? (
               <Views key={`${chainId}:${address}`} tokenAddress={address} chainId={chainId} />
             ) : tab === "trades" ? (
               <div role="tabpanel" aria-label="成交">
@@ -919,11 +936,9 @@ function TokenWorkspace({
                   <table>
                     <thead>
                       <tr>
-                        {["时间", "方向", "金额 U", "成交时市值", "钱包 / 标签", "同钱包次数"].map(
-                          (title) => (
-                            <th key={title}>{title}</th>
-                          ),
-                        )}
+                        {["时间", "方向", "金额 U", "成交时市值", "钱包 / 标签"].map((title) => (
+                          <th key={title}>{title}</th>
+                        ))}
                       </tr>
                     </thead>
                     <tbody>
@@ -963,16 +978,7 @@ function TokenWorkspace({
                                         ))}
                                   </div>
                                 ))
-                              : "未知"}
-                          </td>
-                          <td>
-                            {trade.wallets?.length
-                              ? trade.wallets.map((wallet) => (
-                                  <div key={wallet.address}>
-                                    {walletCounts.get(wallet.address.toLowerCase())?.size ?? "未知"}
-                                  </div>
-                                ))
-                              : "未知"}
+                              : "—"}
                           </td>
                         </tr>
                       ))}
@@ -1081,9 +1087,7 @@ function TokenWorkspace({
                           </td>
                           <td>{amount(holder.quantity)}</td>
                           <td>{amount(holder.valueUsd, "$")}</td>
-                          <td>
-                            {holder.supplyPct == null ? "未知" : `${amount(holder.supplyPct)}%`}
-                          </td>
+                          <td>{percent(holder.supplyPct)}</td>
                           <td>
                             {amount(holder.boughtUsd, "$")} / {amount(holder.soldUsd, "$")}
                           </td>
@@ -1122,10 +1126,7 @@ function TokenWorkspace({
             )}
           </section>
         </div>
-        <aside className="token-sidebar">
-          {children}
-          <TokenRiskGrid token={token} />
-        </aside>
+        <aside className="token-sidebar">{children}</aside>
       </div>
     </section>
   );

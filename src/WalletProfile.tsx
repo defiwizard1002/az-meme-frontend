@@ -152,13 +152,13 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
             <div>
               <span>7 日已实现盈亏</span>
               <strong aria-label="7 日已实现盈亏">
-                {stats?.realizedPnlUsd == null ? "未知" : money(stats.realizedPnlUsd)}
+                {stats?.realizedPnlUsd == null ? "—" : money(stats.realizedPnlUsd)}
               </strong>
             </div>
             <div>
               <span>当前持仓浮盈</span>
               <strong>
-                {profile.unrealizedPnlUsd == null ? "未知" : money(profile.unrealizedPnlUsd)}
+                {profile.unrealizedPnlUsd == null ? "—" : money(profile.unrealizedPnlUsd)}
               </strong>
             </div>
             <div>
@@ -168,7 +168,7 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
             <div>
               <span>7 日买入 / 卖出</span>
               <strong aria-label="7 日买入 / 卖出">
-                {stats ? `${stats.buyCount} / ${stats.sellCount}` : "未知"}
+                {stats ? `${stats.buyCount} / ${stats.sellCount}` : "—"}
               </strong>
             </div>
           </div>
@@ -205,12 +205,12 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
                   <td>
                     {position.quantityComplete && position.quantityAtomic !== null
                       ? amount(formatUnits(BigInt(position.quantityAtomic), position.decimals))
-                      : "未知"}
+                      : "—"}
                   </td>
-                  <td>{position.costUsd == null ? "未知" : money(position.costUsd)}</td>
-                  <td>{position.valueUsd == null ? "未知" : money(position.valueUsd)}</td>
+                  <td>{position.costUsd == null ? "—" : money(position.costUsd)}</td>
+                  <td>{position.valueUsd == null ? "—" : money(position.valueUsd)}</td>
                   <td>
-                    {position.unrealizedPnlUsd == null ? "未知" : money(position.unrealizedPnlUsd)}
+                    {position.unrealizedPnlUsd == null ? "—" : money(position.unrealizedPnlUsd)}
                   </td>
                   <td>{relativeTime(position.updatedAt)}</td>
                 </tr>
@@ -260,8 +260,8 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
                     {shortAddress(activity.token)}
                   </button>
                 </td>
-                <td>{activity.amountUsd == null ? "未知" : money(activity.amountUsd)}</td>
-                <td>{activity.marketCapUsd == null ? "未知" : money(activity.marketCapUsd)}</td>
+                <td>{activity.amountUsd == null ? "—" : money(activity.amountUsd)}</td>
+                <td>{activity.marketCapUsd == null ? "—" : money(activity.marketCapUsd)}</td>
               </tr>
             ))}
           </tbody>

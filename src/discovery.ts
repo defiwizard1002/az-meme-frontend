@@ -1,4 +1,3 @@
-import { percent } from "./display";
 import type { Token } from "./types";
 export type MarketSort =
   | "ageSeconds"
@@ -41,20 +40,17 @@ export function reconcileMarkets(
 }
 export function lifecycleLabel(token: Token): string {
   const life = token.lifecycle;
-  if (!life) return "阶段未知";
+  if (!life) return "—";
   const labels: Record<string, string> = {
-    CURVE: "内盘",
-    NEAR_GRADUATION: "即将毕业",
-    GRADUATED: "已毕业",
-    SWEPT: "等待建池",
-    RESCUED: "已救援",
-    NOT_APPLICABLE: "外盘",
-    UNKNOWN: "阶段未知",
+    CURVE: "On curve",
+    NEAR_GRADUATION: "Graduating soon",
+    GRADUATED: "Graduated",
+    SWEPT: "Awaiting pool",
+    RESCUED: "Rescued",
+    NOT_APPLICABLE: "AMM",
+    UNKNOWN: "—",
   };
-  const text = labels[life.state] ?? "阶段未知";
-  return life.state === "CURVE" || life.state === "NEAR_GRADUATION"
-    ? `${text} · ${life.progressPct == null ? "进度未知" : percent(life.progressPct)}`
-    : text;
+  return labels[life.state] ?? "—";
 }
 
 /** Apply committed price patches without regressing a newer observation. */

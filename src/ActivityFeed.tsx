@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError } from "./api";
-import { money, relativeTime, shortAddress } from "./display";
+import { compactMoney, money, relativeTime, shortAddress } from "./display";
 import { walletApi } from "./wallet-api";
 import { useUserState } from "./user-state";
 import type { ActivityPage, ActivityQuery, WalletActivity } from "./wallet-types";
@@ -39,43 +39,50 @@ export function ActivityFeed(props: ActivityFeedProps) {
         <span className="muted">最近 24 小时</span>
       </header>
       <div className="toolbar activity-filters">
-        <label>
-          钱包分类
-          <select
-            aria-label="钱包分类"
-            value={scope}
-            onChange={(event) => setScope(event.target.value as ActivityQuery["scope"])}
-          >
-            <option value="ALL">All</option>
-            <option value="FOLLOWING">Following</option>
-            <option value="SMART_MONEY">Smart Money</option>
-            <option value="KOL">KOL</option>
-          </select>
-        </label>
-        <label>
-          买卖方向
-          <select
-            aria-label="买卖方向"
-            value={side}
-            onChange={(event) => setSide(event.target.value as ActivityQuery["side"])}
-          >
-            <option value="ANY">全部方向</option>
-            <option value="BUY">买入</option>
-            <option value="SELL">卖出</option>
-          </select>
-        </label>
-        <label>
-          成交金额
-          <select
-            aria-label="成交金额"
-            value={minUsd}
-            onChange={(event) => setMinUsd(event.target.value as ActivityQuery["minUsd"])}
-          >
-            <option value="ANY">Any</option>
-            <option value="500">≥500 U</option>
-            <option value="2000">≥2000 U</option>
-          </select>
-        </label>
+        <div className="tabs activity-scope" aria-label="钱包分类">
+          {(
+            [
+              ["ALL", "All"],
+              ["FOLLOWING", "Following"],
+              ["SMART_MONEY", "Smart Money"],
+              ["KOL", "KOL"],
+            ] as const
+          ).map(([value, label]) => (
+            <button key={value} aria-pressed={scope === value} onClick={() => setScope(value)}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="activity-filter-row">
+          <div className="tabs" aria-label="买卖方向">
+            <span>Side</span>
+            {(
+              [
+                ["ANY", "All"],
+                ["BUY", "Buys"],
+                ["SELL", "Sells"],
+              ] as const
+            ).map(([value, label]) => (
+              <button key={value} aria-pressed={side === value} onClick={() => setSide(value)}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="tabs" aria-label="成交金额">
+            <span>Amount</span>
+            {(
+              [
+                ["ANY", "All"],
+                ["500", "≥ $500"],
+                ["2000", "≥ $2K"],
+              ] as const
+            ).map(([value, label]) => (
+              <button key={value} aria-pressed={minUsd === value} onClick={() => setMinUsd(value)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
       {scope === "FOLLOWING" && !state.authenticated ? (
         <p className="empty-state">连接钱包后查看关注动态。</p>
@@ -283,8 +290,8 @@ function FilteredFeed({
                     {shortAddress(item.token)}
                   </button>
                 </td>
-                <td>{item.amountUsd == null ? "未知" : money(item.amountUsd)}</td>
-                <td>{item.marketCapUsd == null ? "未知" : money(item.marketCapUsd)}</td>
+                <td>{compactMoney(item.amountUsd)}</td>
+                <td>{compactMoney(item.marketCapUsd)}</td>
                 <td
                   onMouseEnter={() => {
                     frozen.current.hovered = true;
