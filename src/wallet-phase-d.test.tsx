@@ -180,7 +180,8 @@ it("wallet-phase-d: 4 related scenarios", async () => {
       </UserStateProvider>,
     );
     await screen.findByText("$2.1K");
-    expect(screen.getByRole("button", { name: "卖出" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Follow Sell" })).toBeNull();
+    expect(screen.getByRole("button", { name: "View" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "KOL" }));
     fireEvent.click(screen.getByRole("button", { name: "Sells" }));
     fireEvent.click(screen.getByRole("button", { name: "≥ $2K" }));
@@ -207,9 +208,9 @@ it("wallet-phase-d: 4 related scenarios", async () => {
         />
       </UserStateProvider>,
     );
-    fireEvent.click(screen.getByRole("button", { name: "卖出" }));
+    fireEvent.click(screen.getByRole("button", { name: "Follow Sell" }));
     expect(onTrade).toHaveBeenCalledWith(token, "SELL");
-    const sellCell = screen.getByRole("button", { name: "卖出" }).parentElement!;
+    const sellCell = screen.getByRole("button", { name: "Follow Sell" }).parentElement!;
     fireEvent.mouseEnter(sellCell);
     vi.mocked(walletApi.feed).mockResolvedValue({
       items: [

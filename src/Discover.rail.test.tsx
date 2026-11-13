@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import Discover from "./Discover";
 vi.mock("./user-state", () => ({
   useUserState: () => ({ watchlist: new Set(), authenticated: false, quickBuyAmounts: ["10"] }),
@@ -29,4 +29,13 @@ it("uses actual 1h change and compact MC in the detail rail", async () => {
   expect(await screen.findByText("$7.67M", { exact: false })).toHaveAttribute("title", "7670000");
   expect(screen.getByText("6.08%", { exact: false })).toHaveTextContent("1h");
   expect(screen.queryByText("100%", { exact: false })).toBeNull();
+});
+
+it("renders New lifecycle in its own status column", async () => {
+  render(<Discover onToken={vi.fn()} onQuickBuy={vi.fn()} onConnect={vi.fn()} />);
+  await screen.findByText("TEST");
+  fireEvent.click(screen.getByRole("button", { name: "New" }));
+  expect(await screen.findByRole("columnheader", { name: "Status" })).toBeVisible();
+  await screen.findByText("TEST");
+  expect(screen.getAllByRole("row")[1].children).toHaveLength(11);
 });

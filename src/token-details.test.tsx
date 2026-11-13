@@ -142,13 +142,18 @@ it("token-details: 5 related scenarios", async () => {
       complete: false,
       coverage: "BOUNDED_TOP_100",
       error: null,
-      items: [holder],
+      items: [holder, { ...holder, address: a, riskLabels: ["unrecognized"] }],
       nextCursor: "50",
     } as any);
     const local = vi.spyOn(tokenApi, "localHolders").mockRejectedValue(new Error("Unavailable"));
     render(<TokenDetails token={token} onProfile={() => {}} follows={[]} walletAddress={a} />);
     fireEvent.click(screen.getByRole("tab", { name: "Holders" }));
-    await screen.findByText("Dev");
+    await screen.findByRole("button", { name: `查看钱包 ${b}` });
+    fireEvent.click(screen.getByRole("button", { name: "Snipers" }));
+    expect(screen.queryByRole("button", { name: `查看钱包 ${b}` })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Dev" }));
+    expect(screen.getByRole("button", { name: `查看钱包 ${b}` })).toBeVisible();
+    expect(screen.queryByRole("button", { name: `查看钱包 ${a}` })).toBeNull();
     expect(screen.queryByText(/最多前 100 名/)).toBeNull();
     expect(screen.queryByText(/不代表其余额为零/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "加载更多持有人" }));
@@ -158,7 +163,7 @@ it("token-details: 5 related scenarios", async () => {
       expect(local).toHaveBeenCalledWith(a, "FOLLOWING", undefined, expect.any(AbortSignal)),
     );
     expect(await screen.findByText(/持有人暂不可用/)).toBeVisible();
-    expect(screen.queryByText("Dev")).toBeNull();
+    expect(screen.queryByRole("button", { name: `查看钱包 ${b}` })).toBeNull();
   })();
   await cleanScenario2();
   await prepareScenario1();

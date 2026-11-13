@@ -223,7 +223,7 @@ export default function Discover({
         <div className="tabs" aria-label="交易页发现列表">
           {(
             [
-              ["hot", "Trending"],
+              ["hot", "🔥 Trending"],
               ["new", "New"],
               ["watchlist", "Watchlist"],
             ] as const
@@ -297,7 +297,7 @@ export default function Discover({
         <div className="tabs" aria-label="发现列表">
           {(
             [
-              ["hot", "Trending"],
+              ["hot", "🔥 Trending"],
               ["new", "New"],
               ["watchlist", "Watchlist"],
             ] as const
@@ -396,10 +396,12 @@ export default function Discover({
             <thead>
               <tr>
                 <th>Token</th>
+                {tab === "new" && <th>Status</th>}
                 <th>{column("Age", "ageSeconds")}</th>
+                {tab === "new" && <th>{column("Market cap", "marketCapUsd")}</th>}
                 <th>{column("Price", "priceUsd")}</th>
                 <th>{column(`${period} change`, period === "1h" ? "change1h" : "change24h")}</th>
-                <th>{column("Market cap", "marketCapUsd")}</th>
+                {tab !== "new" && <th>{column("Market cap", "marketCapUsd")}</th>}
                 <th>
                   {column(`${period} volume`, period === "1h" ? "volume1hUsd" : "volume24hUsd")}
                 </th>
@@ -408,7 +410,7 @@ export default function Discover({
                 <th>
                   {column("Smart", "smartMoneyCount")} / {column("KOL", "kolCount")}
                 </th>
-                <th>Quick buy</th>
+                <th>⚡ Quick buy</th>
               </tr>
             </thead>
             <tbody>
@@ -442,10 +444,22 @@ export default function Discover({
                     <span title={token.tokenAddress} className="muted address">
                       {shortAddress(token.tokenAddress)}
                     </span>
-                    <span className="lifecycle">{lifecycleLabel(token)}</span>
+                    {tab !== "new" && <span className="lifecycle">{lifecycleLabel(token)}</span>}
                   </td>
+                  {tab === "new" && (
+                    <td>
+                      <span className={`lifecycle status-${token.lifecycle?.state ?? "unknown"}`}>
+                        {lifecycleLabel(token)}
+                      </span>
+                    </td>
+                  )}
                   <td>{age(token.ageSeconds)}</td>
-                  <td>{money(token.priceUsd)}</td>
+                  {tab === "new" && (
+                    <td title={token.marketCapUsd ?? undefined}>
+                      {compactMoney(token.marketCapUsd)}
+                    </td>
+                  )}
+                  <td className="market-price">{money(token.priceUsd)}</td>
                   <td
                     className={
                       Number(period === "1h" ? token.change1h : token.change24h) < 0
@@ -455,9 +469,11 @@ export default function Discover({
                   >
                     {percent(period === "1h" ? token.change1h : token.change24h)}
                   </td>
-                  <td title={token.marketCapUsd ?? undefined}>
-                    {compactMoney(token.marketCapUsd)}
-                  </td>
+                  {tab !== "new" && (
+                    <td title={token.marketCapUsd ?? undefined}>
+                      {compactMoney(token.marketCapUsd)}
+                    </td>
+                  )}
                   <td
                     title={(period === "1h" ? token.volume1hUsd : token.volume24hUsd) ?? undefined}
                   >
@@ -466,9 +482,12 @@ export default function Discover({
                   <td title={token.liquidityUsd ?? undefined}>
                     {compactMoney(token.liquidityUsd)}
                   </td>
-                  <td>{amount(token.holders)}</td>
                   <td>
-                    {amount(token.smartMoneyCount)} / {amount(token.kolCount)}
+                    {token.holders == null ? "—" : Number(token.holders).toLocaleString("en-US")}
+                  </td>
+                  <td>
+                    <span title="Smart Money">🧠 {amount(token.smartMoneyCount)}</span>{" "}
+                    <span title="KOL">👤 {amount(token.kolCount)}</span>
                   </td>
                   <td className="quick-buy-cell">
                     <select

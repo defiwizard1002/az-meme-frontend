@@ -112,6 +112,7 @@ function TokenWorkspace({
   const [holdersLoading, setHoldersLoading] = useState(false);
   const [holdersError, setHoldersError] = useState<string | null>(null);
   const [holdersRetry, setHoldersRetry] = useState(0);
+  const [holderRisk, setHolderRisk] = useState<string | null>(null);
   const [holderScope, setHolderScope] = useState<"ALL" | LocalHolderScope>("ALL");
   const [chartLoading, setChartLoading] = useState(true);
   const [chartError, setChartError] = useState<string | null>(null);
@@ -718,7 +719,9 @@ function TokenWorkspace({
         grouped.set(`${trade.txHash}:${trade.side}`, trade);
     return buildTradeMarkers([...grouped.values()], interval, walletAddress, markerFilters);
   }, [trades, historicalMarkers, interval, walletAddress, markerFilters]);
-  const holderRows = holders?.items ?? [];
+  const holderRows = (holders?.items ?? []).filter(
+    (holder) => !holderRisk || holder.riskLabels.includes(holderRisk),
+  );
   const lifecycle = token.lifecycle;
   const lifecycleLabel = lifecycle
     ? {
@@ -769,29 +772,49 @@ function TokenWorkspace({
             >
               {copyState ?? "复制地址"}
             </button>
+            <nav className="social-links" aria-label="社交链接">
+              {[
+                ["Website", token.website],
+                ["X", token.twitterUsername],
+                ["Telegram", token.telegram],
+                ["Discord", token.discord],
+              ].map(([label, value]) => {
+                const href = socialUrl(value, label!);
+                return href ? (
+                  <a key={label} href={href} target="_blank" rel="noreferrer">
+                    {label}
+                  </a>
+                ) : null;
+              })}
+            </nav>
+            {lifecycle?.state !== "UNKNOWN" &&
+              lifecycle?.state !== "NOT_APPLICABLE" &&
+              lifecycle && (
+                <div className="lifecycle" title={token.launchpad ?? undefined}>
+                  <span>{lifecycleLabel}</span>
+                  {lifecycle.progressPct != null && (
+                    <progress
+                      max={100}
+                      value={Number(lifecycle.progressPct)}
+                      aria-label="毕业进度"
+                    />
+                  )}
+                </div>
+              )}
           </div>
           {onWatch && (
-            <button type="button" aria-pressed={watched} onClick={onWatch}>
-              {watched ? "已自选" : "加入自选"}
+            <button
+              type="button"
+              aria-label={watched ? "取消自选" : "加入自选"}
+              aria-pressed={watched}
+              onClick={onWatch}
+            >
+              {watched ? "★" : "☆"}
             </button>
           )}
         </div>
         {token.description && <p>{token.description}</p>}
-        <nav className="social-links" aria-label="社交链接">
-          {[
-            ["Website", token.website],
-            ["X", token.twitterUsername],
-            ["Telegram", token.telegram],
-            ["Discord", token.discord],
-          ].map(([label, value]) => {
-            const href = socialUrl(value, label!);
-            return href ? (
-              <a key={label} href={href} target="_blank" rel="noreferrer">
-                {label}
-              </a>
-            ) : null;
-          })}
-        </nav>
+
         <dl className="token-stats">
           {[
             ["价格", money(token.priceUsd)],
@@ -806,14 +829,6 @@ function TokenWorkspace({
             </div>
           ))}
         </dl>
-        {lifecycle?.state !== "UNKNOWN" && lifecycle?.state !== "NOT_APPLICABLE" && lifecycle && (
-          <div className="lifecycle" title={token.launchpad ?? undefined}>
-            <span>{lifecycleLabel}</span>
-            {lifecycle.progressPct != null && (
-              <progress max={100} value={Number(lifecycle.progressPct)} aria-label="毕业进度" />
-            )}
-          </div>
-        )}
         {detailError && (
           <p role="alert">
             {detailError} <button onClick={() => setRetry((value) => value + 1)}>重试</button>
@@ -1011,8 +1026,28 @@ function TokenWorkspace({
                   ).map(([scope, label]) => (
                     <button
                       key={scope}
-                      aria-pressed={holderScope === scope}
-                      onClick={() => setHolderScope(scope)}
+                      aria-pressed={!holderRisk && holderScope === scope}
+                      onClick={() => {
+                        setHolderRisk(null);
+                        setHolderScope(scope);
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                  {[
+                    ["dev", "Dev"],
+                    ["sniper", "Snipers"],
+                    ["insider", "Insiders"],
+                  ].map(([risk, label]) => (
+                    <button
+                      key={risk}
+                      aria-pressed={holderRisk === risk}
+                      title="筛选当前已加载的持有人；可加载更多"
+                      onClick={() => {
+                        setHolderScope("ALL");
+                        setHolderRisk(risk);
+                      }}
                     >
                       {label}
                     </button>

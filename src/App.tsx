@@ -190,16 +190,16 @@ function Workspace({
     <div className={`app-shell page-${location.page}`}>
       <header className="app-header">
         <button className="brand" onClick={() => navigate("discover")} aria-label="Memebot 首页">
-          <span>Meme</span>
+          <span className="azx-wordmark">AZX</span>
+          <span className="meme-product-label">Meme</span>
           <span className="chain-label">● Robinhood Chain</span>
-          <small>Get in early. Dodge the rugs.</small>
         </button>
         <nav aria-label="主导航">
           {(
             [
               ["discover", "Discover"],
               ["activity", "Smart Money"],
-              ["portfolio", "Positions / Orders"],
+              ["portfolio", "Positions & Orders"],
               ["settings", "设置"],
             ] as const
           ).map(([page, label]) => (
@@ -208,7 +208,7 @@ function Workspace({
               aria-current={location.page === page ? "page" : undefined}
               onClick={() => navigate(page)}
             >
-              {label}
+              {location.page === "token" && page === "discover" ? "← Back" : label}
             </button>
           ))}
         </nav>
@@ -247,11 +247,13 @@ function Workspace({
           )}
         </div>
       </header>
-      <ActivityRibbon
-        onWallet={setProfile}
-        onToken={openToken}
-        onSmartMoney={() => navigate("activity")}
-      />
+      {location.page !== "token" && (
+        <ActivityRibbon
+          onWallet={setProfile}
+          onToken={openToken}
+          onSmartMoney={() => navigate("activity")}
+        />
+      )}
       <main>
         {connectionError && <p className="notice">{connectionError}</p>}
         {accountError && (
@@ -330,9 +332,6 @@ function Workspace({
           ))}
         {location.page === "token" && (
           <>
-            <button className="back-link" onClick={() => navigate("discover")}>
-              ← Discover
-            </button>
             {tokenError && (
               <p role="alert" className="error">
                 {tokenError} <button onClick={() => setTokenRetry((n) => n + 1)}>重试</button>

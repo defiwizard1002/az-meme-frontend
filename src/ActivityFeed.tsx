@@ -244,87 +244,85 @@ function FilteredFeed({
           applyPending();
         }}
       >
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>时间</th>
-              <th>钱包</th>
-              <th>方向</th>
-              <th>代币</th>
-              <th>金额 (U)</th>
-              <th>交易时市值 (U)</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <tr key={item.eventId}>
-                <td title={new Date(item.timestampMs).toLocaleString()}>
-                  {relativeTime(item.timestampMs)}
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    className="text-button"
-                    title={item.address}
-                    onClick={() => onWallet(item.address)}
-                  >
-                    {shortAddress(item.address)}
-                  </button>
-                  {item.labels?.map((label) => (
-                    <span className="badge" key={label}>
-                      {label === "SMART_MONEY" ? "Smart" : "KOL"}
-                    </span>
-                  ))}
-                </td>
-                <td className={item.kind === "BUY" ? "positive" : "negative"}>
-                  {item.kind === "BUY" ? "买入" : "卖出"}
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    className="text-button"
-                    title={item.token}
-                    onClick={() => onToken(item.token)}
-                  >
-                    {shortAddress(item.token)}
-                  </button>
-                </td>
-                <td>{compactMoney(item.amountUsd)}</td>
-                <td>{compactMoney(item.marketCapUsd)}</td>
-                <td
-                  onMouseEnter={() => {
-                    frozen.current.hovered = true;
-                  }}
-                  onMouseLeave={() => {
-                    frozen.current.hovered = false;
-                    applyPending();
-                  }}
-                  onFocus={() => {
-                    frozen.current.hovered = true;
-                  }}
-                  onBlur={() => {
-                    frozen.current.hovered = false;
-                    applyPending();
-                  }}
+        <div className="activity-list" aria-label="交易动态">
+          {items.map((item) => (
+            <article className="activity-card" key={item.eventId}>
+              <div className="activity-wallet">
+                <span className="activity-avatar" aria-hidden="true">
+                  {item.address.slice(2, 4)}
+                </span>
+                <button
+                  type="button"
+                  className="text-button"
+                  title={item.address}
+                  onClick={() => onWallet(item.address)}
                 >
+                  {shortAddress(item.address)}
+                </button>
+                {item.labels?.map((label) => (
+                  <span className="badge" key={label}>
+                    {label === "SMART_MONEY" ? "Smart" : "KOL"}
+                  </span>
+                ))}
+              </div>
+              <div className="activity-event">
+                <span className={item.kind === "BUY" ? "positive" : "negative"}>
+                  {item.kind === "BUY" ? "Bought" : "Sold"}
+                </span>
+                <button
+                  type="button"
+                  className="activity-token text-button"
+                  title={item.token}
+                  onClick={() => onToken(item.token)}
+                >
+                  {shortAddress(item.token)}
+                </button>
+                <span className="activity-value" title={item.amountUsd ?? undefined}>
+                  {compactMoney(item.amountUsd)}
+                </span>
+                <span className="muted">@</span>
+                <span className="activity-value" title={item.marketCapUsd ?? undefined}>
+                  {compactMoney(item.marketCapUsd)} <span className="muted">MC</span>
+                </span>
+              </div>
+              <time
+                title={new Date(item.timestampMs).toLocaleString()}
+                dateTime={new Date(item.timestampMs).toISOString()}
+              >
+                {relativeTime(item.timestampMs)}
+              </time>
+              <div
+                className="activity-actions"
+                onMouseEnter={() => {
+                  frozen.current.hovered = true;
+                }}
+                onMouseLeave={() => {
+                  frozen.current.hovered = false;
+                  applyPending();
+                }}
+                onFocus={() => {
+                  frozen.current.hovered = true;
+                }}
+                onBlur={() => {
+                  frozen.current.hovered = false;
+                  applyPending();
+                }}
+              >
+                <button type="button" className="text-button" onClick={() => onToken(item.token)}>
+                  View
+                </button>
+                {(item.kind === "BUY" || heldTokens.has(item.token.toLowerCase())) && (
                   <button
                     type="button"
-                    disabled={item.kind === "SELL" && !heldTokens.has(item.token.toLowerCase())}
-                    title={
-                      item.kind === "SELL" && !heldTokens.has(item.token.toLowerCase())
-                        ? "仅可卖出已确认持有的代币"
-                        : undefined
-                    }
                     onClick={() => onTrade(item.token, item.kind === "SELL" ? "SELL" : "BUY")}
                   >
-                    {item.kind === "SELL" ? "卖出" : "买入"}
+                    {item.kind === "SELL" ? "Follow Sell" : "Buy"}
                   </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
       </div>
       {!loading && !error && !items.length && (
         <p className="empty-state">最近 24 小时没有符合这些条件的活动</p>

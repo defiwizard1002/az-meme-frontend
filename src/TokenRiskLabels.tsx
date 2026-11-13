@@ -74,33 +74,54 @@ export function TokenRiskLabels({ security }: { security: Token["security"] }) {
 export function TokenRiskGrid({ token }: { token: Token }) {
   const security = token.security;
   const metrics = riskMetrics(security);
+  const tone = safetySeverity(security);
   return (
     <section className="token-risk-panel panel" aria-label="Safety 安全信息">
       <div className="risk-grid-heading">
-        <h3>Safety</h3>
-        <TokenRiskLabels security={security} />
+        <span aria-hidden="true" className={`risk-status-icon security-${tone}`}>
+          {{ safe: "✓", warning: "!", danger: "×", neutral: "—" }[tone]}
+        </span>
+        <div className="risk-summary">
+          <TokenRiskLabels security={security} />
+          <p>
+            {
+              {
+                safe: "No obvious red flags found. For reference only.",
+                warning: "Notable risk factors identified. Trade with caution.",
+                danger: "High-risk signals detected. You could lose most of your investment.",
+                neutral: "Insufficient data to assess risk. Trade with caution.",
+              }[tone]
+            }
+          </p>
+        </div>
       </div>
       {security.isHoneypot === true && <p className="security-danger">已识别貔貅，已禁止买入</p>}
       <dl className="risk-grid">
-        {metrics.map(({ label, value, tone }) => (
-          <div className="risk-metric" key={label}>
-            <dt className="risk-metric-label">{label}</dt>
-            <dd className={`risk-metric-value security-${tone}`}>{value}</dd>
-          </div>
-        ))}
+        {[...metrics.slice(9), ...metrics.slice(0, 6), metrics[8], metrics[7]].map(
+          ({ label, value, tone }) => (
+            <div className="risk-metric" key={label}>
+              <dt className="risk-metric-label">{label}</dt>
+              <dd className={`risk-metric-value security-${tone}`}>{value}</dd>
+            </div>
+          ),
+        )}
       </dl>
-      <dl className="risk-grid">
-        {[
-          ["Rat 成交量占比", security.ratVolumePct],
-          ["Bundler 成交量占比", security.bundlerVolumePct],
-          ["Phishing 成交量占比", security.phishingVolumePct],
-        ].map(([label, value]) => (
-          <div className="risk-metric" key={label}>
-            <dt>{label}</dt>
-            <dd>{value == null ? "未知" : `${format.format(Number(value))}%`}</dd>
-          </div>
-        ))}
-      </dl>
+      <details className="risk-extra">
+        <summary>Additional data</summary>
+        <dl className="risk-grid">
+          {[
+            ["买入税", security.buyTaxPct],
+            ["Rat 成交量占比", security.ratVolumePct],
+            ["Bundler 成交量占比", security.bundlerVolumePct],
+            ["Phishing 成交量占比", security.phishingVolumePct],
+          ].map(([label, value]) => (
+            <div className="risk-metric" key={label}>
+              <dt>{label}</dt>
+              <dd>{value == null ? "未知" : `${format.format(Number(value))}%`}</dd>
+            </div>
+          ))}
+        </dl>
+      </details>
     </section>
   );
 }

@@ -1,6 +1,26 @@
+@font-face {
+  font-family: Cousine;
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/cousine-regular.ttf") format("truetype");
+}
+@font-face {
+  font-family: Cousine;
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/cousine-bold.ttf") format("truetype");
+}
+html {
+  scrollbar-width: none;
+}
+html::-webkit-scrollbar {
+  display: none;
+}
 :root {
   font-family:
-    Inter,
+    "PingFang SC",
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",
@@ -1952,7 +1972,7 @@ textarea {
   background: transparent;
   border: 0;
   border-radius: 0;
-  padding: 16px 4px;
+  padding: 10px 4px;
   color: #97939f;
 }
 .token-activity > [role="tablist"] > button[aria-selected="true"] {
@@ -1965,12 +1985,13 @@ textarea {
 .views-filters {
   display: flex;
   gap: 8px;
-  padding: 12px 20px;
+  padding: 8px 16px;
   border-bottom: 1px solid #23212c;
 }
 .views-filters button {
-  min-height: 36px;
-  padding: 6px 14px;
+  min-height: 24px;
+  padding: 3px 8px;
+  font-size: 11px;
   border: 0;
   border-radius: 8px;
   background: #18171f;
@@ -1982,28 +2003,28 @@ textarea {
 }
 .views-list {
   display: grid;
-  gap: 14px;
-  padding: 18px 20px;
+  gap: 10px;
+  padding: 12px 16px;
 }
 .view-card {
   min-width: 0;
-  padding: 20px;
+  padding: 16px;
   border: 1px solid #25232e;
-  border-radius: 16px;
+  border-radius: 10px;
   background: #101115;
 }
 .view-author {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   color: #eeeef1;
-  font-size: 16px;
+  font-size: 14px;
 }
 .view-author img,
 .view-avatar {
   position: relative;
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   flex-shrink: 0;
   object-fit: cover;
@@ -2016,10 +2037,10 @@ textarea {
   color: #dac5f3;
 }
 .view-body {
-  margin: 18px 0 18px 56px;
+  margin: 8px 0 10px 44px;
   color: #d2cfd8;
-  font-size: 16px;
-  line-height: 1.6;
+  font-size: 14px;
+  line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -2028,7 +2049,7 @@ textarea {
   flex-wrap: wrap;
   align-items: center;
   gap: 10px 16px;
-  margin-left: 56px;
+  margin-left: 44px;
   color: #9691a3;
   font-size: 13px;
 }
@@ -2310,4 +2331,230 @@ textarea {
 }
 .holder-controls {
   flex-wrap: wrap;
+}
+
+.discover .data-table td:not(:first-child),
+.market-rail-token > span:last-child,
+.market-rail-token small,
+.token-stats dd,
+.token-activity td:not(:first-child),
+.quote-amount,
+.view-metadata strong,
+.view-holding,
+.activity-value {
+  font-family: Cousine, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.discover .data-table td {
+  font-weight: 400;
+}
+.lifecycle.status-CURVE {
+  color: #8b8ba3;
+}
+.lifecycle.status-NEAR_GRADUATION {
+  color: #f5ab42;
+}
+.lifecycle.status-GRADUATED {
+  color: #20c477;
+}
+
+.activity-card {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr) 70px 140px;
+  align-items: center;
+  gap: 16px;
+  min-height: 59px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.activity-wallet,
+.activity-event,
+.activity-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.activity-avatar {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #272238;
+  color: #b9a6d8;
+}
+.activity-wallet .text-button {
+  font-weight: 600;
+}
+.activity-token {
+  background: #191824;
+  border-radius: 5px;
+  padding: 4px 8px;
+}
+.activity-card time {
+  color: var(--muted);
+}
+.activity-actions {
+  justify-content: flex-end;
+}
+@media (max-width: 900px) {
+  .activity-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 12px;
+  }
+  .activity-event {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    flex-wrap: wrap;
+  }
+  .activity-card time {
+    grid-row: 1;
+    grid-column: 2;
+  }
+  .activity-actions {
+    grid-column: 1 / -1;
+  }
+}
+
+.token-risk-panel {
+  padding: 16px;
+}
+.risk-grid-heading {
+  justify-content: flex-start;
+  gap: 12px;
+}
+.risk-status-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  font-size: 22px;
+}
+.risk-summary {
+  display: grid;
+  gap: 6px;
+}
+.risk-summary p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.token-risk-panel .risk-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.token-risk-panel .risk-metric {
+  background: #14131e;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px;
+  min-height: 46px;
+}
+.risk-metric dt {
+  font-size: 11px;
+}
+.risk-metric dd {
+  font-family: Cousine, monospace;
+  font-size: 12px;
+  font-weight: 700;
+}
+.risk-extra {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+@media (max-width: 600px) {
+  .token-risk-panel .risk-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.table-scroll {
+  scrollbar-width: none;
+}
+.table-scroll::-webkit-scrollbar {
+  display: none;
+}
+.discover .lifecycle {
+  font-family: "PingFang SC", sans-serif;
+}
+.discover .tabs button {
+  border: 0;
+  background: transparent;
+}
+.discover .tabs button[aria-pressed="true"] {
+  background: #171521;
+  color: #ececf3;
+}
+
+.azx-wordmark {
+  font-weight: 800;
+  font-style: italic;
+  letter-spacing: -1px;
+}
+.meme-product-label {
+  font-size: 14px;
+  font-weight: 600;
+  margin-left: 12px;
+}
+@media (min-width: 901px) {
+  .app-header {
+    grid-template-rows: 44px 44px;
+    padding-top: 6px;
+    gap: 6px;
+    min-height: 100px;
+    background: #08070c;
+  }
+  .brand {
+    align-self: center;
+    align-items: center;
+  }
+  .discover .search {
+    top: 60px;
+  }
+}
+
+.page-token main {
+  padding-top: 0;
+}
+.market-rail {
+  scrollbar-width: none;
+}
+.market-rail::-webkit-scrollbar {
+  display: none;
+}
+.chart-panel .data-note:empty {
+  display: none;
+}
+
+.token-heading .social-links,
+.token-heading .lifecycle {
+  display: inline-flex;
+  gap: 5px;
+  margin: 0 0 0 6px;
+  vertical-align: middle;
+}
+.token-heading .lifecycle progress {
+  width: 60px;
+}
+.chart-panel.panel {
+  margin-bottom: 0;
+}
+@media (min-width: 1101px) {
+  .token-header {
+    min-height: 70px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  .token-stats {
+    grid-row: 1;
+  }
+}
+
+.discover .data-table td.market-price {
+  font-weight: 700;
 }
