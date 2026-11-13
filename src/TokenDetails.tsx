@@ -1,3 +1,4 @@
+import { DesignIcon } from "./DesignIcon";
 import Views from "./Callout";
 import { Portfolio } from "./Portfolio";
 import { amount as displayAmount, money, price, percent, compactMoney } from "./display";
@@ -809,7 +810,7 @@ function TokenWorkspace({
               aria-pressed={watched}
               onClick={onWatch}
             >
-              {watched ? "★" : "☆"}
+              <DesignIcon name="star" filled={watched} />
             </button>
           )}
         </div>

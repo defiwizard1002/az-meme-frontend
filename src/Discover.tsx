@@ -1,3 +1,4 @@
+import { DesignIcon } from "./DesignIcon";
 import { mergeLiveToken } from "./discovery";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { request, requestPublicMarket, memeApi, wsBaseUrl } from "./api";
@@ -223,12 +224,13 @@ export default function Discover({
         <div className="tabs" aria-label="交易页发现列表">
           {(
             [
-              ["hot", "🔥 Trending"],
+              ["hot", "Trending"],
               ["new", "New"],
               ["watchlist", "Watchlist"],
             ] as const
           ).map(([value, label]) => (
             <button key={value} aria-pressed={tab === value} onClick={() => changeTab(value)}>
+              {value === "hot" && <DesignIcon name="flame" />}
               {label}
             </button>
           ))}
@@ -297,12 +299,13 @@ export default function Discover({
         <div className="tabs" aria-label="发现列表">
           {(
             [
-              ["hot", "🔥 Trending"],
+              ["hot", "Trending"],
               ["new", "New"],
               ["watchlist", "Watchlist"],
             ] as const
           ).map(([value, label]) => (
             <button key={value} aria-pressed={tab === value} onClick={() => changeTab(value)}>
+              {value === "hot" && <DesignIcon name="flame" />}
               {label}
             </button>
           ))}
@@ -410,7 +413,9 @@ export default function Discover({
                 <th>
                   {column("Smart", "smartMoneyCount")} / {column("KOL", "kolCount")}
                 </th>
-                <th>⚡ Quick buy</th>
+                <th>
+                  <DesignIcon name="bolt" /> Quick buy
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -423,7 +428,10 @@ export default function Discover({
                       aria-pressed={user.watchlist.has(token.tokenAddress.toLowerCase())}
                       onClick={() => watch(token)}
                     >
-                      {user.watchlist.has(token.tokenAddress.toLowerCase()) ? "★" : "☆"}
+                      <DesignIcon
+                        name="star"
+                        filled={user.watchlist.has(token.tokenAddress.toLowerCase())}
+                      />
                     </button>
                     <button className="token-link" onClick={() => onToken(token)}>
                       <span className="token-avatar">
@@ -486,8 +494,12 @@ export default function Discover({
                     {token.holders == null ? "—" : Number(token.holders).toLocaleString("en-US")}
                   </td>
                   <td>
-                    <span title="Smart Money">🧠 {amount(token.smartMoneyCount)}</span>{" "}
-                    <span title="KOL">👤 {amount(token.kolCount)}</span>
+                    <span title="Smart Money">
+                      <DesignIcon name="smart-money" /> {amount(token.smartMoneyCount)}
+                    </span>{" "}
+                    <span title="KOL">
+                      <DesignIcon name="kol" /> {amount(token.kolCount)}
+                    </span>
                   </td>
                   <td className="quick-buy-cell">
                     <select
