@@ -2294,3 +2294,17 @@ textarea {
   padding-top: 6px;
   padding-bottom: 6px;
 }
+.token-details {
+  grid-template-rows: max-content minmax(0, 1fr);
+}
+@media (max-width: 780px) {
+  .token-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    row-gap: 12px;
+  }
+  .token-stats dd {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
