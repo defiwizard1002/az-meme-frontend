@@ -308,11 +308,12 @@ export default function Discover({
           ).map(([value, label]) => (
             <button key={value} aria-pressed={tab === value} onClick={() => changeTab(value)}>
               {value === "hot" && <DesignIcon name="flame" />}
+              {value === "watchlist" && <DesignIcon name="star" />}
               {label}
             </button>
           ))}
         </div>
-        <div className="tabs" aria-label="Market interval">
+        <div className="tabs interval-control" aria-label="Market interval">
           {(["1h", "24h"] as const).map((value) => (
             <button
               key={value}
@@ -331,6 +332,7 @@ export default function Discover({
           ))}
         </div>
         <label className="quick-presets">
+          <DesignIcon name="bolt" />
           Quick buy{" "}
           <select
             disabled={!user.quickBuyAmounts.length}

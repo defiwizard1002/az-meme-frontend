@@ -39,3 +39,17 @@ it("renders New lifecycle in its own status column", async () => {
   await screen.findByText("TEST");
   expect(screen.getAllByRole("row")[1].children).toHaveLength(11);
 });
+
+it("uses the reference controls for watchlist, interval and quick buy", async () => {
+  render(<Discover onToken={vi.fn()} onQuickBuy={vi.fn()} onConnect={vi.fn()} />);
+  await screen.findByText("TEST");
+  expect(
+    screen.getByRole("button", { name: "Watchlist" }).querySelector(".icon-star"),
+  ).not.toBeNull();
+  const interval = screen.getByLabelText("Market interval");
+  expect(interval).toHaveClass("interval-control");
+  expect(interval.querySelectorAll("button")).toHaveLength(2);
+  const quickBuy = screen.getByLabelText("Quick buy amount");
+  expect(quickBuy.closest(".quick-presets")?.querySelector(".icon-bolt")).not.toBeNull();
+  expect(quickBuy).toHaveValue("10");
+});

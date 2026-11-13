@@ -3133,8 +3133,8 @@ textarea {
   max-width: 170px;
   min-height: 28px;
   padding: 3px 9px 3px 3px;
-  border: 1px solid #2d2a35;
-  border-radius: 14px;
+  border: 0;
+  border-radius: 6px;
   background: #08080a;
   color: #f0edf4;
   font-size: 11px;
@@ -3142,7 +3142,6 @@ textarea {
   white-space: nowrap;
 }
 .activity-token:hover:not(:disabled) {
-  border-color: #504663;
   background: #111019;
 }
 .activity-token-logo {
@@ -3626,4 +3625,44 @@ textarea {
   .activity-quick .design-icon {
     margin-right: 4px;
   }
+}
+
+.discover > .toolbar > .interval-control {
+  gap: 0;
+  padding: 2px;
+  border: 1px solid #24212b;
+  border-radius: 16px;
+  background: #08070b;
+}
+.discover > .toolbar > .interval-control button {
+  min-height: 26px;
+  padding: 3px 10px;
+  border: 0;
+  border-radius: 13px;
+  background: transparent;
+  color: #918c9c;
+  font-size: 11px;
+}
+.discover > .toolbar > .interval-control button[aria-pressed="true"] {
+  background: #1a1722;
+  box-shadow: none;
+  color: #f4f1f7;
+}
+.discover > .toolbar > .quick-presets {
+  min-height: 30px;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid #292530;
+  border-radius: 16px;
+  background: #08070b;
+  color: #f4f1f7;
+}
+.discover > .toolbar > .quick-presets select {
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  color-scheme: dark;
+  font-size: 10px;
+  font-weight: 600;
 }
