@@ -1078,6 +1078,53 @@ small,
   color: var(--muted);
   font-weight: 500;
 }
+.token-activity .trades-table {
+  min-width: 560px;
+}
+.token-activity .trades-table th,
+.token-activity .trades-table td {
+  height: 35px;
+  padding: 7px 16px;
+  line-height: 20px;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
+.token-activity .trades-table th {
+  height: 30px;
+  padding-block: 4px;
+}
+.token-activity .trades-table td {
+  font-size: 12px;
+}
+.trades-table th:nth-child(3),
+.trades-table th:nth-child(4),
+.trades-table td:nth-child(3),
+.trades-table td:nth-child(4) {
+  text-align: right;
+}
+.token-activity .trades-table td:first-child,
+.trade-value {
+  font-family: Cousine, monospace;
+  font-size: 12px;
+}
+.token-activity .trades-table .trade-value small {
+  display: inline;
+  font-size: 10px;
+  line-height: 1;
+  color: inherit;
+}
+.trade-wallet {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  height: 20px;
+}
+.trade-wallet .link-button,
+.trade-wallet .identity-tag {
+  flex-shrink: 0;
+  font-family: "PingFang SC", sans-serif;
+}
 .link-button {
   border: 0;
   padding: 0;

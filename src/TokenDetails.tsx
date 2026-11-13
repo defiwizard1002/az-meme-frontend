@@ -1,7 +1,7 @@
 import { DesignIcon } from "./DesignIcon";
 import Views from "./Callout";
 import { Portfolio } from "./Portfolio";
-import { amount as displayAmount, money, price, percent, compactMoney } from "./display";
+import { amount as displayAmount, money, percent, compactMoney, age } from "./display";
 import { mergeLiveToken } from "./discovery";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { memeApi, wsBaseUrl } from "./api";
@@ -38,6 +38,15 @@ const amount = (value: string | number | null | undefined, unit = "") =>
 const addressLabel = (value: string) => `${value.slice(0, 6)}…${value.slice(-4)}`;
 const date = (value: number | null | undefined) =>
   value ? new Date(value).toLocaleString() : "更新时间未知";
+function TradeValue({ value }: { value: string | null | undefined }) {
+  return (
+    <span className="trade-value">
+      {compactMoney(value)
+        .split(/(\.\d+)/)
+        .map((part, index) => (part.startsWith(".") ? <small key={index}>{part}</small> : part))}
+    </span>
+  );
+}
 function socialUrl(raw: string | null | undefined, kind: string): string | null {
   if (!raw) return null;
   const value = raw.trim();
@@ -943,60 +952,59 @@ function TokenWorkspace({
             ) : tab === "trades" ? (
               <div role="tabpanel" aria-label="成交">
                 <div className="table-scroll">
-                  <table>
+                  <table className="trades-table">
                     <thead>
                       <tr>
-                        {["时间", "方向", "金额 U", "成交时市值", "钱包 / 标签"].map((title) => (
+                        {["Time", "Side", "Amount", "MC", "Trader"].map((title) => (
                           <th key={title}>{title}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {trades.map((trade) => (
-                        <tr key={trade.tradeId}>
+                        <tr key={trade.tradeId} data-trade-id={trade.tradeId}>
                           <td>
-                            <time dateTime={new Date(trade.t * 1000).toISOString()}>
-                              {new Date(trade.t * 1000).toLocaleTimeString()}
+                            <time
+                              dateTime={new Date(trade.t * 1000).toISOString()}
+                              title={new Date(trade.t * 1000).toLocaleString()}
+                            >
+                              {age(Math.max(0, Math.floor(Date.now() / 1000 - trade.t)))}
                             </time>
                           </td>
                           <td className={trade.side === "BUY" ? "positive" : "negative"}>
-                            {trade.side === "BUY" ? "买入" : "卖出"}
+                            {trade.side === "BUY" ? "Buy" : "Sell"}
                           </td>
-                          <td>{price(trade.notionalUsd)}</td>
+                          <td
+                            className={trade.side === "BUY" ? "positive" : "negative"}
+                            title={trade.notionalUsd}
+                          >
+                            <TradeValue value={trade.notionalUsd} />
+                          </td>
                           <td title={trade.marketCapUsd ?? undefined}>
-                            {amount(trade.marketCapUsd, "$")}
+                            <TradeValue value={trade.marketCapUsd} />
                           </td>
                           <td>
-                            {trade.wallets?.length ? (
-                              trade.wallets.map((wallet) => (
-                                <div key={wallet.address}>
-                                  <button
-                                    className="link-button"
-                                    aria-label={`查看钱包 ${wallet.address}`}
-                                    title={wallet.address}
-                                    onClick={() => onProfile(wallet.address)}
-                                  >
-                                    {addressLabel(wallet.address)}
-                                  </button>
-                                  {wallet.labelSource === "LOCAL_MANUAL" &&
-                                    wallet.labels
-                                      .filter((label) => label === "SMART_MONEY" || label === "KOL")
-                                      .map((label) => (
-                                        <span className="identity-tag" key={label}>
-                                          {label === "SMART_MONEY" ? "Smart" : label}
-                                        </span>
-                                      ))}
-                                </div>
-                              ))
-                            ) : trade.trader ? (
-                              <button
-                                className="link-button"
-                                aria-label={`查看钱包 ${trade.trader}`}
-                                title={trade.trader}
-                                onClick={() => onProfile(trade.trader!)}
-                              >
-                                {addressLabel(trade.trader)}
-                              </button>
+                            {trade.trader ? (
+                              <div className="trade-wallet">
+                                <button
+                                  className="link-button"
+                                  aria-label={`查看钱包 ${trade.trader}`}
+                                  title={trade.trader}
+                                  onClick={() => onProfile(trade.trader!)}
+                                >
+                                  {addressLabel(trade.trader)}
+                                </button>
+                                {trade.wallets
+                                  ?.find(
+                                    (wallet) =>
+                                      wallet.address.toLowerCase() === trade.trader!.toLowerCase(),
+                                  )
+                                  ?.labels.map((label) => (
+                                    <span className="identity-tag" key={label}>
+                                      {label === "SMART_MONEY" ? "Smart" : label}
+                                    </span>
+                                  ))}
+                              </div>
                             ) : (
                               "—"
                             )}

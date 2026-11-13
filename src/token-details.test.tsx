@@ -101,6 +101,15 @@ it("token-details: 5 related scenarios", async () => {
     expect(profile).toHaveBeenCalledWith(b);
     expect(screen.queryByRole("columnheader", { name: "同钱包次数" })).toBeNull();
     expect(screen.getAllByRole("columnheader")).toHaveLength(5);
+    expect(screen.getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
+      "Time",
+      "Side",
+      "Amount",
+      "MC",
+      "Trader",
+    ]);
+    expect(screen.getByText("$500")).toBeVisible();
+    expect(document.querySelector(".trade-wallet .identity-tag")).toHaveTextContent("Smart");
     fireEvent.click(screen.getByRole("tab", { name: "Safety" }));
     expect(screen.getByRole("tabpanel", { name: "Safety" })).toBeVisible();
     expect(screen.getByRole("tab", { name: "Positions" })).toBeVisible();
@@ -399,6 +408,42 @@ it("token-details: 5 related scenarios", async () => {
     expect(instances).toHaveLength(2);
     expect(memeApi.getWsTicket).toHaveBeenLastCalledWith(expect.any(AbortSignal), true);
   })();
+});
+it("keeps the chain trader, matches only its real labels, and preserves missing values", async () => {
+  vi.spyOn(Date, "now").mockReturnValue(126500);
+  vi.mocked(memeApi.getTrades).mockResolvedValue({
+    items: [
+      {
+        ...trades[0]!,
+        t: 123,
+        notionalUsd: "1250",
+        marketCapUsd: "1250000",
+        wallets: [
+          { address: a, labels: ["KOL"], labelSource: "LOCAL_MANUAL" },
+          { address: b, labels: ["SMART_MONEY", "TRACKED"], labelSource: "LOCAL_MANUAL" },
+        ],
+      },
+      { ...trades[0]!, tradeId: "2", t: 122, trader: a, wallets: [], marketCapUsd: null },
+      { ...trades[0]!, tradeId: "3", trader: null, wallets: [], marketCapUsd: null },
+    ] as Trade[],
+    nextCursor: null,
+  });
+  render(<TokenDetails token={token} onProfile={() => {}} />);
+  fireEvent.click(screen.getByRole("tab", { name: "成交" }));
+  await screen.findByRole("button", { name: `查看钱包 ${b}` });
+  const rows = document.querySelectorAll(".trades-table tbody tr");
+  expect(rows).toHaveLength(3);
+  expect(rows[0]!.querySelector("time")).toHaveTextContent("3s");
+  expect(rows[0]!.querySelectorAll("button")).toHaveLength(1);
+  expect(rows[0]!.querySelector("button")).toHaveAttribute("title", b);
+  expect(rows[0]).toHaveTextContent("$1.25K");
+  expect(rows[0]).toHaveTextContent("$1.25M");
+  expect(rows[0]!.querySelector(".trade-value small")).toHaveTextContent(".25");
+  expect(rows[0]).toHaveTextContent("TRACKED");
+  expect(rows[0]).not.toHaveTextContent("KOL");
+  expect(rows[1]!.querySelectorAll(".identity-tag")).toHaveLength(0);
+  expect(rows[1]!.querySelectorAll("td")[3]).toHaveTextContent("—");
+  expect(rows[2]!.querySelectorAll("td")[4]).toHaveTextContent("—");
 });
 
 const bar = (t: number): Candle => ({
