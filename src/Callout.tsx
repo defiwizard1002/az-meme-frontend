@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { requestPublicMarket } from "./api";
-import { money, percent } from "./display";
+import { percent } from "./display";
 
 export interface CalloutItem {
   uid: string;
@@ -31,212 +31,147 @@ export interface CalloutItem {
 
 interface CalloutResponse {
   items: CalloutItem[];
-  nextCursor: number | null;
+  available: boolean;
   stale: boolean;
-  heartbeat: { lastItemAtMs: number | null; total: number | null } | null;
+  hasMore: boolean;
 }
 
-type Feed = "all" | "new" | "leaderboard" | "conviction";
-
-const FEED_LABEL: Record<Feed, string> = {
-  all: "全部",
-  new: "最新",
-  leaderboard: "KOL 榜",
-  conviction: "高信念",
-};
-
-const PLATFORM_LABEL: Record<string, string> = {
-  gmgn: "GMGN",
-  fomo: "Fomo",
-  pump: "Pump",
-  twitter: "X",
-};
-
-function timeAgo(ms: number): string {
-  if (!ms) return "—";
-  const diff = Math.max(0, Date.now() - ms);
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return "刚刚";
-  if (minutes < 60) return `${minutes} 分钟前`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} 小时前`;
-  return `${Math.floor(hours / 24)} 天前`;
+function compactMoney(value: string | null): string {
+  if (value === null || !Number.isFinite(Number(value))) return "—";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    maximumFractionDigits: 2,
+  }).format(Number(value));
 }
 
-const isEvmAddress = (address: string) => /^0x[0-9a-f]{40}$/i.test(address);
-
-/**
- * 喊单（GMGN Callout Radar）列表。数据来自采集器写入的 meme_callout 表，
- * 页面每 15 秒刷新一次；接口返回 stale 时如实提示掉线，不假装实时。
- */
-export default function Callout({ onToken }: { onToken: (address: string) => void }) {
-  const [feed, setFeed] = useState<Feed>("all");
-  const [items, setItems] = useState<CalloutItem[]>([]);
-  const [stale, setStale] = useState(false);
-  const [loading, setLoading] = useState(true);
+export default function Views({
+  tokenAddress,
+  chainId,
+}: {
+  tokenAddress: string;
+  chainId: number;
+}) {
+  const [holdersOnly, setHoldersOnly] = useState(false);
+  const [page, setPage] = useState<CalloutResponse>();
   const [error, setError] = useState<string>();
-  const [revision, setRevision] = useState(0);
-
-  const load = useCallback(
-    async (signal: { cancelled: boolean }) => {
-      try {
-        const query = feed === "all" ? "" : `&feed=${feed}`;
-        const page = await requestPublicMarket<CalloutResponse>(
-          `/sapi/v1/meme/callouts?limit=60${query}`,
-        );
-        if (signal.cancelled) return;
-        setItems(page.items);
-        setStale(page.stale);
-        setError(undefined);
-      } catch (cause) {
-        if (signal.cancelled) return;
-        setError(cause instanceof Error ? cause.message : "喊单数据暂时不可用");
-      } finally {
-        if (!signal.cancelled) setLoading(false);
-      }
-    },
-    [feed],
-  );
-
+  const [retry, setRetry] = useState(0);
   useEffect(() => {
-    const signal = { cancelled: false };
-    setLoading(true);
-    void load(signal);
-    const timer = setInterval(() => void load(signal), 15_000);
-    return () => {
-      signal.cancelled = true;
-      clearInterval(timer);
-    };
-  }, [load, revision]);
+    const controller = new AbortController();
+    setPage(undefined);
+    setError(undefined);
+    void requestPublicMarket<CalloutResponse>(
+      `/sapi/v1/meme/tokens/${tokenAddress}/callouts?chainId=${chainId}&holders=${holdersOnly ? 1 : 0}&limit=100`,
+      { signal: controller.signal },
+    )
+      .then((result) => {
+        if (!controller.signal.aborted) setPage(result);
+      })
+      .catch((cause: unknown) => {
+        if (!controller.signal.aborted)
+          setError(cause instanceof Error ? cause.message : "Views unavailable");
+      });
+    return () => controller.abort();
+  }, [tokenAddress, chainId, holdersOnly, retry]);
 
   return (
-    <section className="panel callout-panel">
-      <header className="toolbar">
-        <div>
-          <strong>Callout 喊单</strong>
-          <span className="muted">
-            来自 GMGN Callout Radar · 保留 7 天{stale ? " · 采集可能已掉线" : ""}
-          </span>
-        </div>
-        <div className="tabs" role="tablist" aria-label="喊单榜单">
-          {(Object.keys(FEED_LABEL) as Feed[]).map((key) => (
-            <button
-              key={key}
-              role="tab"
-              aria-pressed={feed === key}
-              className={feed === key ? "active" : undefined}
-              onClick={() => setFeed(key)}
-            >
-              {FEED_LABEL[key]}
-            </button>
-          ))}
-          <button className="text-button" onClick={() => setRevision((n) => n + 1)}>
-            刷新
-          </button>
-        </div>
-      </header>
-      {error && <p className="notice">{error}</p>}
-      {loading && !items.length && <p className="empty-state">正在读取喊单…</p>}
-      {!loading && !error && !items.length && <p className="empty-state">最近 7 天没有喊单</p>}
-      {items.length > 0 && (
-        <div className="table-scroll">
-          <table className="data-table callout-table">
-            <thead>
-              <tr>
-                <th>时间</th>
-                <th>作者</th>
-                <th>代币</th>
-                <th>喊单内容</th>
-                <th>喊单时市值</th>
-                <th>KOL 持仓</th>
-                <th>来源</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => {
-                const text = item.content.zhHans || item.content.text || "—";
-                const author = item.author.name || item.author.handle || "未知作者";
-                return (
-                  <tr key={item.uid}>
-                    <td title={new Date(item.createdAtMs).toLocaleString()}>
-                      {timeAgo(item.createdAtMs)}
-                    </td>
-                    <td>
-                      <div className="callout-author">
-                        {item.author.avatar ? (
-                          <img src={item.author.avatar} alt="" width={22} height={22} />
-                        ) : (
-                          <span className="avatar-fallback">{author.slice(0, 1)}</span>
-                        )}
-                        <div>
-                          <strong>{author}</strong>
-                          {item.author.handle && (
-                            <a
-                              className="muted"
-                              href={`https://x.com/${item.author.handle}`}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              @{item.author.handle}
-                            </a>
-                          )}
-                          {item.author.followers ? (
-                            <span className="muted">
-                              {item.author.followers >= 1000
-                                ? `${(item.author.followers / 1000).toFixed(1)}k`
-                                : item.author.followers}{" "}
-                              关注
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="callout-token">
-                        {item.logo && <img src={item.logo} alt="" width={20} height={20} />}
-                        {isEvmAddress(item.tokenAddress) ? (
-                          <button
-                            className="token-link"
-                            onClick={() => onToken(item.tokenAddress.toLowerCase())}
-                          >
-                            <strong>{item.symbol || "未知"}</strong>
-                          </button>
-                        ) : (
-                          <strong>{item.symbol || "未知"}</strong>
-                        )}
-                      </div>
-                      {item.isSafe === "risk" && <span className="badge">风险</span>}
-                    </td>
-                    <td className="callout-text">{text}</td>
-                    <td>{money(item.mcapAtCallout)}</td>
-                    <td>
-                      {item.holding.usdValue ? (
+    <div role="tabpanel" aria-label="Views" className="views-panel">
+      <div className="views-filters" aria-label="View filters">
+        <button aria-pressed={!holdersOnly} onClick={() => setHoldersOnly(false)}>
+          All
+        </button>
+        <button aria-pressed={holdersOnly} onClick={() => setHoldersOnly(true)}>
+          Holders only
+        </button>
+      </div>
+      {error ? (
+        <p role="alert" className="notice">
+          {error} <button onClick={() => setRetry((n) => n + 1)}>Retry</button>
+        </p>
+      ) : !page ? (
+        <p className="empty-state" role="status">
+          Loading views…
+        </p>
+      ) : !page.available ? (
+        <p className="empty-state" role="status">
+          Views unavailable
+        </p>
+      ) : (
+        <>
+          {page.stale && (
+            <p className="notice" role="status">
+              Views may be outdated · collection freshness unconfirmed
+            </p>
+          )}
+          {!page.items.length && (
+            <p className="empty-state">No {holdersOnly ? "holder " : ""}views in the last 7 days</p>
+          )}
+          <div className="views-list">
+            {page.items.map((item) => {
+              const author = item.author.name || item.author.handle || "Unknown author";
+              const holding = item.holding.usdValue === null ? null : Number(item.holding.usdValue);
+              return (
+                <article className="view-card" key={item.uid}>
+                  <div className="view-author">
+                    <span className="view-avatar" aria-hidden="true">
+                      {author.slice(0, 1)}
+                      {item.author.avatar && (
+                        <img
+                          src={item.author.avatar}
+                          alt=""
+                          width={40}
+                          height={40}
+                          onError={(event) => {
+                            event.currentTarget.style.display = "none";
+                          }}
+                        />
+                      )}
+                    </span>
+                    <strong>{author}</strong>
+                  </div>
+                  <p className="view-body">{item.content.zhHans || item.content.text || "—"}</p>
+                  <div className="view-metadata">
+                    <span>
+                      MC when posted <strong>{compactMoney(item.mcapAtCallout)}</strong>
+                    </span>
+                    <span
+                      className={`view-holding${holding !== null && holding > 0 ? " positive" : ""}`}
+                    >
+                      {holding === null || !Number.isFinite(holding) ? (
+                        "Holding unknown"
+                      ) : holding === 0 ? (
+                        "Not holding"
+                      ) : holding > 0 ? (
                         <>
-                          {money(item.holding.usdValue)}{" "}
-                          {item.holding.pnlPct && (
-                            <span
-                              className={Number(item.holding.pnlPct) >= 0 ? "positive" : "negative"}
-                            >
-                              {percent(Number(item.holding.pnlPct) * 100)}
-                            </span>
+                          Hold {compactMoney(item.holding.usdValue)}
+                          {item.holding.pnlPct !== null && (
+                            <>
+                              {" "}
+                              <span
+                                className={
+                                  Number(item.holding.pnlPct) >= 0 ? "positive" : "negative"
+                                }
+                              >
+                                {percent(Number(item.holding.pnlPct) * 100)}
+                              </span>
+                            </>
                           )}
                         </>
                       ) : (
-                        "—"
+                        "Holding unknown"
                       )}
-                    </td>
-                    <td>
-                      <span className="badge">
-                        {PLATFORM_LABEL[item.platform] ?? item.platform}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                    </span>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+          {page.hasMore && (
+            <p className="muted views-limit">Showing the latest 100 views from the last 7 days</p>
+          )}
+        </>
       )}
-    </section>
+    </div>
   );
 }

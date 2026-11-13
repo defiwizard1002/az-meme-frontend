@@ -1,3 +1,4 @@
+import Views from "./Callout";
 import { amount as displayAmount, money, price } from "./display";
 import { mergeLiveToken } from "./discovery";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -97,7 +98,7 @@ function TokenWorkspace({
   const [marketLive, setMarketLive] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [interval, setInterval] = useState<Interval>("1m");
-  const [tab, setTab] = useState<"trades" | "holders">("trades");
+  const [tab, setTab] = useState<"views" | "trades" | "holders">("views");
   const [snapshot, setSnapshot] = useState<CandleSnapshot | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [tradeCursor, setTradeCursor] = useState<string | null>(null);
@@ -896,6 +897,9 @@ function TokenWorkspace({
           </section>
           <section className="token-activity panel">
             <div role="tablist" aria-label="代币记录">
+              <button role="tab" aria-selected={tab === "views"} onClick={() => setTab("views")}>
+                Views
+              </button>
               <button role="tab" aria-selected={tab === "trades"} onClick={() => setTab("trades")}>
                 成交
               </button>
@@ -907,7 +911,9 @@ function TokenWorkspace({
                 Holders
               </button>
             </div>
-            {tab === "trades" ? (
+            {tab === "views" ? (
+              <Views key={`${chainId}:${address}`} tokenAddress={address} chainId={chainId} />
+            ) : tab === "trades" ? (
               <div role="tabpanel" aria-label="成交">
                 <div className="table-scroll">
                   <table>

@@ -1,98 +1,80 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import Callout from "./Callout";
-
-const response = {
-  rc: 0,
-  mc: "SUCCESS",
-  ma: [],
-  result: {
-    items: [
-      {
-        uid: "callout-1",
-        tokenAddress: "0x60b269135b0f19ec6b02104674a522ae273f3b65",
-        symbol: "SPCX",
-        logo: null,
-        platform: "twitter",
-        feeds: ["new"],
-        launchpad: null,
-        isSafe: "safe",
-        author: {
-          id: "1",
-          name: "Gary Marcus",
-          handle: "GaryMarcus",
-          avatar: null,
-          wallet: null,
-          followers: 250000,
-        },
-        content: { text: "serious allegations", zhHans: "如果属实，这是相当严重的指控" },
-        holding: { usdValue: null, pnlPct: null },
-        mcapAtCallout: "703366.5",
-        priceAtCallout: "0.0007033665",
-        isDeclaration: false,
-        tweetId: null,
-        createdAtMs: Date.now() - 60_000,
-        firstSeenAtMs: Date.now() - 60_000,
-      },
-      {
-        uid: "callout-2",
-        tokenAddress: "bizev8auekt6ndyajftzwyn4oeh1brgknt83qbjvpump",
-        symbol: "CHAIRMAN",
-        logo: null,
-        platform: "pump",
-        feeds: ["conviction"],
-        launchpad: "Pump.fun",
-        isSafe: "safe",
-        author: {
-          id: "2",
-          name: "solgav",
-          handle: null,
-          avatar: null,
-          wallet: null,
-          followers: 1020,
-        },
-        content: { text: "v2 live", zhHans: null },
-        holding: { usdValue: "1482.5", pnlPct: "-0.09" },
-        mcapAtCallout: "978537",
-        priceAtCallout: null,
-        isDeclaration: false,
-        tweetId: null,
-        createdAtMs: Date.now() - 3 * 3600_000,
-        firstSeenAtMs: Date.now() - 3 * 3600_000,
-      },
-    ],
-    nextCursor: null,
-    stale: false,
-    heartbeat: { lastItemAtMs: Date.now(), total: 2 },
-  },
+import Views from "./Callout";
+import { requestPublicMarket } from "./api";
+vi.mock("./api", () => ({ requestPublicMarket: vi.fn() }));
+const request = vi.mocked(requestPublicMarket);
+const token = `0x${"ab".repeat(20)}`;
+const item = {
+  uid: "1",
+  author: { name: "Tidal", avatar: null },
+  content: { text: "Stock-meme narrative", zhHans: null },
+  holding: { usdValue: null, pnlPct: null },
+  mcapAtCallout: "6620000",
 };
-
+const page = { items: [item], available: true, stale: false, hasMore: false };
 afterEach(() => {
   cleanup();
-  vi.unstubAllGlobals();
+  vi.resetAllMocks();
 });
-
-it("渲染喊单列表，中文文案优先，非 EVM 代币不可点", async () => {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue(new Response(JSON.stringify(response), { status: 200 })),
-  );
-  const onToken = vi.fn();
-  render(<Callout onToken={onToken} />);
-
-  expect(await screen.findByText("如果属实，这是相当严重的指控")).toBeInTheDocument();
-  expect(screen.getByText("Gary Marcus")).toBeInTheDocument();
-  // 中文缺失时回落到原文
-  expect(screen.getByText("v2 live")).toBeInTheDocument();
-  // EVM 代币是按钮，Solana 地址只显示文字
-  const evm = screen.getByRole("button", { name: "SPCX" });
-  evm.click();
-  expect(onToken).toHaveBeenCalledWith("0x60b269135b0f19ec6b02104674a522ae273f3b65");
-  expect(screen.queryByRole("button", { name: "CHAIRMAN" })).toBeNull();
+it("renders cards, distinguishes unknown and zero holdings without invented badges", async () => {
+  request.mockResolvedValue({
+    ...page,
+    items: [
+      item,
+      { ...item, uid: "2", author: { name: "Whale" }, holding: { usdValue: "0", pnlPct: null } },
+      {
+        ...item,
+        uid: "3",
+        author: { name: "Holder" },
+        holding: { usdValue: "1300", pnlPct: "0.294" },
+      },
+    ],
+  });
+  render(<Views tokenAddress={token} chainId={4663} />);
+  expect(await screen.findByText("Tidal")).toBeInTheDocument();
+  expect(screen.getByText("Holding unknown")).toBeInTheDocument();
+  expect(screen.getByText("Not holding")).toBeInTheDocument();
+  expect(screen.getByText(/Hold \$/)).toBeInTheDocument();
+  expect(screen.queryByText("KOL")).not.toBeInTheDocument();
+  expect(screen.getAllByText("MC when posted")).toHaveLength(3);
 });
-
-it("接口失败时显示错误而不是空列表", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
-  render(<Callout onToken={() => {}} />);
-  await waitFor(() => expect(screen.getByText(/网络请求失败/)).toBeInTheDocument());
+it("filter and token changes abort old requests and ignore late results", async () => {
+  let resolveOld!: (value: unknown) => void;
+  request
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveOld = resolve;
+        }),
+    )
+    .mockResolvedValue(page);
+  const view = render(<Views tokenAddress={token} chainId={4663} />);
+  const firstSignal = request.mock.calls[0]![1]!.signal!;
+  fireEvent.click(screen.getByRole("button", { name: "Holders only" }));
+  expect(firstSignal.aborted).toBe(true);
+  expect(await screen.findByText("Tidal")).toBeInTheDocument();
+  expect(request.mock.calls[1]![0]).toContain("holders=1");
+  const secondSignal = request.mock.calls[1]![1]!.signal!;
+  view.rerender(<Views tokenAddress={`0x${"cd".repeat(20)}`} chainId={4663} />);
+  expect(secondSignal.aborted).toBe(true);
+  resolveOld({ ...page, items: [{ ...item, author: { name: "Wrong token" } }] });
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
+  expect(screen.queryByText("Wrong token")).not.toBeInTheDocument();
+  view.unmount();
+  expect(request.mock.calls[2]![1]!.signal!.aborted).toBe(true);
+});
+it("distinguishes unavailable, stale, empty and request error", async () => {
+  request
+    .mockResolvedValueOnce({ ...page, available: false })
+    .mockResolvedValueOnce({ ...page, items: [], stale: true })
+    .mockRejectedValueOnce(new Error("Read failed"));
+  const view = render(<Views tokenAddress={token} chainId={4663} />);
+  expect(await screen.findByText("Views unavailable")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Holders only" }));
+  expect(await screen.findByText(/Views may be outdated/)).toBeInTheDocument();
+  expect(screen.getByText(/No holder views/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "All" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Read failed");
+  view.unmount();
 });

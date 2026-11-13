@@ -3,7 +3,7 @@ import * as matchers from "@testing-library/jest-dom/matchers";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { TokenDetails, buildTradeMarkers } from "./TokenDetails";
 import type { Candle, CandleSnapshot, Token, Trade } from "./types";
-import { memeApi } from "./api";
+import { memeApi, requestPublicMarket } from "./api";
 import { tokenApi } from "./token-api";
 vi.mock("./api", () => ({
   requestPublicMarket: vi.fn(),
@@ -58,6 +58,7 @@ const trades = [
 ] as Trade[];
 const prepareScenario1 = () => {
   vi.stubGlobal("WebSocket", undefined);
+  vi.mocked(requestPublicMarket).mockResolvedValue({ items: [], available: true, stale: false });
   vi.spyOn(tokenApi, "detail").mockResolvedValue(token);
   vi.spyOn(tokenApi, "markers").mockRejectedValue(new Error("Unavailable"));
   vi.mocked(memeApi.getWsTicket).mockResolvedValue({
@@ -93,6 +94,8 @@ it("token-details: 5 related scenarios", async () => {
   await (async () => {
     const profile = vi.fn();
     render(<TokenDetails token={token} onProfile={profile} walletAddress={b} />);
+    expect(screen.getByRole("tab", { name: "Views" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("tab", { name: "成交" }));
     await screen.findByRole("button", { name: `查看钱包 ${b}` });
     fireEvent.click(screen.getByRole("button", { name: `查看钱包 ${b}` }));
     expect(profile).toHaveBeenCalledWith(b);
@@ -101,7 +104,7 @@ it("token-details: 5 related scenarios", async () => {
     for (const label of ["Smart", "KOL", "My Trades"])
       expect(screen.getByRole("checkbox", { name: label })).toBeChecked();
     expect(screen.getByTestId("chart")).toHaveAttribute("data-markers", "1");
-    expect(screen.queryByText("Views")).toBeNull();
+    expect(screen.getByRole("tab", { name: "Views" })).toBeVisible();
     expect(
       buildTradeMarkers([{ ...trades[0]!, wallets: undefined }], "1m", b, {
         smart: true,
@@ -418,6 +421,7 @@ it("keeps logo out of layout until loaded, hides failures and resets for each UR
   vi.mocked(tokenApi.detail).mockReturnValue(new Promise(() => {}));
   const first = { ...token, logo: "https://images.example/first.png" };
   const { container, rerender } = render(<TokenDetails token={first} onProfile={vi.fn()} />);
+  fireEvent.click(screen.getByRole("tab", { name: "成交" }));
   await screen.findByRole("button", { name: `查看钱包 ${b}` });
   const logo = () => container.querySelector(".token-logo") as HTMLImageElement;
   expect(logo()).not.toBeVisible();
