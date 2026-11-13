@@ -213,7 +213,10 @@ export interface Quote {
   reference?: {
     closeUsd: string;
     observedAt: number;
-    interval: "1s";
+    interval: "1s" | "STATE";
+    source?: "CANDLE" | "LOCAL_POOL_STATE";
+    asOfBlock?: number;
+    blockHash?: string | null;
     revision: string;
     maxAgeMs: number;
   };

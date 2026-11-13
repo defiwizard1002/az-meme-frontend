@@ -1,16 +1,6 @@
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
+import fixtures from "../../../tests/display-price.fixtures.json";
 import { amount, money, percent, price } from "./display";
-
-// Shared with the parent E2E expectations (scripts/display-price.mjs); the same
-// literals appear in tests/display-price.fixtures.json so either side changing
-// the rendered format fails a test.
-const here = dirname(fileURLToPath(import.meta.url));
-const fixtures: Array<{ input: unknown; amount: string; price: string }> = JSON.parse(
-  readFileSync(resolve(here, "../../../tests/display-price.fixtures.json"), "utf8"),
-);
 
 it("formats USD and prices without long decimal tails", () => {
   expect(money("0.00000000000019856")).toBe("$1.986e-13");
@@ -29,9 +19,12 @@ it("formats USD and prices without long decimal tails", () => {
   }
 });
 
+// 与父仓 E2E 期望共用同一份字面量（tests/display-price.fixtures.json），
+// 任一侧改了显示规则都会让这里的断言失败。
 it("matches the E2E display fixtures", () => {
   for (const fixture of fixtures) {
-    expect(price(fixture.input as string | number | null)).toBe(fixture.price);
-    expect(money(fixture.input as string | number | null)).toBe(fixture.money);
+    const input = fixture.input as string | number | null;
+    expect(price(input)).toBe(fixture.price);
+    expect(money(input)).toBe(fixture.money);
   }
 });

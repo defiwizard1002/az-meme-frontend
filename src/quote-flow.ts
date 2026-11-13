@@ -48,6 +48,18 @@ export type QuoteTerms = {
 export type ValidQuote = QuoteDisplay & QuoteTerms;
 export class QuoteExpiredError extends Error {}
 
+// 报价参考价有两种合法来源：最近一根已收盘 1 秒 K 线，或按本次金额算出的当前池状态。
+// 池状态必须带明确来源和所在区块，避免把无来源的数字当成可成交价格。
+function isLiveReference(reference: NonNullable<Quote["reference"]>): boolean {
+  if (reference.interval === "1s") return true;
+  return (
+    reference.interval === "STATE" &&
+    reference.source === "LOCAL_POOL_STATE" &&
+    Number.isSafeInteger(reference.asOfBlock) &&
+    (reference.asOfBlock ?? 0) > 0
+  );
+}
+
 /** Validate the server contract once. The browser never derives trading limits from chart data. */
 export function requireQuoteTerms(
   value: QuoteDisplay,
@@ -77,7 +89,7 @@ export function requireQuoteTerms(
     throw Error("报价缺少有效费用配置，暂时无法交易");
   if (
     !value.reference ||
-    value.reference.interval !== "1s" ||
+    !isLiveReference(value.reference) ||
     !Number.isFinite(value.reference.observedAt) ||
     !Number.isFinite(value.reference.maxAgeMs) ||
     value.reference.maxAgeMs <= 0 ||
