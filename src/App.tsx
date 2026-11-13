@@ -24,10 +24,10 @@ interface AppProps {
   onConnect?: () => Promise<boolean>;
   onLogout?: () => void;
 }
-type Page = "discover" | "activity" | "portfolio" | "settings" | "token";
+type Page = "discover" | "activity" | "portfolio" | "settings" | "token" | "wallet";
 function route(): { page: Page; address?: string } {
   const [page, address] = window.location.hash.slice(1).split("/");
-  if (page === "token" && /^0x[0-9a-f]{40}$/i.test(address ?? ""))
+  if ((page === "token" || page === "wallet") && /^0x[0-9a-f]{40}$/i.test(address ?? ""))
     return { page, address: address.toLowerCase() };
   return {
     page: (["activity", "portfolio", "settings"].includes(page) ? page : "discover") as Page,
@@ -54,6 +54,7 @@ function Workspace({
   const [tokenError, setTokenError] = useState<string>();
   const [tokenRetry, setTokenRetry] = useState(0);
   const [profile, setProfile] = useState<string>();
+  const profileAddress = location.page === "wallet" ? location.address : profile;
   const [summary, setSummary] = useState<AccountSummary | null>(null);
   const [accountError, setAccountError] = useState<string>();
   const [revision, setRevision] = useState(0);
@@ -268,7 +269,7 @@ function Workspace({
             onConnect={() => void connect()}
           />
         )}
-        {location.page === "activity" && (
+        {(location.page === "activity" || location.page === "wallet") && (
           <ActivityFeed
             onWallet={setProfile}
             onToken={openToken}
@@ -399,11 +400,14 @@ function Workspace({
       <footer className="app-footer">
         <span>Robinhood Chain · Memebot</span>
       </footer>
-      {profile && (
+      {profileAddress && (
         <WalletProfile
-          key={`${profile}:${walletAddress ?? "guest"}`}
-          address={profile}
-          onClose={() => setProfile(undefined)}
+          key={`${profileAddress}:${walletAddress ?? "guest"}`}
+          address={profileAddress}
+          onClose={() => {
+            setProfile(undefined);
+            if (location.page === "wallet") navigate("activity");
+          }}
           onToken={openToken}
           onTrade={trade}
         />

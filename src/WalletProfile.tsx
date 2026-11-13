@@ -102,7 +102,7 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
       });
   }
   const stats = profile?.stats;
-  const winRate = stats?.winRate == null ? "未知" : `${(Number(stats.winRate) * 100).toFixed(1)}%`;
+  const winRate = stats?.winRate == null ? "—" : `${(Number(stats.winRate) * 100).toFixed(1)}%`;
   const xUrl = safeUrl(profile?.xUrl);
   const avatar = safeUrl(profile?.avatarUrl);
   return (
@@ -180,11 +180,8 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
           <thead>
             <tr>
               <th>代币</th>
-              <th>数量</th>
-              <th>成本 (U)</th>
               <th>价值 (U)</th>
               <th>浮盈 (U)</th>
-              <th>更新时间</th>
             </tr>
           </thead>
           <tbody>
@@ -201,18 +198,18 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
                     >
                       {shortAddress(position.token)}
                     </button>
+                    <small
+                      title={`atomic ${position.quantityAtomic ?? "—"}; updated ${position.updatedAt}`}
+                    >
+                      {position.quantityComplete && position.quantityAtomic !== null
+                        ? amount(formatUnits(BigInt(position.quantityAtomic), position.decimals))
+                        : "—"}
+                    </small>
                   </td>
-                  <td>
-                    {position.quantityComplete && position.quantityAtomic !== null
-                      ? amount(formatUnits(BigInt(position.quantityAtomic), position.decimals))
-                      : "—"}
-                  </td>
-                  <td>{position.costUsd == null ? "—" : money(position.costUsd)}</td>
                   <td>{position.valueUsd == null ? "—" : money(position.valueUsd)}</td>
                   <td>
                     {position.unrealizedPnlUsd == null ? "—" : money(position.unrealizedPnlUsd)}
                   </td>
-                  <td>{relativeTime(position.updatedAt)}</td>
                 </tr>
               ))}
           </tbody>

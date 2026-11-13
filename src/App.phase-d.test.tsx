@@ -20,7 +20,14 @@ vi.mock("./Discover", () => ({
     ),
 }));
 vi.mock("./ActivityFeed", () => ({ ActivityRibbon: () => null, ActivityFeed: () => null }));
-vi.mock("./WalletProfile", () => ({ WalletProfile: () => null }));
+vi.mock("./WalletProfile", () => ({
+  WalletProfile: ({ address, onClose }: any) => (
+    <div role="dialog">
+      {address}
+      <button onClick={onClose}>Close profile</button>
+    </div>
+  ),
+}));
 vi.mock("./UserSettings", () => ({ UserSettings: () => null }));
 vi.mock("./Portfolio", () => ({ Portfolio: () => null }));
 vi.mock("./TradingPanel", () => ({ TradingPanel: () => null }));
@@ -91,4 +98,15 @@ it("shows real account totals and leaves incomplete PnL unknown", async () => {
   cleanup();
   render(<App />);
   expect(document.querySelector(".account-overview")).toHaveTextContent("Available—");
+});
+
+it("opens a public wallet deep link without loading private account data", async () => {
+  const address = `0x${"a".repeat(40)}`;
+  window.location.hash = `wallet/${address}`;
+  render(<App />);
+  expect(await screen.findByRole("dialog")).toHaveTextContent(address);
+  expect(api.getAccount).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText("Close profile"));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(window.location.hash).toBe("#activity");
 });

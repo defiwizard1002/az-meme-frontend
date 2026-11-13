@@ -1807,7 +1807,7 @@ textarea {
   }
 }
 
-/* Reference Trending: compact header, live strip and 38px market rows. */
+/* Memebot desktop typography and market rows. */
 .app-header {
   padding: 12px 20px 0;
   gap: 6px;
@@ -1873,31 +1873,31 @@ textarea {
   margin-bottom: 10px;
 }
 .discover .data-table {
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 .discover .data-table td {
-  height: 38px;
-  padding-top: 3px;
-  padding-bottom: 3px;
+  height: 59px;
+  padding-top: 10px;
+  padding-bottom: 10px;
 }
 .discover .token-link {
-  padding-left: 34px;
+  padding-left: 42px;
   min-height: 15px;
 }
 .discover .token-link strong {
-  font-size: 11px;
+  font-size: 14px;
 }
 .discover .token-link > span:not(.token-avatar) {
   font-size: 10px;
 }
 .discover .token-avatar {
-  width: 28px;
-  height: 28px;
+  width: 34px;
+  height: 34px;
   border-radius: 7px;
 }
 .discover .address {
-  padding-left: 34px;
+  padding-left: 42px;
   margin-top: 1px;
 }
 .discover .lifecycle {
@@ -2180,4 +2180,117 @@ textarea {
   .chart-frame {
     min-height: 310px;
   }
+}
+
+/* Frame 22660-16239: desktop content uses a 320px rail and 340px trade column. */
+@media (min-width: 1101px) {
+  .app-shell main:has(.trading-screen) {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .trading-screen {
+    grid-template-columns: 320px minmax(0, 1fr);
+  }
+  .market-rail {
+    padding: 8px 14px;
+  }
+  .market-rail-token {
+    padding: 8px 0;
+  }
+  .market-rail .tabs button {
+    font-size: 14px;
+    padding: 6px 8px;
+  }
+  .token-stats dt {
+    font-size: 11px;
+  }
+  .token-stats dd {
+    font-size: 12px;
+  }
+  .token-heading h2 {
+    font-size: 16px;
+  }
+  .token-heading img {
+    width: 44px;
+    height: 44px;
+  }
+  .chart-panel .chart {
+    height: 270px;
+    margin-top: 10px;
+  }
+  .intervals button,
+  .marker-filters label {
+    font-size: 11px;
+  }
+  .token-activity {
+    padding: 0 16px 16px;
+  }
+  .token-activity > .tabs {
+    margin-bottom: 8px;
+  }
+}
+.profile-drawer {
+  width: min(460px, 100%);
+  padding: 24px;
+  background: #0e0d16;
+}
+.profile-drawer .stat-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.profile-drawer .stat-grid > div {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.profile-drawer .data-table {
+  min-width: 0;
+  width: 100%;
+}
+.profile-drawer .data-table td,
+.profile-drawer .data-table th {
+  padding: 10px 4px;
+}
+.profile-drawer .data-table small,
+.token-activity td small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 3px;
+}
+.profile-drawer .profile-identity {
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.profile-drawer .toolbar {
+  justify-content: space-between;
+}
+.profile-drawer .stat-grid strong {
+  font-size: 16px;
+}
+.profile-drawer > .toolbar {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  margin: 0;
+}
+.profile-drawer > .toolbar h2 {
+  display: none;
+}
+.profile-drawer .profile-identity {
+  display: block;
+  padding-right: 40px;
+}
+.profile-drawer .profile-identity h3 {
+  margin: 0 0 12px;
+  font-size: 20px;
+}
+.profile-drawer .full-address {
+  display: block;
+  margin-bottom: 8px;
+  overflow-wrap: anywhere;
+}
+.profile-drawer .data-table td {
+  padding-top: 6px;
+  padding-bottom: 6px;
 }

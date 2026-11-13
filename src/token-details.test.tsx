@@ -453,3 +453,16 @@ it("keeps logo out of layout until loaded, hides failures and resets for each UR
   expect(logo()).not.toBeVisible();
   expect(screen.getByRole("heading", { name: "TEST Test" })).toBeVisible();
 });
+
+it("uses historical trade cap and the proven trader without inventing tracked labels", async () => {
+  vi.mocked(memeApi.getTrades).mockResolvedValue({
+    items: [{ ...trades[0]!, wallets: [], trader: b, marketCapUsd: "12345.6789" }],
+    nextCursor: null,
+  });
+  const onProfile = vi.fn();
+  render(<TokenDetails token={{ ...token, marketCapUsd: "999999999" }} onProfile={onProfile} />);
+  fireEvent.click(screen.getByRole("tab", { name: "成交" }));
+  expect(await screen.findByTitle("12345.6789")).toHaveTextContent("$12.35K");
+  fireEvent.click(screen.getByRole("button", { name: `查看钱包 ${b}` }));
+  expect(onProfile).toHaveBeenCalledWith(b);
+});

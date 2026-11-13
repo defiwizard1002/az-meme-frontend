@@ -733,7 +733,10 @@ function TokenWorkspace({
     : "状态未知";
   return (
     <section className="token-details" aria-label="Token 详情">
-      <header className="token-header panel">
+      <header
+        className="token-header panel"
+        title={`${marketLive ? "实时行情 · " : ""}${date(token.updatedAt)}${token.stale ? " · 数据待更新" : ""}`}
+      >
         <div className="token-heading">
           {token.logo && (
             <img
@@ -803,23 +806,14 @@ function TokenWorkspace({
             </div>
           ))}
         </dl>
-        <p className="data-note">
-          {marketLive ? "实时行情 · " : ""}
-          {date(token.updatedAt)}
-          {token.stale ? " · 数据待更新" : ""}
-        </p>
-        <div className="lifecycle">
-          <span>
-            {token.launchpad ?? "协议未知"} · {lifecycleLabel}
-          </span>
-          <span>
-            进度：
-            {percent(lifecycle?.progressPct)}
-          </span>
-          {lifecycle?.progressPct != null && (
-            <progress max={100} value={Number(lifecycle.progressPct)} aria-label="毕业进度" />
-          )}
-        </div>
+        {lifecycle?.state !== "UNKNOWN" && lifecycle?.state !== "NOT_APPLICABLE" && lifecycle && (
+          <div className="lifecycle" title={token.launchpad ?? undefined}>
+            <span>{lifecycleLabel}</span>
+            {lifecycle.progressPct != null && (
+              <progress max={100} value={Number(lifecycle.progressPct)} aria-label="毕业进度" />
+            )}
+          </div>
+        )}
         {detailError && (
           <p role="alert">
             {detailError} <button onClick={() => setRetry((value) => value + 1)}>重试</button>
@@ -953,32 +947,43 @@ function TokenWorkspace({
                             {trade.side === "BUY" ? "买入" : "卖出"}
                           </td>
                           <td>{price(trade.notionalUsd)}</td>
-                          <td>{amount(trade.marketCapUsd, "$")}</td>
+                          <td title={trade.marketCapUsd ?? undefined}>
+                            {amount(trade.marketCapUsd, "$")}
+                          </td>
                           <td>
-                            {trade.wallets?.length
-                              ? trade.wallets.map((wallet) => (
-                                  <div key={wallet.address}>
-                                    <button
-                                      className="link-button"
-                                      aria-label={`查看钱包 ${wallet.address}`}
-                                      title={wallet.address}
-                                      onClick={() => onProfile(wallet.address)}
-                                    >
-                                      {addressLabel(wallet.address)}
-                                    </button>
-                                    {wallet.labelSource === "LOCAL_MANUAL" &&
-                                      wallet.labels
-                                        .filter(
-                                          (label) => label === "SMART_MONEY" || label === "KOL",
-                                        )
-                                        .map((label) => (
-                                          <span className="identity-tag" key={label}>
-                                            {label === "SMART_MONEY" ? "Smart" : label}
-                                          </span>
-                                        ))}
-                                  </div>
-                                ))
-                              : "—"}
+                            {trade.wallets?.length ? (
+                              trade.wallets.map((wallet) => (
+                                <div key={wallet.address}>
+                                  <button
+                                    className="link-button"
+                                    aria-label={`查看钱包 ${wallet.address}`}
+                                    title={wallet.address}
+                                    onClick={() => onProfile(wallet.address)}
+                                  >
+                                    {addressLabel(wallet.address)}
+                                  </button>
+                                  {wallet.labelSource === "LOCAL_MANUAL" &&
+                                    wallet.labels
+                                      .filter((label) => label === "SMART_MONEY" || label === "KOL")
+                                      .map((label) => (
+                                        <span className="identity-tag" key={label}>
+                                          {label === "SMART_MONEY" ? "Smart" : label}
+                                        </span>
+                                      ))}
+                                </div>
+                              ))
+                            ) : trade.trader ? (
+                              <button
+                                className="link-button"
+                                aria-label={`查看钱包 ${trade.trader}`}
+                                title={trade.trader}
+                                onClick={() => onProfile(trade.trader!)}
+                              >
+                                {addressLabel(trade.trader)}
+                              </button>
+                            ) : (
+                              "—"
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -1025,13 +1030,10 @@ function TokenWorkspace({
                       <tr>
                         {[
                           "钱包 / 标签",
-                          "数量",
-                          "价值",
-                          "供应占比",
-                          "累计买入 / 卖出",
-                          "买入 / 卖出次数",
-                          "平均买入 / 卖出市值",
-                          "已实现 / 未实现盈亏",
+                          "Remaining",
+                          "Bought / avg MC",
+                          "Sold / avg MC",
+                          "PnL",
                         ].map((title) => (
                           <th key={title}>{title}</th>
                         ))}
@@ -1085,22 +1087,23 @@ function TokenWorkspace({
                                 </span>
                               ))}
                           </td>
-                          <td>{amount(holder.quantity)}</td>
-                          <td>{amount(holder.valueUsd, "$")}</td>
-                          <td>{percent(holder.supplyPct)}</td>
-                          <td>
-                            {amount(holder.boughtUsd, "$")} / {amount(holder.soldUsd, "$")}
+                          <td title={`数量 ${holder.quantity ?? "—"}`}>
+                            {amount(holder.valueUsd, "$")}
+                            <small>{percent(holder.supplyPct)} of supply</small>
                           </td>
                           <td>
-                            {amount(holder.buyCount)} / {amount(holder.sellCount)}
+                            {amount(holder.boughtUsd, "$")} /{" "}
+                            {amount(holder.averageBuyMarketCapUsd, "$")}
+                            <small>{amount(holder.buyCount)} buys</small>
                           </td>
                           <td>
-                            {amount(holder.averageBuyMarketCapUsd, "$")} /{" "}
+                            {amount(holder.soldUsd, "$")} /{" "}
                             {amount(holder.averageSellMarketCapUsd, "$")}
+                            <small>{amount(holder.sellCount)} sells</small>
                           </td>
                           <td>
-                            {amount(holder.realizedPnlUsd, "$")} /{" "}
-                            {amount(holder.unrealizedPnlUsd, "$")}
+                            {amount(holder.realizedPnlUsd, "$")}
+                            <small>unrealized {amount(holder.unrealizedPnlUsd, "$")}</small>
                           </td>
                         </tr>
                       ))}
