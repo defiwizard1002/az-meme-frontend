@@ -61,18 +61,34 @@ export default function Views({
     const controller = new AbortController();
     setPage(undefined);
     setError(undefined);
-    void requestPublicMarket<CalloutResponse>(
-      `/sapi/v1/meme/tokens/${tokenAddress}/callouts?chainId=${chainId}&holders=${holdersOnly ? 1 : 0}&limit=100`,
-      { signal: controller.signal },
-    )
-      .then((result) => {
-        if (!controller.signal.aborted) setPage(result);
-      })
-      .catch((cause: unknown) => {
-        if (!controller.signal.aborted)
-          setError(cause instanceof Error ? cause.message : "Views unavailable");
-      });
-    return () => controller.abort();
+    let pending = false;
+    const load = () => {
+      if (pending) return;
+      pending = true;
+      void requestPublicMarket<CalloutResponse>(
+        `/sapi/v1/meme/tokens/${tokenAddress}/callouts?chainId=${chainId}&holders=${holdersOnly ? 1 : 0}&limit=100`,
+        { signal: controller.signal },
+      )
+        .then((result) => {
+          if (!controller.signal.aborted) {
+            setPage(result);
+            setError(undefined);
+          }
+        })
+        .catch((cause: unknown) => {
+          if (!controller.signal.aborted)
+            setError(cause instanceof Error ? cause.message : "Views unavailable");
+        })
+        .finally(() => {
+          pending = false;
+        });
+    };
+    load();
+    const timer = setInterval(load, 15_000);
+    return () => {
+      clearInterval(timer);
+      controller.abort();
+    };
   }, [tokenAddress, chainId, holdersOnly, retry]);
 
   return (
@@ -85,14 +101,17 @@ export default function Views({
           Holders only
         </button>
       </div>
-      {error ? (
+      {error && (
         <p role="alert" className="notice">
           {error} <button onClick={() => setRetry((n) => n + 1)}>Retry</button>
         </p>
-      ) : !page ? (
-        <p className="empty-state" role="status">
-          Loading views…
-        </p>
+      )}
+      {!page ? (
+        !error && (
+          <p className="empty-state" role="status">
+            Loading views…
+          </p>
+        )
       ) : !page.available ? (
         <p className="empty-state" role="status">
           Views unavailable

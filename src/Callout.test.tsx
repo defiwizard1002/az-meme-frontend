@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import Views from "./Callout";
 import { requestPublicMarket } from "./api";
@@ -16,6 +16,7 @@ const page = { items: [item], available: true, stale: false, hasMore: false };
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
+  vi.useRealTimers();
 });
 it("renders cards, distinguishes unknown and zero holdings without invented badges", async () => {
   request.mockResolvedValue({
@@ -77,4 +78,73 @@ it("distinguishes unavailable, stale, empty and request error", async () => {
   fireEvent.click(screen.getByRole("button", { name: "All" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Read failed");
   view.unmount();
+});
+
+it("refreshes every 15 seconds without overlap or blanking, and cleans up changed selections", async () => {
+  vi.useFakeTimers();
+  request.mockResolvedValue(page);
+  const view = render(<Views tokenAddress={token} chainId={4663} />);
+  await act(async () => {});
+  const card = screen.getByText("Tidal").closest("article");
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(14999);
+  });
+  expect(request).toHaveBeenCalledTimes(1);
+  let resolveRefresh!: (value: unknown) => void;
+  request.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        resolveRefresh = resolve;
+      }),
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1);
+  });
+  expect(request).toHaveBeenCalledTimes(2);
+  expect(screen.getByText("Tidal").closest("article")).toBe(card);
+  expect(screen.queryByText("Loading views…")).not.toBeInTheDocument();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(30000);
+  });
+  expect(request).toHaveBeenCalledTimes(2);
+  const oldSignal = request.mock.calls[1]![1]!.signal!;
+  fireEvent.click(screen.getByRole("button", { name: "Holders only" }));
+  await act(async () => {});
+  expect(oldSignal.aborted).toBe(true);
+  await act(async () => {
+    resolveRefresh({ ...page, items: [{ ...item, author: { name: "Wrong selection" } }] });
+  });
+  expect(screen.queryByText("Wrong selection")).not.toBeInTheDocument();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(15000);
+  });
+  expect(request).toHaveBeenCalledTimes(4);
+  expect(request.mock.calls[3]![0]).toContain(`tokens/${token}/callouts?chainId=4663&holders=1`);
+  expect(screen.getByRole("button", { name: "Holders only" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  request.mockRejectedValueOnce(new Error("Refresh failed"));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(15000);
+  });
+  expect(screen.getByRole("alert")).toHaveTextContent("Refresh failed");
+  expect(screen.getByText("Tidal")).toBeInTheDocument();
+  const previous = request.mock.calls.at(-1)![1]!.signal!;
+  view.rerender(<Views tokenAddress={`0x${"cd".repeat(20)}`} chainId={4664} />);
+  await act(async () => {});
+  expect(previous.aborted).toBe(true);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(15000);
+  });
+  expect(request).toHaveBeenCalledTimes(7);
+  expect(request.mock.calls[6]![0]).toContain(
+    `tokens/0x${"cd".repeat(20)}/callouts?chainId=4664&holders=1`,
+  );
+  const finalSignal = request.mock.calls[6]![1]!.signal!;
+  view.unmount();
+  expect(finalSignal.aborted).toBe(true);
+  expect(vi.getTimerCount()).toBe(0);
+  await vi.advanceTimersByTimeAsync(30000);
+  expect(request).toHaveBeenCalledTimes(7);
 });
