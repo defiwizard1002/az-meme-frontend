@@ -255,7 +255,7 @@ it("uses the selected activity quick-buy preset for a row buy", async () => {
     </UserStateProvider>,
   );
   await screen.findByRole("button", { name: /10 USDG/ });
-  expect(screen.getByText("1 trade")).toBeVisible();
+  expect(await screen.findByText("1 trade")).toBeVisible();
   expect(screen.getByRole("button", { name: /^Follow / })).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: /10 USDG/ }));
   expect(onTrade).toHaveBeenCalledWith(token, "BUY", "10");
