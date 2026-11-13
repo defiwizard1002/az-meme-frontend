@@ -1941,3 +1941,99 @@ textarea {
     position: static;
   }
 }
+
+/* Callout 喊单列表 */
+.callout-panel .toolbar {
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.callout-panel .toolbar strong {
+  margin-right: 10px;
+}
+.callout-table th,
+.callout-table td {
+  text-align: left;
+}
+.callout-table {
+  table-layout: fixed;
+  width: 100%;
+  min-width: 960px;
+}
+.callout-table td {
+  vertical-align: top;
+  font-size: 12px;
+}
+.callout-table th:nth-child(1),
+.callout-table td:nth-child(1) {
+  width: 86px;
+}
+.callout-table th:nth-child(2),
+.callout-table td:nth-child(2) {
+  width: 200px;
+}
+.callout-table th:nth-child(3),
+.callout-table td:nth-child(3) {
+  width: 132px;
+}
+.callout-table th:nth-child(5),
+.callout-table td:nth-child(5) {
+  width: 108px;
+}
+.callout-table th:nth-child(6),
+.callout-table td:nth-child(6) {
+  width: 132px;
+}
+.callout-table th:nth-child(7),
+.callout-table td:nth-child(7) {
+  width: 72px;
+}
+.callout-table .callout-text {
+  line-height: 1.5;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.callout-token {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.callout-token img {
+  border-radius: 50%;
+  object-fit: cover;
+}
+.callout-author {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.callout-author img {
+  border-radius: 50%;
+  object-fit: cover;
+}
+.callout-author > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.callout-author .muted {
+  font-size: 11px;
+}
+.avatar-fallback {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #1f2937;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.callout-table .positive,
+.callout-table .negative {
+  margin-left: 6px;
+}

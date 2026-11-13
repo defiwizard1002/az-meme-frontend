@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Discover from "./Discover";
+import Callout from "./Callout";
 import { memeApi } from "./api";
 import { walletApi } from "./wallet-api";
 import { UserStateProvider, useUserState } from "./user-state";
@@ -24,13 +25,15 @@ interface AppProps {
   onConnect?: () => Promise<boolean>;
   onLogout?: () => void;
 }
-type Page = "discover" | "activity" | "portfolio" | "settings" | "token";
+type Page = "discover" | "callout" | "activity" | "portfolio" | "settings" | "token";
 function route(): { page: Page; address?: string } {
   const [page, address] = window.location.hash.slice(1).split("/");
   if (page === "token" && /^0x[0-9a-f]{40}$/i.test(address ?? ""))
     return { page, address: address.toLowerCase() };
   return {
-    page: (["activity", "portfolio", "settings"].includes(page) ? page : "discover") as Page,
+    page: (["callout", "activity", "portfolio", "settings"].includes(page)
+      ? page
+      : "discover") as Page,
   };
 }
 export default function App(props: AppProps) {
@@ -197,6 +200,7 @@ function Workspace({
           {(
             [
               ["discover", "Discover"],
+              ["callout", "Callout"],
               ["activity", "Smart Money"],
               ["portfolio", "Positions / Orders"],
               ["settings", "设置"],
@@ -267,6 +271,9 @@ function Workspace({
             }}
             onConnect={() => void connect()}
           />
+        )}
+        {location.page === "callout" && (
+          <Callout onToken={(address) => navigate("token", address)} />
         )}
         {location.page === "activity" && (
           <ActivityFeed
