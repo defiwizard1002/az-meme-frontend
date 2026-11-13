@@ -429,8 +429,8 @@ it("keeps the chain trader, matches only its real labels, and preserves missing 
     nextCursor: null,
   });
   render(<TokenDetails token={token} onProfile={() => {}} />);
-  fireEvent.click(screen.getByRole("tab", { name: "成交" }));
-  await screen.findByRole("button", { name: `查看钱包 ${b}` });
+  fireEvent.click(screen.getByRole("tab", { name: "Trades" }));
+  await screen.findByRole("button", { name: `View wallet ${b}` });
   const rows = document.querySelectorAll(".trades-table tbody tr");
   expect(rows).toHaveLength(3);
   expect(rows[0]!.querySelector("time")).toHaveTextContent("3s");

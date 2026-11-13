@@ -73,6 +73,6 @@ describe("quote reference sources", () => {
         maxAgeMs: 60000,
       },
     } as unknown as Quote;
-    expect(() => requireQuoteTerms(stateQuote, draft)).toThrow(/参考价/);
+    expect(() => requireQuoteTerms(stateQuote, draft)).toThrow(/candle reference/);
   });
 });

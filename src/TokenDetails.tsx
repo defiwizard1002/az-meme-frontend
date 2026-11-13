@@ -992,7 +992,7 @@ function TokenWorkspace({
                               <div className="trade-wallet">
                                 <button
                                   className="link-button"
-                                  aria-label={`查看钱包 ${trade.trader}`}
+                                  aria-label={`View wallet ${trade.trader}`}
                                   title={trade.trader}
                                   onClick={() => onProfile(trade.trader!)}
                                 >
