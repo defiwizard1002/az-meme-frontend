@@ -2575,3 +2575,13 @@ textarea {
   width: 14px;
   height: 14px;
 }
+
+.wallet-token-identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.wallet-token-identity img {
+  border-radius: 6px;
+  object-fit: cover;
+}

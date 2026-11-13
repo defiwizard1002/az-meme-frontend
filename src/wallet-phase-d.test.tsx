@@ -253,3 +253,40 @@ it("settings keeps its saved confirmation after the persisted amounts update", a
   expect(await screen.findByText("快捷金额已保存")).toBeVisible();
   expect(input).toHaveValue("1.25, 2");
 });
+it("renders provided wallet token identity while retaining its address", async () => {
+  vi.mocked(walletApi.profile).mockResolvedValue(null as unknown as WalletProfileData);
+  vi.mocked(walletApi.positions).mockResolvedValue({
+    items: [
+      {
+        chainId: 4663,
+        address,
+        token,
+        decimals: 18,
+        quantityAtomic: "1000000000000000000",
+        observedNetAtomic: "0",
+        quantityComplete: true,
+        costUsd: null,
+        boughtAtomic: "0",
+        soldAtomic: "0",
+        boughtUsd: null,
+        soldUsd: null,
+        realizedPnlUsd: null,
+        cyclePnlUsd: null,
+        cycleNumber: 0,
+        updatedAt: 0,
+        symbol: "NVDA",
+        name: "NVIDIA",
+        logo: "https://example.com/nvda.png",
+      },
+    ],
+    nextCursor: null,
+  });
+  render(
+    <UserStateProvider userId={null}>
+      <WalletProfile address={address} onClose={vi.fn()} onToken={vi.fn()} />
+    </UserStateProvider>,
+  );
+  const button = await screen.findByRole("button", { name: "NVDA" });
+  expect(button).toHaveAttribute("title", token);
+  expect(button.querySelector("img")).toHaveAttribute("src", "https://example.com/nvda.png");
+});

@@ -24,6 +24,9 @@ export interface WalletActivity {
   marketCapCoverage?: "SUPPLY_OR_PRICE_UNAVAILABLE" | "LOCAL_SUPPLY_AND_EXECUTION";
 }
 export interface WalletPosition {
+  name?: string | null;
+  symbol?: string | null;
+  logo?: string | null;
   chainId: number;
   address: string;
   token: string;

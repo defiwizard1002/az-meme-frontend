@@ -192,11 +192,14 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
                   <td>
                     <button
                       type="button"
-                      className="text-button"
+                      className="text-button wallet-token-identity"
                       title={position.token}
                       onClick={() => onToken(position.token)}
                     >
-                      {shortAddress(position.token)}
+                      {safeUrl(position.logo) && (
+                        <img src={safeUrl(position.logo)!} alt="" width={24} height={24} />
+                      )}
+                      {position.symbol || position.name || shortAddress(position.token)}
                     </button>
                     <small
                       title={`atomic ${position.quantityAtomic ?? "—"}; updated ${position.updatedAt}`}
