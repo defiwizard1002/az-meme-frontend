@@ -197,7 +197,15 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
                       onClick={() => onToken(position.token)}
                     >
                       {safeUrl(position.logo) && (
-                        <img src={safeUrl(position.logo)!} alt="" width={24} height={24} />
+                        <img
+                          src={safeUrl(position.logo)}
+                          alt=""
+                          width={24}
+                          height={24}
+                          onError={(event) => {
+                            event.currentTarget.style.display = "none";
+                          }}
+                        />
                       )}
                       {position.symbol || position.name || shortAddress(position.token)}
                     </button>
