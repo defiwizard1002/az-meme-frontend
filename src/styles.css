@@ -2308,3 +2308,6 @@ textarea {
     white-space: nowrap;
   }
 }
+.holder-controls {
+  flex-wrap: wrap;
+}
