@@ -95,11 +95,11 @@ it("token-details: 5 related scenarios", async () => {
     const profile = vi.fn();
     render(<TokenDetails token={token} onProfile={profile} walletAddress={b} />);
     expect(screen.getByRole("tab", { name: "Views" })).toHaveAttribute("aria-selected", "true");
-    fireEvent.click(screen.getByRole("tab", { name: "成交" }));
-    await screen.findByRole("button", { name: `查看钱包 ${b}` });
-    fireEvent.click(screen.getByRole("button", { name: `查看钱包 ${b}` }));
+    fireEvent.click(screen.getByRole("tab", { name: "Trades" }));
+    await screen.findByRole("button", { name: `View wallet ${b}` });
+    fireEvent.click(screen.getByRole("button", { name: `View wallet ${b}` }));
     expect(profile).toHaveBeenCalledWith(b);
-    expect(screen.queryByRole("columnheader", { name: "同钱包次数" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "Wallet count" })).toBeNull();
     expect(screen.getAllByRole("columnheader")).toHaveLength(5);
     expect(screen.getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
       "Time",
@@ -157,22 +157,22 @@ it("token-details: 5 related scenarios", async () => {
     const local = vi.spyOn(tokenApi, "localHolders").mockRejectedValue(new Error("Unavailable"));
     render(<TokenDetails token={token} onProfile={() => {}} follows={[]} walletAddress={a} />);
     fireEvent.click(screen.getByRole("tab", { name: "Holders" }));
-    await screen.findByRole("button", { name: `查看钱包 ${b}` });
+    await screen.findByRole("button", { name: `View wallet ${b}` });
     fireEvent.click(screen.getByRole("button", { name: "Snipers" }));
-    expect(screen.queryByRole("button", { name: `查看钱包 ${b}` })).toBeNull();
+    expect(screen.queryByRole("button", { name: `View wallet ${b}` })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Dev" }));
-    expect(screen.getByRole("button", { name: `查看钱包 ${b}` })).toBeVisible();
-    expect(screen.queryByRole("button", { name: `查看钱包 ${a}` })).toBeNull();
-    expect(screen.queryByText(/最多前 100 名/)).toBeNull();
-    expect(screen.queryByText(/不代表其余额为零/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "加载更多持有人" }));
+    expect(screen.getByRole("button", { name: `View wallet ${b}` })).toBeVisible();
+    expect(screen.queryByRole("button", { name: `View wallet ${a}` })).toBeNull();
+    expect(screen.queryByText(/top 100/i)).toBeNull();
+    expect(screen.queryByText(/not zero/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Load more holders" }));
     await waitFor(() => expect(load).toHaveBeenCalledWith(a, "50", expect.any(AbortSignal)));
     fireEvent.click(screen.getByRole("button", { name: "Following" }));
     await waitFor(() =>
       expect(local).toHaveBeenCalledWith(a, "FOLLOWING", undefined, expect.any(AbortSignal)),
     );
-    expect(await screen.findByText(/持有人暂不可用/)).toBeVisible();
-    expect(screen.queryByRole("button", { name: `查看钱包 ${b}` })).toBeNull();
+    expect(await screen.findByText(/Filtered holders unavailable/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: `View wallet ${b}` })).toBeNull();
   })();
   await cleanScenario2();
   await prepareScenario1();
@@ -239,9 +239,9 @@ it("token-details: 5 related scenarios", async () => {
         }) as any,
     );
     render(<TokenDetails token={token} onProfile={() => {}} />);
-    await screen.findByRole("button", { name: "加载更多历史标记" });
+    await screen.findByRole("button", { name: "Load more historical markers" });
     expect(screen.getByTestId("chart")).toHaveAttribute("data-markers", "1");
-    fireEvent.click(screen.getByRole("button", { name: "加载更多历史标记" }));
+    fireEvent.click(screen.getByRole("button", { name: "Load more historical markers" }));
     await waitFor(() => expect(screen.getByTestId("chart")).toHaveAttribute("data-markers", "2"));
     expect(tokenApi.markers).toHaveBeenCalledWith(
       a,
@@ -476,8 +476,8 @@ it("keeps logo out of layout until loaded, hides failures and resets for each UR
   vi.mocked(tokenApi.detail).mockReturnValue(new Promise(() => {}));
   const first = { ...token, logo: "https://images.example/first.png" };
   const { container, rerender } = render(<TokenDetails token={first} onProfile={vi.fn()} />);
-  fireEvent.click(screen.getByRole("tab", { name: "成交" }));
-  await screen.findByRole("button", { name: `查看钱包 ${b}` });
+  fireEvent.click(screen.getByRole("tab", { name: "Trades" }));
+  await screen.findByRole("button", { name: `View wallet ${b}` });
   const logo = () => container.querySelector(".token-logo") as HTMLImageElement;
   expect(logo()).not.toBeVisible();
   expect(screen.getByRole("heading", { name: "TEST Test" })).toBeVisible();
@@ -511,8 +511,8 @@ it("uses historical trade cap and the proven trader without inventing tracked la
   });
   const onProfile = vi.fn();
   render(<TokenDetails token={{ ...token, marketCapUsd: "999999999" }} onProfile={onProfile} />);
-  fireEvent.click(screen.getByRole("tab", { name: "成交" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Trades" }));
   expect(await screen.findByTitle("12345.6789")).toHaveTextContent("$12.35K");
-  fireEvent.click(screen.getByRole("button", { name: `查看钱包 ${b}` }));
+  fireEvent.click(screen.getByRole("button", { name: `View wallet ${b}` }));
   expect(onProfile).toHaveBeenCalledWith(b);
 });

@@ -129,11 +129,11 @@ it("wallet-phase-d: 4 related scenarios", async () => {
         <WalletProfile address={address} onClose={vi.fn()} onToken={vi.fn()} />
       </UserStateProvider>,
     );
-    expect(await screen.findByText("暂无持仓")).toBeVisible();
-    expect(screen.queryByText("等待余额快照")).toBeNull();
-    expect(screen.getByLabelText("7 日已实现盈亏")).toHaveTextContent("—");
-    expect(screen.getByLabelText("7 日买入 / 卖出")).toHaveTextContent("—");
-    fireEvent.click(screen.getByRole("button", { name: "更多持仓" }));
+    expect(await screen.findByText("No positions")).toBeVisible();
+    expect(screen.queryByText("Waiting for balance snapshot")).toBeNull();
+    expect(screen.getByLabelText("7d realized PnL")).toHaveTextContent("—");
+    expect(screen.getByLabelText("7d buys / sells")).toHaveTextContent("—");
+    fireEvent.click(screen.getByRole("button", { name: "Load more positions" }));
     await waitFor(() =>
       expect(walletApi.positions).toHaveBeenLastCalledWith(address, token, expect.any(AbortSignal)),
     );
@@ -191,7 +191,7 @@ it("wallet-phase-d: 4 related scenarios", async () => {
         expect.any(AbortSignal),
       ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "加载更多动态" }));
+    fireEvent.click(screen.getByRole("button", { name: "Load more activity" }));
     await waitFor(() =>
       expect(walletApi.feed).toHaveBeenLastCalledWith(
         expect.objectContaining({ before: cursor }),
@@ -226,11 +226,39 @@ it("wallet-phase-d: 4 related scenarios", async () => {
     await act(async () => {
       refreshers.at(-1)!();
     });
-    expect(screen.getByText(/1 条新动态/)).toBeVisible();
+    expect(screen.getByText(/1 new trade/)).toBeVisible();
     expect(screen.queryByText("$2.2K")).not.toBeInTheDocument();
     fireEvent.mouseLeave(sellCell);
     expect(screen.getByText("$2.2K")).toBeVisible();
   })();
+});
+
+it("uses the selected activity quick-buy preset for a row buy", async () => {
+  vi.mocked(walletApi.feed).mockResolvedValue({
+    items: [
+      {
+        eventId: "d".repeat(64),
+        address,
+        token,
+        kind: "BUY",
+        timestampMs: Date.now(),
+        amountUsd: "2",
+        marketCapUsd: "3",
+      },
+    ],
+    nextCursor: null,
+  } as ActivityPage);
+  const onTrade = vi.fn();
+  render(
+    <UserStateProvider userId={null}>
+      <ActivityFeed onWallet={vi.fn()} onToken={vi.fn()} onTrade={onTrade} heldTokens={new Set()} />
+    </UserStateProvider>,
+  );
+  await screen.findByRole("button", { name: /10 USDG/ });
+  expect(screen.getByText("1 trade")).toBeVisible();
+  expect(screen.getByRole("button", { name: /^Follow / })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: /10 USDG/ }));
+  expect(onTrade).toHaveBeenCalledWith(token, "BUY", "10");
 });
 
 it("settings keeps its saved confirmation after the persisted amounts update", async () => {
@@ -239,9 +267,9 @@ it("settings keeps its saved confirmation after the persisted amounts update", a
       <UserSettings onWallet={() => {}} onToken={() => {}} />
     </UserStateProvider>,
   );
-  const input = await screen.findByRole("textbox", { name: "买入预设" });
+  const input = await screen.findByRole("textbox", { name: "Buy presets" });
   fireEvent.change(input, { target: { value: "1.25, 2" } });
-  fireEvent.click(screen.getByRole("button", { name: "保存快捷金额" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save quick-buy amounts" }));
   await waitFor(() =>
     expect(walletApi.saveState).toHaveBeenCalledWith(
       "SETTINGS",
@@ -250,7 +278,7 @@ it("settings keeps its saved confirmation after the persisted amounts update", a
       expect.any(AbortSignal),
     ),
   );
-  expect(await screen.findByText("快捷金额已保存")).toBeVisible();
+  expect(await screen.findByText("Quick-buy amounts saved")).toBeVisible();
   expect(input).toHaveValue("1.25, 2");
 });
 it("renders provided wallet token identity while retaining its address", async () => {

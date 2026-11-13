@@ -17,12 +17,12 @@ it("TokenRiskLabels: 3 related scenarios", async () => {
         token={token({ isHoneypot: true, top10HolderPct: null, devHoldingPct: "0" })}
       />,
     );
-    expect(screen.getByText("高风险")).toHaveClass("security-danger");
-    expect(screen.queryByText(/信息不完整/)).toBeNull();
-    expect(screen.getByText(/已禁止买入/)).toBeVisible();
-    expect(metric("Dev 持仓")).toHaveTextContent("0%");
-    expect(metric("Dev 持仓")).toHaveClass("security-safe");
-    expect(metric("Top 10 持仓")).toHaveTextContent("—");
+    expect(screen.getByText("High risk")).toHaveClass("security-danger");
+    expect(screen.queryByText(/Insufficient data/)).toBeNull();
+    expect(screen.getByText(/Buying is disabled/)).toBeVisible();
+    expect(metric("Dev")).toHaveTextContent("0%");
+    expect(metric("Dev")).toHaveClass("security-safe");
+    expect(metric("Top 10")).toHaveTextContent("—");
   })();
   await cleanScenario1();
   // applies every documented threshold including boundary values and boolean risk
@@ -55,10 +55,10 @@ it("TokenRiskLabels: 3 related scenarios", async () => {
         token={token({ ratVolumePct: "95", bundlerVolumePct: "40", phishingVolumePct: "30" })}
       />,
     );
-    expect(metric("Rat 持仓")).toHaveTextContent("—");
-    expect(metric("Bundler 持仓")).toHaveTextContent("—");
-    expect(metric("Rat 成交量占比")).toHaveTextContent("95%");
-    expect(metric("Bundler 成交量占比")).toHaveTextContent("40%");
-    expect(screen.getByText("风险未知")).toHaveClass("security-neutral");
+    expect(metric("Rat")).toHaveTextContent("Unknown");
+    expect(metric("Bundlers")).toHaveTextContent("—");
+    expect(metric("Rat volume share")).toHaveTextContent("95%");
+    expect(metric("Bundler volume share")).toHaveTextContent("40%");
+    expect(screen.getByText("Risk unknown")).toHaveClass("security-neutral");
   })();
 });

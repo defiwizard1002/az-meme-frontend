@@ -4,12 +4,14 @@ import { useUserState } from "./user-state";
 
 export function parseQuickBuyAmounts(text: string): string[] {
   const values = text.trim() ? text.split(/[,，\s]+/).filter(Boolean) : [];
-  if (values.length > 8) throw new Error("最多保存 8 个快捷买入金额");
+  if (values.length > 8) throw new Error("Save at most 8 quick-buy amounts");
   for (const value of values) {
-    if (!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(value)) throw new Error("金额最多两位小数");
+    if (!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(value))
+      throw new Error("Use at most two decimal places");
     const [whole, fraction = ""] = value.split(".");
     const cents = BigInt(whole!) * 100n + BigInt(fraction.padEnd(2, "0"));
-    if (cents < 100n || cents > 100_000_000n) throw new Error("每个金额须为 1–1,000,000 U");
+    if (cents < 100n || cents > 100_000_000n)
+      throw new Error("Each amount must be between 1 and 1,000,000 U");
   }
   return values;
 }
@@ -28,28 +30,28 @@ export function UserSettings({
     setPending(`${kind}:${address}`);
     setError(null);
     void (kind === "FOLLOW" ? state.setFollow(address, false) : state.setWatchlist(address, false))
-      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "保存失败"))
+      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Save failed"))
       .finally(() => setPending(null));
   }
   return (
     <section className="panel user-settings">
-      <h2>用户设置</h2>
+      <h2>Settings</h2>
       {!state.authenticated ? (
-        <p className="empty-state">连接钱包后可保存设置。</p>
+        <p className="empty-state">Connect wallet to save settings.</p>
       ) : (
         <>
-          {state.loading && <p role="status">正在读取设置…</p>}
+          {state.loading && <p role="status">Loading settings…</p>}
           {(state.error || error) && <p role="alert">{error ?? state.error}</p>}
           {state.error && (
             <button type="button" onClick={state.reload}>
-              重新读取设置
+              Reload settings
             </button>
           )}
           {!state.loading && !state.error && (
             <>
               <QuickAmounts />
-              <h3>关注钱包 ({state.followed.size})</h3>
-              {!state.followed.size && <p className="empty-state">尚未关注钱包</p>}
+              <h3>Followed wallets ({state.followed.size})</h3>
+              {!state.followed.size && <p className="empty-state">No followed wallets</p>}
               <ul className="settings-list">
                 {[...state.followed].map((address) => (
                   <li key={address}>
@@ -61,19 +63,19 @@ export function UserSettings({
                     >
                       {shortAddress(address)}
                     </button>
-                    <span className="muted">{state.notes[address] || "无私有备注"}</span>
+                    <span className="muted">{state.notes[address] || "No private note"}</span>
                     <button
                       type="button"
                       disabled={pending !== null}
                       onClick={() => remove("FOLLOW", address)}
                     >
-                      取消关注
+                      Unfollow
                     </button>
                   </li>
                 ))}
               </ul>
-              <h3>自选代币 ({state.watchlist.size})</h3>
-              {!state.watchlist.size && <p className="empty-state">尚未添加自选</p>}
+              <h3>Watchlist ({state.watchlist.size})</h3>
+              {!state.watchlist.size && <p className="empty-state">No watchlist tokens</p>}
               <ul className="settings-list">
                 {[...state.watchlist].map((address) => (
                   <li key={address}>
@@ -90,7 +92,7 @@ export function UserSettings({
                       disabled={pending !== null}
                       onClick={() => remove("WATCHLIST", address)}
                     >
-                      移除自选
+                      Remove
                     </button>
                   </li>
                 ))}
@@ -121,17 +123,17 @@ function QuickAmounts() {
     setSaving(true);
     void state
       .saveQuickBuyAmounts(amounts)
-      .then(() => setMessage("快捷金额已保存"))
-      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "保存失败"))
+      .then(() => setMessage("Quick-buy amounts saved"))
+      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Save failed"))
       .finally(() => setSaving(false));
   }
   return (
     <form onSubmit={submit} className="settings-form">
-      <h3>快捷买入金额</h3>
+      <h3>Quick-buy amounts</h3>
       <label>
-        买入预设 (U)
+        Buy presets (U)
         <input
-          aria-label="买入预设"
+          aria-label="Buy presets"
           value={text}
           onChange={(event) => {
             setText(event.target.value);
@@ -142,10 +144,11 @@ function QuickAmounts() {
         />
       </label>
       <p className="muted">
-        用逗号分隔，最多 8 个；每个 1–1,000,000 U，最多两位小数。留空可清除预设。
+        Comma-separated, up to 8 values. Each value must be 1–1,000,000 U with at most two decimals.
+        Leave empty to clear.
       </p>
       <button type="submit" disabled={saving}>
-        {saving ? "保存中…" : "保存快捷金额"}
+        {saving ? "Saving…" : "Save quick-buy amounts"}
       </button>
       {error && <p role="alert">{error}</p>}
       {message && <p role="status">{message}</p>}

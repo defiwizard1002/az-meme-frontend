@@ -531,7 +531,7 @@ export function CandleChart({
   return (
     <figure
       className="chart"
-      aria-label={`${symbol} K 线图`}
+      aria-label={`${symbol} candlestick chart`}
       aria-busy={historyLoading || refreshing}
     >
       <div
@@ -544,23 +544,25 @@ export function CandleChart({
         data-history-loading={historyLoading ? "true" : "false"}
       />
       {data.candles.length === 0 && !refreshing && !failed && (
-        <div className="chart-empty">{candles.length === 0 ? "暂无 K 线" : "暂无可渲染 K 线"}</div>
+        <div className="chart-empty">
+          {candles.length === 0 ? "No candles" : "No renderable candles"}
+        </div>
       )}
       {gaps.some((gap) => gap.reason === "PRICING_SUPPRESSED") && (
         <figcaption className="chart-availability" role="status">
-          部分历史 K 线已隐藏，缺口保留
+          Some historical candles are hidden; gaps are preserved
         </figcaption>
       )}
       {legacy && (
         <figcaption className="chart-availability" role="status">
-          历史规则 · 未重建
+          Historical rules · not rebuilt
         </figcaption>
       )}
       {(historyLoading || refreshing) && (
         <div
           className="history-loading"
           role="status"
-          aria-label={historyLoading ? "正在加载更早行情" : "正在加载行情"}
+          aria-label={historyLoading ? "Loading earlier candles" : "Loading candles"}
           aria-live="polite"
         >
           <div className="history-loading-dots">

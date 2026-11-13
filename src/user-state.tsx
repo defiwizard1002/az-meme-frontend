@@ -74,7 +74,7 @@ function AccountState({
       })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted)
-          setError(cause instanceof Error ? cause.message : "私人设置读取失败");
+          setError(cause instanceof Error ? cause.message : "Private settings failed to load");
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
@@ -82,7 +82,7 @@ function AccountState({
     return () => controller.abort();
   }, [authenticated, revision]);
   async function save(kind: UserStateKind, target: string, value: UserStateValue | null) {
-    if (!authenticated) throw new Error("请先连接钱包");
+    if (!authenticated) throw new Error("Connect wallet to continue");
     const signal = lifetime.current!.signal;
     const normalizedTarget = target.toLowerCase();
     if (value === null) await walletApi.deleteState(kind, normalizedTarget, signal);

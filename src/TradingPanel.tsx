@@ -133,7 +133,7 @@ function TradingForm({
       onTemporaryError: (cause) => {
         if (!controller.signal.aborted)
           setError(
-            `交易结果尚未确认，将继续查询：${cause instanceof Error ? cause.message : String(cause)}`,
+            `Trade unconfirmed. Continuing to check: ${cause instanceof Error ? cause.message : String(cause)}`,
           );
       },
     });
@@ -143,18 +143,19 @@ function TradingForm({
   const invalidReason = useCallback(
     (tradeSide: "BUY" | "SELL", input: string): string | null => {
       if (!/^\d+(?:\.\d+)?$/.test(input) || compareAmounts(input, "0") <= 0)
-        return "请输入大于 0 的金额";
+        return "Enter an amount greater than 0";
       if (tradeSide === "BUY") {
-        if (honeypot) return "已识别为 Honeypot，禁止买入";
+        if (honeypot) return "Honeypot detected. Buying is disabled";
         if (compareAmounts(input, "1") < 0 || compareAmounts(input, "9999999") > 0)
-          return "买入金额须为 1–9,999,999 U";
-        if (treasury === null) return "余额加载中";
-        if (compareAmounts(input, treasury) > 0) return "共享资金余额不足";
+          return "Buy amount must be between 1 and 9,999,999 U";
+        if (treasury === null) return "Loading balance";
+        if (compareAmounts(input, treasury) > 0) return "Insufficient available balance";
       } else {
-        if (ownBalance === null) return "余额未知";
-        if (compareAmounts(input, ownBalance) > 0) return "当前钱包代币余额不足";
+        if (ownBalance === null) return "Balance unknown";
+        if (compareAmounts(input, ownBalance) > 0) return "Insufficient token balance";
       }
-      if (token.tradeStatus === "UNSUPPORTED_POOL_TYPE") return "当前代币暂不支持交易";
+      if (token.tradeStatus === "UNSUPPORTED_POOL_TYPE")
+        return "Trading is unavailable for this token";
       return null;
     },
     [honeypot, ownBalance, token.tradeStatus, treasury],
@@ -298,7 +299,7 @@ function TradingForm({
       if (active.current.signal.aborted) return;
       setApproval(null);
       setQuote(null);
-      setError("授权已完成，请按当前金额重新交易");
+      setError("Approval complete. Review the amount and trade again");
     } catch (cause) {
       if (!active.current.signal.aborted)
         setError(cause instanceof Error ? cause.message : String(cause));
@@ -313,23 +314,23 @@ function TradingForm({
   const quoteStatus =
     (
       {
-        MEME_REFERENCE_UNAVAILABLE: "该代币流动性不足，暂不支持报价",
-        MEME_LOCAL_STATE_UNAVAILABLE: "行情同步中，请稍后重试",
-        MEME_UNAUTHORIZED: "请先连接钱包",
+        MEME_REFERENCE_UNAVAILABLE: "Not enough liquidity to quote",
+        MEME_LOCAL_STATE_UNAVAILABLE: "Market data is syncing. Try again shortly",
+        MEME_UNAUTHORIZED: "Connect wallet to continue",
       } as Record<string, string>
     )[errorCode ?? ""] ??
-    (/Privy login required/i.test(errorMessage ?? "") ? "请先连接钱包" : undefined);
+    (/Privy login required/i.test(errorMessage ?? "") ? "Connect wallet to continue" : undefined);
   const invalid = invalidReason(side, amount);
   const expired = quote !== null && quote.expiresAt <= now;
   const transactionState =
     transaction?.status === "CONFIRMED"
-      ? "已成交"
+      ? "Filled"
       : transaction?.status === "FAILED"
-        ? "失败"
-        : "处理中";
+        ? "Failed"
+        : "Processing";
   return (
-    <section className="panel trading-panel" aria-label="交易">
-      <div className="tabs" role="tablist" aria-label="交易方向">
+    <section className="panel trading-panel" aria-label="Trade">
+      <div className="tabs" role="tablist" aria-label="Trade side">
         <button
           role="tab"
           aria-selected={side === "BUY"}
@@ -341,7 +342,7 @@ function TradingForm({
           }}
           disabled={busy}
         >
-          买入
+          Buy
         </button>
         <button
           role="tab"
@@ -354,19 +355,19 @@ function TradingForm({
           }}
           disabled={busy}
         >
-          卖出
+          Sell
         </button>
       </div>
-      <p className="muted">平台共享资金：{treasury ?? "未知"} USDG</p>
+      <p className="muted">Available: {treasury ?? "—"} USDG</p>
       {side === "SELL" && (
         <p>
-          当前钱包余额：{ownBalance ?? "未知"} {symbol}
+          Wallet balance: {ownBalance ?? "—"} {symbol}
         </p>
       )}
       <label>
-        金额（{side === "BUY" ? "USDG" : symbol}）
+        Amount ({side === "BUY" ? "USDG" : symbol})
         <input
-          aria-label="交易金额"
+          aria-label="Trade amount"
           inputMode="decimal"
           value={amount}
           disabled={busy || Boolean(pendingId)}
@@ -378,7 +379,7 @@ function TradingForm({
         />
       </label>
       {side === "BUY" && quickBuyAmounts.length > 0 && (
-        <div className="presets" aria-label="买入预设金额">
+        <div className="presets" aria-label="Buy presets">
           {quickBuyAmounts.map((value) => (
             <button
               key={value}
@@ -414,42 +415,42 @@ function TradingForm({
       )}
       {quote && (
         <dl className="quote-details">
-          <dt>预计到账</dt>
+          <dt>Expected received</dt>
           <dd
             className="quote-amount"
             title={`${quote.targetOut} ${side === "BUY" ? symbol : "USDG"}`}
           >
             {price(quote.targetOut)} {side === "BUY" ? symbol : "USDG"}
           </dd>
-          <dt>最低到账</dt>
+          <dt>Minimum received</dt>
           <dd
             className="quote-amount"
             title={`${quote.minOut} ${side === "BUY" ? symbol : "USDG"}`}
           >
             {price(quote.minOut)} {side === "BUY" ? symbol : "USDG"}
           </dd>
-          <dt>滑点</dt>
+          <dt>Slippage</dt>
           <dd>{(quote.slippageBps / 100).toFixed(2)}%</dd>
-          <dt>平台费用</dt>
+          <dt>Platform fee</dt>
           <dd>
             {price(quote.fees.find((fee) => fee.type === "SERVICE")?.amount)} USDG（
             {percent(Number(quote.effectiveFeeBps) / 100)}）
           </dd>
-          <dt>最佳路径</dt>
+          <dt>Route</dt>
           <dd>
             {quote.routeHops?.map((hop) => hop.venue).join(" → ") ||
               quote.routePools?.map((pool) => pool.poolType).join(" → ") ||
-              "准备时确认"}
+              "Confirmed at prepare"}
           </dd>
-          <dt>报价有效期</dt>
+          <dt>Quote expires</dt>
           <dd>
             {expired
-              ? "已过期，提交时重新报价"
-              : `${Math.max(0, Math.ceil((quote.expiresAt - now) / 1000))} 秒`}
+              ? "Expired. Refreshes on submit"
+              : `${Math.max(0, Math.ceil((quote.expiresAt - now) / 1000))}s`}
           </dd>
         </dl>
       )}
-      {quoting && <p role="status">获取报价中…</p>}
+      {quoting && <p role="status">Getting quote…</p>}
       {walletAddress && !busy && !pendingId && !invalid && (
         <button
           onClick={() => {
@@ -458,7 +459,7 @@ function TradingForm({
           }}
           disabled={quoting}
         >
-          刷新报价
+          Refresh quote
         </button>
       )}
       {(error || (walletAddress && invalid)) && (
@@ -471,13 +472,15 @@ function TradingForm({
         </p>
       )}
       {pendingId && (
-        <p role="status">交易 {pendingId} 处理中，正在查询同一笔交易，请勿重复提交。</p>
+        <p role="status">
+          Trade {pendingId} is processing. Checking the same order; do not resubmit.
+        </p>
       )}
       {transaction && (
         <p role="status">
           {transactionState}
           {transaction.settlement && transaction.status === "CONFIRMED"
-            ? ` · 实际到账 ${transaction.settlement.amountOut}`
+            ? ` · Received ${transaction.settlement.amountOut}`
             : ""}
           {transaction.errorMessage ? ` · ${transaction.errorMessage}` : ""}
         </p>
@@ -489,7 +492,7 @@ function TradingForm({
             void onConnect?.();
           }}
         >
-          连接钱包
+          Connect wallet
         </button>
       ) : approval ? (
         <button
@@ -499,7 +502,7 @@ function TradingForm({
             void approve();
           }}
         >
-          授权 {symbol}
+          Approve {symbol}
         </button>
       ) : (
         <button
@@ -509,7 +512,7 @@ function TradingForm({
             void submit(side, amount);
           }}
         >
-          {busy ? "处理中…" : side === "BUY" ? `买入 ${symbol}` : `卖出 ${symbol}`}
+          {busy ? "Processing…" : side === "BUY" ? `Buy ${symbol}` : `Sell ${symbol}`}
         </button>
       )}
     </section>

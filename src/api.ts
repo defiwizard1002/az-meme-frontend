@@ -87,7 +87,7 @@ async function readEnvelope<T>(response: Response, prefix: "MEME" | "AZ"): Promi
   } catch {
     throw new ApiError(
       `${prefix}_${response.ok ? "INVALID_RESPONSE" : "REQUEST_FAILED"}`,
-      `HTTP ${response.status}: 服务响应读取中断，请检查连接后重试`,
+      `HTTP ${response.status}: service response was interrupted. Check the connection and retry`,
       response.status,
     );
   }
@@ -98,7 +98,7 @@ async function readEnvelope<T>(response: Response, prefix: "MEME" | "AZ"): Promi
   ) {
     throw new ApiError(
       "MEME_PRIVATE_ACCOUNT_ENTRY_REQUIRED",
-      "当前为公开行情入口，报价和交易请使用私有主账户入口（Tailscale / 私网）",
+      "This is the public market entry. Use the private main-account entry (Tailscale / private network) for quotes and trading",
       response.status,
     );
   }
@@ -110,7 +110,7 @@ async function readEnvelope<T>(response: Response, prefix: "MEME" | "AZ"): Promi
     if (response.ok)
       throw new ApiError(
         `${prefix}_INVALID_RESPONSE`,
-        `HTTP ${response.status}: 服务响应无效，请稍后重试`,
+        `HTTP ${response.status}: invalid service response. Retry shortly`,
         response.status,
       );
     // Non-JSON proxy failures must retain their original HTTP status below.
@@ -121,7 +121,7 @@ async function readEnvelope<T>(response: Response, prefix: "MEME" | "AZ"): Promi
       typeof payload?.mc === "string" ? payload.mc : `${prefix}_REQUEST_FAILED`,
       Array.isArray(payload?.ma) && typeof payload.ma[0] === "string"
         ? payload.ma[0]
-        : `HTTP ${response.status}: 请求失败`,
+        : `HTTP ${response.status}: request failed`,
       response.status,
       payload?.result ?? undefined,
     );
@@ -129,7 +129,7 @@ async function readEnvelope<T>(response: Response, prefix: "MEME" | "AZ"): Promi
   if (!payload || payload.rc !== 0 || !Object.hasOwn(payload, "result")) {
     throw new ApiError(
       `${prefix}_INVALID_RESPONSE`,
-      `HTTP ${response.status}: 服务响应格式无效`,
+      `HTTP ${response.status}: invalid service response format`,
       response.status,
     );
   }
@@ -155,8 +155,10 @@ async function send<T>(
     controller.abort(
       new ApiError(
         `${prefix}_${response && !response.ok ? "REQUEST_FAILED" : "REQUEST_TIMEOUT"}`,
-        `${response ? `HTTP ${response.status}: ` : ""}请求超时${
-          mutation ? "，结果未确认，交易可能已广播；请先核对交易记录，勿重复提交" : "，请稍后重试"
+        `${response ? `HTTP ${response.status}: ` : ""}Request timed out${
+          mutation
+            ? "; the result is unconfirmed and a trade may have been broadcast. Check trade history first and do not resubmit"
+            : "; retry shortly"
         }`,
         response?.status ?? 0,
       ),
@@ -192,7 +194,7 @@ async function send<T>(
     if (cause instanceof ApiError) throw cause;
     throw new ApiError(
       `${prefix}_REQUEST_FAILED`,
-      "网络请求失败，请检查连接后重试",
+      "Network request failed. Check the connection and retry",
       response?.status ?? 0,
     );
   } finally {
@@ -244,7 +246,7 @@ export async function authenticateWallet(address: string, provider: WalletProvid
     params: [nonce.message, address],
   });
   if (typeof signature !== "string")
-    throw new ApiError("MEME_WALLET_SIGNATURE_INVALID", "钱包签名无效", 400);
+    throw new ApiError("MEME_WALLET_SIGNATURE_INVALID", "Invalid wallet signature", 400);
   const verified = await request<{ token: string }>("/sapi/v1/meme/auth/wallet/verify", {
     method: "POST",
     body: JSON.stringify({ address, signature }),
@@ -327,7 +329,12 @@ export const memeApi = {
       input.purpose === "ESTIMATE",
     ).then((value): ValidQuote => {
       if ("status" in value && value.status === "APPROVAL_REQUIRED")
-        throw new ApiError("MEME_APPROVAL_REQUIRED", "需要授权，完成后将重新获取报价", 200, value);
+        throw new ApiError(
+          "MEME_APPROVAL_REQUIRED",
+          "Approval required. A new quote will be requested after approval",
+          200,
+          value,
+        );
       return requireQuoteTerms(value as QuoteDisplay, input);
     });
   },
@@ -387,7 +394,8 @@ async function executeAccountTrade(input: AccountTradeInput): Promise<AccountTra
   const pendingId = pendingExecutionId(input.walletAddress);
   if (pendingId) {
     const existing = await memeApi.getAccountTransaction(pendingId);
-    if (sessionToken !== executionSession) throw new Error("钱包已切换，请返回原钱包查看交易状态");
+    if (sessionToken !== executionSession)
+      throw new Error("Wallet changed. Return to the original wallet to view trade status");
     if (existing.status !== "CONFIRMED" && existing.status !== "FAILED") return existing;
     forgetExecution(input.walletAddress, pendingId);
   }
@@ -412,7 +420,8 @@ async function executeAccountTrade(input: AccountTradeInput): Promise<AccountTra
     );
     recordCreated = true;
     rememberExecution(walletAddress, prepared.record.executionId);
-    if (sessionToken !== executionSession) throw new Error("钱包已切换，请返回原钱包查看交易状态");
+    if (sessionToken !== executionSession)
+      throw new Error("Wallet changed. Return to the original wallet to view trade status");
     if (!prepared.authorizationRequest) {
       if (prepared.record.status === "CONFIRMED" || prepared.record.status === "FAILED")
         forgetExecution(walletAddress, prepared.record.executionId);

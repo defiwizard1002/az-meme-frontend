@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError } from "./api";
-import { compactMoney, money, relativeTime, shortAddress } from "./display";
+import { DesignIcon } from "./DesignIcon";
+import { compactMoney, money, relativeTime, safeUrl, shortAddress } from "./display";
 import { walletApi } from "./wallet-api";
 import { useUserState } from "./user-state";
 import type { ActivityPage, ActivityQuery, WalletActivity } from "./wallet-types";
@@ -10,16 +11,16 @@ interface ActivityLinks {
   onToken: (address: string) => void;
 }
 export interface ActivityFeedProps extends ActivityLinks {
-  onTrade: (token: string, side: "BUY" | "SELL") => void;
+  onTrade: (token: string, side: "BUY" | "SELL", amountIn?: string) => void;
   heldTokens: ReadonlySet<string>;
 }
 const dayMs = 86_400_000;
 function feedError(cause: unknown): string {
   return cause instanceof ApiError && [404, 501].includes(cause.status)
-    ? "动态服务暂不可用，请稍后重试。"
+    ? "Activity unavailable. Try again shortly."
     : cause instanceof Error
       ? cause.message
-      : "动态读取失败";
+      : "Activity request failed";
 }
 function mergeActivities(current: WalletActivity[], latest: WalletActivity[], fromMs: number) {
   return [...new Map([...current, ...latest].map((item) => [item.eventId, item])).values()]
@@ -32,29 +33,53 @@ export function ActivityFeed(props: ActivityFeedProps) {
   const [scope, setScope] = useState<ActivityQuery["scope"]>("ALL");
   const [side, setSide] = useState<ActivityQuery["side"]>("ANY");
   const [minUsd, setMinUsd] = useState<ActivityQuery["minUsd"]>("ANY");
+  const [count, setCount] = useState<{ loaded: number; complete: boolean } | null>(null);
+  const [quickAmount, setQuickAmount] = useState(state.quickBuyAmounts[0] ?? "");
+  useEffect(() => {
+    if (!state.quickBuyAmounts.includes(quickAmount))
+      setQuickAmount(state.quickBuyAmounts[0] ?? "");
+  }, [quickAmount, state.quickBuyAmounts]);
   return (
     <section className="panel activity-panel">
-      <header className="toolbar">
-        <h2>Smart Money 动态</h2>
-        <span className="muted">最近 24 小时</span>
-      </header>
       <div className="toolbar activity-filters">
-        <div className="tabs activity-scope" aria-label="钱包分类">
-          {(
-            [
-              ["ALL", "All"],
-              ["FOLLOWING", "Following"],
-              ["SMART_MONEY", "Smart Money"],
-              ["KOL", "KOL"],
-            ] as const
-          ).map(([value, label]) => (
-            <button key={value} aria-pressed={scope === value} onClick={() => setScope(value)}>
-              {label}
-            </button>
-          ))}
+        <div className="activity-toolbar-top">
+          <div className="tabs activity-scope" aria-label="Wallet category">
+            {(
+              [
+                ["ALL", "All"],
+                ["FOLLOWING", "Following"],
+                ["SMART_MONEY", "Smart Money"],
+                ["KOL", "KOL"],
+              ] as const
+            ).map(([value, label]) => (
+              <button key={value} aria-pressed={scope === value} onClick={() => setScope(value)}>
+                {value === "FOLLOWING" && <DesignIcon name="star" />}
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="activity-quick">
+            <label className="quick-presets">
+              <DesignIcon name="bolt" />
+              Quick buy{" "}
+              <select
+                disabled={!state.quickBuyAmounts.length}
+                aria-label="Activity quick buy amount"
+                value={quickAmount}
+                onChange={(event) => setQuickAmount(event.target.value)}
+              >
+                {state.quickBuyAmounts.map((value) => (
+                  <option key={value} value={value}>
+                    {value} USDG
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span className="live-label">● Live</span>
+          </div>
         </div>
         <div className="activity-filter-row">
-          <div className="tabs" aria-label="买卖方向">
+          <div className="tabs" aria-label="Trade side">
             <span>Side</span>
             {(
               [
@@ -68,7 +93,7 @@ export function ActivityFeed(props: ActivityFeedProps) {
               </button>
             ))}
           </div>
-          <div className="tabs" aria-label="成交金额">
+          <div className="tabs" aria-label="Trade amount">
             <span>Amount</span>
             {(
               [
@@ -82,10 +107,15 @@ export function ActivityFeed(props: ActivityFeedProps) {
               </button>
             ))}
           </div>
+          <span className="activity-count">
+            {count
+              ? `${count.loaded}${count.complete ? "" : "+"} ${count.loaded === 1 ? "trade" : "trades"}`
+              : ""}
+          </span>
         </div>
       </div>
       {scope === "FOLLOWING" && !state.authenticated ? (
-        <p className="empty-state">连接钱包后查看关注动态。</p>
+        <p className="empty-state">Connect wallet to view following activity.</p>
       ) : (
         <FilteredFeed
           key={`${scope}:${side}:${minUsd}`}
@@ -93,6 +123,8 @@ export function ActivityFeed(props: ActivityFeedProps) {
           scope={scope}
           side={side}
           minUsd={minUsd}
+          quickAmount={quickAmount}
+          onCount={setCount}
         />
       )}
     </section>
@@ -102,11 +134,18 @@ function FilteredFeed({
   scope,
   side,
   minUsd,
+  quickAmount,
+  onCount,
   onWallet,
   onToken,
   onTrade,
   heldTokens,
-}: ActivityFeedProps & Pick<ActivityQuery, "scope" | "side" | "minUsd">) {
+}: ActivityFeedProps &
+  Pick<ActivityQuery, "scope" | "side" | "minUsd"> & {
+    quickAmount: string;
+    onCount: (count: { loaded: number; complete: boolean } | null) => void;
+  }) {
+  const state = useUserState();
   const [items, setItems] = useState<WalletActivity[]>([]);
   const [cursor, setCursor] = useState<ActivityPage["nextCursor"]>(null);
   const [pending, setPending] = useState<ActivityPage | null>(null);
@@ -121,6 +160,10 @@ function FilteredFeed({
   const fromMs = useRef(Date.now() - dayMs);
   const pendingPage = useRef<ActivityPage | null>(null);
   const table = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    onCount({ loaded: items.length, complete: cursor === null });
+  }, [cursor, items.length, onCount]);
 
   function applyPending() {
     if (
@@ -213,12 +256,12 @@ function FilteredFeed({
     pending?.items.filter((item) => !items.some((old) => old.eventId === item.eventId)).length ?? 0;
   return (
     <>
-      {loading && <p role="status">正在读取动态…</p>}
+      {loading && <p role="status">Loading activity…</p>}
       {error && (
         <p role="alert">
           {error}{" "}
           <button type="button" onClick={() => setRevision((value) => value + 1)}>
-            重试动态
+            Retry
           </button>
         </p>
       )}
@@ -233,7 +276,8 @@ function FilteredFeed({
             applyPending();
           }}
         >
-          {incoming ? `${incoming} 条新动态` : "动态已更新"}，返回顶部查看
+          {incoming ? `${incoming} new ${incoming === 1 ? "trade" : "trades"}` : "Activity updated"}
+          . Return to top to view.
         </button>
       )}
       <div
@@ -244,12 +288,22 @@ function FilteredFeed({
           applyPending();
         }}
       >
-        <div className="activity-list" aria-label="交易动态">
+        <div className="activity-list" aria-label="Trade activity">
           {items.map((item) => (
             <article className="activity-card" key={item.eventId}>
               <div className="activity-wallet">
                 <span className="activity-avatar" aria-hidden="true">
-                  {item.address.slice(2, 4)}
+                  {safeUrl(item.walletAvatarUrl) ? (
+                    <img
+                      src={safeUrl(item.walletAvatarUrl)!}
+                      alt=""
+                      onError={(event) => {
+                        event.currentTarget.style.display = "none";
+                      }}
+                    />
+                  ) : (
+                    (item.walletName || item.address.slice(2, 3)).slice(0, 1).toUpperCase()
+                  )}
                 </span>
                 <button
                   type="button"
@@ -257,13 +311,36 @@ function FilteredFeed({
                   title={item.address}
                   onClick={() => onWallet(item.address)}
                 >
-                  {shortAddress(item.address)}
+                  {item.walletName || shortAddress(item.address)}
                 </button>
                 {item.labels?.map((label) => (
                   <span className="badge" key={label}>
                     {label === "SMART_MONEY" ? "Smart" : "KOL"}
                   </span>
                 ))}
+                <button
+                  type="button"
+                  className="activity-follow-star"
+                  aria-label={`${state.followed.has(item.address.toLowerCase()) ? "Unfollow" : "Follow"} ${item.walletName || shortAddress(item.address)}`}
+                  aria-pressed={state.followed.has(item.address.toLowerCase())}
+                  disabled={!state.authenticated}
+                  title={
+                    state.authenticated
+                      ? state.followed.has(item.address.toLowerCase())
+                        ? "Unfollow wallet"
+                        : "Follow wallet"
+                      : "Connect wallet to follow"
+                  }
+                  onClick={() =>
+                    void state
+                      .setFollow(item.address, !state.followed.has(item.address.toLowerCase()))
+                      .catch((cause) =>
+                        setError(cause instanceof Error ? cause.message : "Follow failed"),
+                      )
+                  }
+                >
+                  <DesignIcon name="star" filled={state.followed.has(item.address.toLowerCase())} />
+                </button>
               </div>
               <div className="activity-event">
                 <span className={item.kind === "BUY" ? "positive" : "negative"}>
@@ -271,11 +348,24 @@ function FilteredFeed({
                 </span>
                 <button
                   type="button"
-                  className="activity-token text-button"
-                  title={item.token}
+                  className="activity-token"
+                  title={item.tokenName || item.token}
                   onClick={() => onToken(item.token)}
                 >
-                  {shortAddress(item.token)}
+                  <span className="activity-token-logo" aria-hidden="true">
+                    {safeUrl(item.tokenLogo) ? (
+                      <img
+                        src={safeUrl(item.tokenLogo)!}
+                        alt=""
+                        onError={(event) => {
+                          event.currentTarget.style.display = "none";
+                        }}
+                      />
+                    ) : (
+                      (item.tokenSymbol || item.token.slice(2, 3)).slice(0, 1)
+                    )}
+                  </span>
+                  <span>{item.tokenSymbol || shortAddress(item.token)}</span>
                 </button>
                 <span className="activity-value" title={item.amountUsd ?? undefined}>
                   {compactMoney(item.amountUsd)}
@@ -308,15 +398,28 @@ function FilteredFeed({
                   applyPending();
                 }}
               >
-                <button type="button" className="text-button" onClick={() => onToken(item.token)}>
+                <button type="button" className="activity-view" onClick={() => onToken(item.token)}>
                   View
                 </button>
                 {(item.kind === "BUY" || heldTokens.has(item.token.toLowerCase())) && (
                   <button
                     type="button"
-                    onClick={() => onTrade(item.token, item.kind === "SELL" ? "SELL" : "BUY")}
+                    className={
+                      item.kind === "SELL" ? "activity-follow-sell" : "activity-follow-buy"
+                    }
+                    onClick={() =>
+                      item.kind === "SELL"
+                        ? onTrade(item.token, "SELL")
+                        : onTrade(item.token, "BUY", quickAmount)
+                    }
                   >
-                    {item.kind === "SELL" ? "Follow Sell" : "Buy"}
+                    {item.kind === "SELL" ? (
+                      "Follow Sell"
+                    ) : (
+                      <>
+                        <DesignIcon name="bolt" /> {quickAmount} USDG
+                      </>
+                    )}
                   </button>
                 )}
               </div>
@@ -325,11 +428,11 @@ function FilteredFeed({
         </div>
       </div>
       {!loading && !error && !items.length && (
-        <p className="empty-state">最近 24 小时没有符合这些条件的活动</p>
+        <p className="empty-state">No matching activity in the last 24 hours</p>
       )}
       {cursor && (
         <button type="button" disabled={paging} onClick={more}>
-          {paging ? "读取中…" : "加载更多动态"}
+          {paging ? "Loading…" : "Load more activity"}
         </button>
       )}
     </>
@@ -389,7 +492,7 @@ export function ActivityRibbon({
   return (
     <section
       className="activity-ribbon"
-      aria-label="最新 10 条动态"
+      aria-label="Latest 10 trades"
       onMouseEnter={() => {
         hover.current = true;
       }}
@@ -403,9 +506,9 @@ export function ActivityRibbon({
     >
       <strong className="live-label">● Live</strong>
       <div className="ticker-track">
-        {loading && <span className="muted">正在读取…</span>}
+        {loading && <span className="muted">Loading…</span>}
         {error && <span className="muted">{error}</span>}
-        {!loading && !error && !items.length && <span className="muted">暂无最近动态</span>}
+        {!loading && !error && !items.length && <span className="muted">No recent activity</span>}
         {items.map((item) => (
           <span className="activity-ribbon-item" key={item.eventId}>
             <button
@@ -414,7 +517,7 @@ export function ActivityRibbon({
               title={item.address}
               onClick={() => onWallet(item.address)}
             >
-              {shortAddress(item.address)}
+              {item.walletName || shortAddress(item.address)}
             </button>
             <span className={item.kind === "BUY" ? "positive" : "negative"}>
               {item.kind === "BUY" ? "bought" : "sold"}
@@ -422,12 +525,12 @@ export function ActivityRibbon({
             <button
               type="button"
               className="text-button"
-              title={item.token}
+              title={item.tokenName || item.token}
               onClick={() => onToken(item.token)}
             >
-              {shortAddress(item.token)}
+              {item.tokenSymbol || shortAddress(item.token)}
             </button>
-            <span>{item.amountUsd == null ? "金额未知" : money(item.amountUsd)}</span>
+            <span>{item.amountUsd == null ? "Amount unknown" : money(item.amountUsd)}</span>
           </span>
         ))}
       </div>

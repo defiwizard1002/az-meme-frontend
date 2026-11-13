@@ -20,6 +20,11 @@ export interface WalletActivity {
   source: "LOCAL_TRANSFERS";
   labels?: WalletLabel[];
   labelSource?: "LOCAL_MANUAL";
+  walletName?: string | null;
+  walletAvatarUrl?: string | null;
+  tokenName?: string | null;
+  tokenSymbol?: string | null;
+  tokenLogo?: string | null;
   marketCapUsd?: string | null;
   marketCapCoverage?: "SUPPLY_OR_PRICE_UNAVAILABLE" | "LOCAL_SUPPLY_AND_EXECUTION";
 }

@@ -95,7 +95,7 @@ export default function Discover({
         setError(undefined);
       } catch (cause) {
         if (!controller.signal.aborted)
-          setError(cause instanceof Error ? cause.message : "列表暂时不可用");
+          setError(cause instanceof Error ? cause.message : "Markets unavailable");
       } finally {
         if (!controller.signal.aborted) setLoading(false);
         running = false;
@@ -178,6 +178,15 @@ export default function Discover({
       ),
     [items, stage, sort],
   );
+  const stageCounts = useMemo(() => {
+    const counts = { ALL: items.length, CURVE: 0, NEAR_GRADUATION: 0, GRADUATED: 0 };
+    for (const token of items) {
+      const state = token.lifecycle?.state;
+      if (state === "CURVE" || state === "NEAR_GRADUATION" || state === "GRADUATED")
+        counts[state] += 1;
+    }
+    return counts;
+  }, [items]);
   useEffect(
     () => setVisible((current) => reconcileMarkets(current, filtered, frozen).items),
     [filtered, frozen],
@@ -214,14 +223,16 @@ export default function Discover({
       setActionError(undefined);
       void user
         .setWatchlist(token.tokenAddress, !user.watchlist.has(token.tokenAddress.toLowerCase()))
-        .catch((cause) => setActionError(cause instanceof Error ? cause.message : "自选保存失败"));
+        .catch((cause) =>
+          setActionError(cause instanceof Error ? cause.message : "Watchlist failed"),
+        );
     },
     [user, onConnect],
   );
   if (compact)
     return (
-      <aside className="market-rail" aria-label="交易页代币列表">
-        <div className="tabs" aria-label="交易页发现列表">
+      <aside className="market-rail" aria-label="Token list">
+        <div className="tabs" aria-label="Discover token list">
           {(
             [
               ["hot", "Trending"],
@@ -229,20 +240,26 @@ export default function Discover({
               ["watchlist", "Watchlist"],
             ] as const
           ).map(([value, label]) => (
-            <button key={value} aria-pressed={tab === value} onClick={() => changeTab(value)}>
+            <button
+              key={value}
+              aria-label={label}
+              aria-pressed={tab === value}
+              onClick={() => changeTab(value)}
+            >
               {value === "hot" && <DesignIcon name="flame" />}
+              {value === "watchlist" && <DesignIcon name="star" />}
               {label}
             </button>
           ))}
         </div>
-        {loading && <p role="status">加载代币…</p>}
+        {loading && <p role="status">Loading tokens…</p>}
         {error && (
           <p role="alert">
             {error}
-            <button onClick={() => setRetry((n) => n + 1)}>重试</button>
+            <button onClick={() => setRetry((n) => n + 1)}>Retry</button>
           </p>
         )}
-        {!loading && !error && !visible.length && <p className="empty-state">暂无符合条件的代币</p>}
+        {!loading && !error && !visible.length && <p className="empty-state">No matching tokens</p>}
         {visible.map((token) => (
           <button
             className="market-rail-token"
@@ -280,23 +297,8 @@ export default function Discover({
     );
   return (
     <section className="panel discover">
-      <div className="section-heading">
-        <div>
-          <span className="eyebrow">ROBINHOOD CHAIN</span>
-          <h1>Discover</h1>
-        </div>
-        <label className="search">
-          <span>搜索</span>
-          <input
-            aria-label="搜索代币名称或地址"
-            placeholder="代币名称或合约地址"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </label>
-      </div>
       <div className="toolbar">
-        <div className="tabs" aria-label="发现列表">
+        <div className="tabs" aria-label="Discover list">
           {(
             [
               ["hot", "Trending"],
@@ -310,7 +312,7 @@ export default function Discover({
             </button>
           ))}
         </div>
-        <div className="tabs" aria-label="行情时间范围">
+        <div className="tabs" aria-label="Market interval">
           {(["1h", "24h"] as const).map((value) => (
             <button
               key={value}
@@ -329,38 +331,52 @@ export default function Discover({
           ))}
         </div>
         <label className="quick-presets">
-          快捷买入{" "}
+          Quick buy{" "}
           <select
             disabled={!user.quickBuyAmounts.length}
-            aria-label="快捷买入金额"
+            aria-label="Quick buy amount"
             value={quickAmount}
             onChange={(e) => setSelectedAmount(e.target.value)}
           >
             {user.quickBuyAmounts.map((value) => (
               <option key={value} value={value}>
-                {value} U
+                {value} USDG
               </option>
             ))}
           </select>
         </label>
+        <label className="search">
+          <span>Search</span>
+          <input
+            aria-label="Search token name or address"
+            placeholder="Search token name or paste contract"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </label>
       </div>
       {tab === "new" && (
-        <div className="tabs lifecycle-filters">
+        <div className="tabs lifecycle-filters" aria-label="Token lifecycle">
           {[
             ["ALL", "All"],
             ["CURVE", "On curve"],
             ["NEAR_GRADUATION", "Graduating soon"],
             ["GRADUATED", "Graduated"],
           ].map(([value, label]) => (
-            <button key={value} aria-pressed={stage === value} onClick={() => setStage(value)}>
-              {label}
+            <button
+              key={value}
+              aria-label={label}
+              aria-pressed={stage === value}
+              onClick={() => setStage(value)}
+            >
+              {label} <span>({stageCounts[value as keyof typeof stageCounts]})</span>
             </button>
           ))}
         </div>
       )}
       {(stale || frozen) && (
         <div className="notice">
-          {stale && <span>数据待更新</span>}
+          {stale && <span>Data delayed</span>}
           {frozen && (
             <button
               onClick={() => {
@@ -370,24 +386,24 @@ export default function Discover({
                 setHover(false);
               }}
             >
-              {added ? `${added} 个新代币 · ` : "列表排序已暂停 · "}回到顶部更新
+              {added ? `${added} new tokens · ` : "Live sorting paused · "}Return to top to update
             </button>
           )}
         </div>
       )}
       {(error || actionError) && (
         <p role="alert" className="error">
-          {error || actionError} <button onClick={() => setRetry((n) => n + 1)}>重试</button>
+          {error || actionError} <button onClick={() => setRetry((n) => n + 1)}>Retry</button>
         </p>
       )}
       {tab === "watchlist" && !user.authenticated ? (
         <div className="empty-state">
-          <p>连接钱包查看你的自选</p>
-          <button onClick={onConnect}>连接钱包</button>
+          <p>Connect wallet to view your watchlist</p>
+          <button onClick={onConnect}>Connect wallet</button>
         </div>
       ) : loading && visible.length === 0 ? (
         <p className="empty-state" role="status">
-          加载行情…
+          Loading markets…
         </p>
       ) : (
         <div
@@ -424,7 +440,7 @@ export default function Discover({
                   <td className="market-token-cell">
                     <button
                       className="watch-button"
-                      aria-label={`自选 ${token.symbol || token.tokenAddress}`}
+                      aria-label={`Watch ${token.symbol || token.tokenAddress}`}
                       aria-pressed={user.watchlist.has(token.tokenAddress.toLowerCase())}
                       onClick={() => watch(token)}
                     >
@@ -447,7 +463,7 @@ export default function Discover({
                         )}
                       </span>
                       <strong>{token.symbol || shortAddress(token.tokenAddress)}</strong>
-                      <span>{token.name || "名称未知"}</span>
+                      <span>{token.name || "Unknown name"}</span>
                     </button>
                     <span title={token.tokenAddress} className="muted address">
                       {shortAddress(token.tokenAddress)}
@@ -521,7 +537,11 @@ export default function Discover({
                         token.security?.isHoneypot === true ||
                         pendingToken === token.tokenAddress
                       }
-                      title={token.security?.isHoneypot === true ? "貔貅风险，禁止买入" : undefined}
+                      title={
+                        token.security?.isHoneypot === true
+                          ? "Honeypot: buying disabled"
+                          : undefined
+                      }
                       onMouseEnter={() => setHover(true)}
                       onMouseLeave={() => setHover(false)}
                       onFocus={() => setHover(true)}
@@ -529,10 +549,10 @@ export default function Discover({
                       onClick={() => onQuickBuy(token, quickAmount)}
                     >
                       {pendingToken === token.tokenAddress
-                        ? "处理中…"
+                        ? "Processing…"
                         : quickAmount
                           ? "Buy"
-                          : "请设置快捷金额"}
+                          : "Set a quick-buy amount"}
                     </button>
                   </td>
                 </tr>
@@ -541,7 +561,7 @@ export default function Discover({
           </table>
           {visible.length === 0 && !error && (
             <p className="empty-state">
-              {tab === "watchlist" ? "暂无自选代币" : "暂无符合条件的代币"}
+              {tab === "watchlist" ? "No watchlist tokens" : "No matching tokens"}
             </p>
           )}
         </div>

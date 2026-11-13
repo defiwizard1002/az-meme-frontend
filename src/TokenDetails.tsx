@@ -37,7 +37,7 @@ const amount = (value: string | number | null | undefined, unit = "") =>
   unit === "$" ? compactMoney(value) : displayAmount(value);
 const addressLabel = (value: string) => `${value.slice(0, 6)}…${value.slice(-4)}`;
 const date = (value: number | null | undefined) =>
-  value ? new Date(value).toLocaleString() : "更新时间未知";
+  value ? new Date(value).toLocaleString() : "Update time unknown";
 function TradeValue({ value }: { value: string | null | undefined }) {
   return (
     <span className="trade-value">
@@ -76,7 +76,7 @@ export function buildTradeMarkers(
           {
             time: Math.floor(trade.t / INTERVAL_SECONDS[interval]) * INTERVAL_SECONDS[interval],
             side: trade.side,
-            label: `${[...labels].join(" / ")} ${trade.side === "BUY" ? "买" : "卖"}`,
+            label: `${[...labels].join(" / ")} ${trade.side === "BUY" ? "Buy" : "Sell"}`,
           },
         ]
       : [];
@@ -165,7 +165,7 @@ function TokenWorkspace({
         .then((value) => {
           if (controller.signal.aborted) return;
           if (value.chainId !== chainId || value.tokenAddress.toLowerCase() !== address)
-            throw Error("代币信息与当前选择不匹配");
+            throw Error("Token response does not match the current selection");
           const newerRisk = Object.fromEntries(
             Object.entries(detailRef.current.security).filter(
               ([key, field]) =>
@@ -188,7 +188,8 @@ function TokenWorkspace({
           updateRef.current?.(merged);
         })
         .catch(() => {
-          if (!controller.signal.aborted) setDetailError("代币信息更新失败，已保留上次结果");
+          if (!controller.signal.aborted)
+            setDetailError("Token update failed. Showing the last result");
         })
         .finally(() => {
           loading = false;
@@ -255,14 +256,14 @@ function TokenWorkspace({
             page.interval !== interval ||
             page.marketKey !== marketKey
           )
-            throw Error("K 线与当前选择不匹配");
+            throw Error("Candles do not match the current selection");
           const current = snapshotRef.current;
           saveSnapshot(
             mergeSnapshots(current?.items.length || current?.gaps.length ? current : null, page),
           );
           setChartLoading(false);
           if (page.syncStatus === "STALE" || page.syncStatus === "FAILED")
-            throw Error("K 线暂时无法更新");
+            throw Error("Candles are temporarily unavailable");
           setChartError(null);
           candleAttempt = 0;
           if (page.syncStatus === "BACKFILLING" || page.syncStatus === "CATCHING_UP")
@@ -270,7 +271,7 @@ function TokenWorkspace({
         })
         .catch(() => {
           if (active) {
-            setChartError("K 线加载失败");
+            setChartError("Candles failed to load");
             setChartLoading(false);
             candleDirty = true;
           }
@@ -308,7 +309,7 @@ function TokenWorkspace({
         })
         .catch(() => {
           if (active) {
-            setTradeError("成交更新失败，正在重试");
+            setTradeError("Trade update failed. Retrying");
             tradeDirty = true;
           }
         })
@@ -339,9 +340,9 @@ function TokenWorkspace({
         page.marketKey !== marketKey ||
         (series && snapshotCandleSeries(page) !== series)
       )
-        throw Error("历史 K 线与当前选择不匹配");
+        throw Error("Historical candles do not match the current selection");
       if (page.syncStatus === "FAILED" || page.syncStatus === "STALE")
-        throw Error("历史 K 线暂时无法加载");
+        throw Error("Historical candles are unavailable");
       const count = snapshotRef.current?.items.length ?? 0;
       const merged = mergeSnapshots(snapshotRef.current, page);
       saveSnapshot(merged);
@@ -368,7 +369,7 @@ function TokenWorkspace({
           setTradeError(null);
         })
         .catch(() => {
-          if (active) setTradeError("更早成交加载失败，请重试");
+          if (active) setTradeError("Earlier trades failed to load. Try again");
         })
         .finally(() => {
           historyFlight = false;
@@ -442,7 +443,7 @@ function TokenWorkspace({
               );
               if (!incoming) return;
               if (incoming.chainId !== chainId || incoming.tokenAddress.toLowerCase() !== address)
-                throw Error("行情与当前代币不匹配");
+                throw Error("Market data does not match this token");
               const fields = Object.fromEntries(
                 (
                   [
@@ -521,7 +522,7 @@ function TokenWorkspace({
                 }, 500);
             }
           } catch {
-            setStreamError("实时行情暂时中断，正在重连");
+            setStreamError("Live market data disconnected. Reconnecting");
             next.close();
           }
         });
@@ -530,12 +531,12 @@ function TokenWorkspace({
           if (socket !== next) return;
           socket = null;
           window.clearTimeout(openTimer);
-          if (active && !hidden()) setStreamError("实时行情暂时中断，正在重连");
+          if (active && !hidden()) setStreamError("Live market data disconnected. Reconnecting");
           reconnect();
         });
       } catch {
         if (active) {
-          setStreamError("实时行情暂时中断，历史仍可查看");
+          setStreamError("Live market data disconnected. History remains available");
           reconnect();
         }
       } finally {
@@ -611,7 +612,7 @@ function TokenWorkspace({
             page.tokenAddress.toLowerCase() !== address ||
             page.source !== "LOCAL"
           )
-            throw Error("历史标记与当前选择不匹配");
+            throw Error("Historical markers do not match the current selection");
           setHistoricalMarkers((current) => [
             ...new Map([...current, ...page.items].map((item) => [item.eventId, item])).values(),
           ]);
@@ -621,7 +622,7 @@ function TokenWorkspace({
           setMarkerError(null);
         })
         .catch(() => {
-          if (!controller.signal.aborted) setMarkerError("历史标记暂不可用");
+          if (!controller.signal.aborted) setMarkerError("Historical markers unavailable");
         })
         .finally(() => {
           loading = false;
@@ -640,7 +641,7 @@ function TokenWorkspace({
     setHolders(null);
     if (holderScope === "FOLLOWING" && !walletAddress) {
       setHoldersLoading(false);
-      setHoldersError("登录后查看关注钱包持仓");
+      setHoldersError("Connect wallet to view following positions");
       return () => controller.abort();
     }
     setHoldersLoading(true);
@@ -653,13 +654,15 @@ function TokenWorkspace({
       .then((page) => {
         if (controller.signal.aborted) return;
         if (page.chainId !== chainId || page.tokenAddress.toLowerCase() !== address)
-          throw Error("持有人与当前选择不匹配");
+          throw Error("Holders do not match the current selection");
         setHolders(page);
       })
       .catch(() => {
         if (!controller.signal.aborted)
           setHoldersError(
-            holderScope === "ALL" ? "持有人加载失败，请重试" : "持有人暂不可用，请重试",
+            holderScope === "ALL"
+              ? "Holders failed to load. Try again"
+              : "Filtered holders unavailable. Try again",
           );
       })
       .finally(() => {
@@ -682,7 +685,7 @@ function TokenWorkspace({
       .then((page) => {
         if (controller.signal.aborted) return;
         if (page.chainId !== chainId || page.tokenAddress.toLowerCase() !== address)
-          throw Error("持有人与当前选择不匹配");
+          throw Error("Holders do not match the current selection");
         setHolders((current) => ({
           ...page,
           items: [
@@ -697,7 +700,7 @@ function TokenWorkspace({
         setHoldersError(null);
       })
       .catch(() => {
-        if (!controller.signal.aborted) setHoldersError("更多持有人加载失败，请重试");
+        if (!controller.signal.aborted) setHoldersError("More holders failed to load. Try again");
       })
       .finally(() => {
         if (!controller.signal.aborted) setHoldersLoading(false);
@@ -735,20 +738,20 @@ function TokenWorkspace({
   const lifecycle = token.lifecycle;
   const lifecycleLabel = lifecycle
     ? {
-        CURVE: "内盘",
-        NEAR_GRADUATION: "即将毕业",
-        GRADUATED: "已毕业",
-        SWEPT: "已迁移",
-        RESCUED: "已退出",
-        NOT_APPLICABLE: "不适用",
-        UNKNOWN: "状态未知",
+        CURVE: "On curve",
+        NEAR_GRADUATION: "Graduating soon",
+        GRADUATED: "Graduated",
+        SWEPT: "Migrated",
+        RESCUED: "Rescued",
+        NOT_APPLICABLE: "Not applicable",
+        UNKNOWN: "Status unknown",
       }[lifecycle.state]
-    : "状态未知";
+    : "Status unknown";
   return (
-    <section className="token-details" aria-label="Token 详情">
+    <section className="token-details" aria-label="Token details">
       <header
         className="token-header panel"
-        title={`${marketLive ? "实时行情 · " : ""}${date(token.updatedAt)}${token.stale ? " · 数据待更新" : ""}`}
+        title={`${marketLive ? "Live market · " : ""}${date(token.updatedAt)}${token.stale ? " · Data delayed" : ""}`}
       >
         <div className="token-heading">
           {token.logo && (
@@ -775,14 +778,14 @@ function TokenWorkspace({
               type="button"
               onClick={() =>
                 void navigator.clipboard.writeText(address).then(
-                  () => setCopyState("已复制"),
-                  () => setCopyState("复制失败"),
+                  () => setCopyState("Copied"),
+                  () => setCopyState("Copy failed"),
                 )
               }
             >
-              {copyState ?? "复制地址"}
+              {copyState ?? "Copy address"}
             </button>
-            <nav className="social-links" aria-label="社交链接">
+            <nav className="social-links" aria-label="Social links">
               {[
                 ["Website", token.website],
                 ["X", token.twitterUsername],
@@ -806,7 +809,7 @@ function TokenWorkspace({
                     <progress
                       max={100}
                       value={Number(lifecycle.progressPct)}
-                      aria-label="毕业进度"
+                      aria-label="Graduation progress"
                     />
                   )}
                 </div>
@@ -815,7 +818,7 @@ function TokenWorkspace({
           {onWatch && (
             <button
               type="button"
-              aria-label={watched ? "取消自选" : "加入自选"}
+              aria-label={watched ? "Remove from watchlist" : "Add to watchlist"}
               aria-pressed={watched}
               onClick={onWatch}
             >
@@ -827,11 +830,12 @@ function TokenWorkspace({
 
         <dl className="token-stats">
           {[
-            ["价格", money(token.priceUsd)],
-            ["市值", amount(token.marketCapUsd, "$")],
-            ["流动性", amount(token.liquidityUsd, "$")],
-            ["24h 成交额", amount(token.volume24hUsd, "$")],
-            ["持有人", amount(token.holders)],
+            ["Market cap", amount(token.marketCapUsd, "$")],
+            ["Price", money(token.priceUsd)],
+            ["24h change", percent(token.change24h)],
+            ["24h volume", amount(token.volume24hUsd, "$")],
+            ["Liquidity", amount(token.liquidityUsd, "$")],
+            ["Holders", amount(token.holders)],
           ].map(([label, value]) => (
             <div key={label}>
               <dt>{label}</dt>
@@ -841,15 +845,15 @@ function TokenWorkspace({
         </dl>
         {detailError && (
           <p role="alert">
-            {detailError} <button onClick={() => setRetry((value) => value + 1)}>重试</button>
+            {detailError} <button onClick={() => setRetry((value) => value + 1)}>Retry</button>
           </p>
         )}
       </header>
       <div className="token-workspace">
         <div className="token-main">
-          <section className="chart-panel panel" aria-label="价格图表">
+          <section className="chart-panel panel" aria-label="Price chart">
             <div className="chart-toolbar">
-              <div className="intervals" aria-label="K 线周期">
+              <div className="intervals" aria-label="Candle interval">
                 {(Object.keys(INTERVAL_SECONDS) as Interval[]).map((value) => (
                   <button
                     key={value}
@@ -894,27 +898,27 @@ function TokenWorkspace({
               onLoadBefore={(before) => loadBeforeRef.current(before)}
             />
             <p className="data-note">
-              {markerError ?? (markerLoading ? "正在加载…" : null)}
+              {markerError ?? (markerLoading ? "Loading…" : null)}
               {markerCursor && (
                 <button disabled={markerLoading} onClick={() => moreMarkersRef.current()}>
-                  加载更多历史标记
+                  Load more historical markers
                 </button>
               )}
             </p>
             {(chartError || streamError) && (
               <p role="status">
                 {chartError ?? streamError}{" "}
-                <button onClick={() => setRetry((value) => value + 1)}>重新加载</button>
+                <button onClick={() => setRetry((value) => value + 1)}>Reload</button>
               </p>
             )}
           </section>
           <section className="token-activity panel">
-            <div role="tablist" aria-label="代币记录">
+            <div role="tablist" aria-label="Token activity">
               <button role="tab" aria-selected={tab === "views"} onClick={() => setTab("views")}>
                 Views
               </button>
               <button role="tab" aria-selected={tab === "trades"} onClick={() => setTab("trades")}>
-                成交
+                Trades
               </button>
               <button
                 role="tab"
@@ -950,7 +954,7 @@ function TokenWorkspace({
             ) : tab === "views" ? (
               <Views key={`${chainId}:${address}`} tokenAddress={address} chainId={chainId} />
             ) : tab === "trades" ? (
-              <div role="tabpanel" aria-label="成交">
+              <div role="tabpanel" aria-label="Trades">
                 <div className="table-scroll">
                   <table className="trades-table">
                     <thead>
@@ -1014,17 +1018,17 @@ function TokenWorkspace({
                     </tbody>
                   </table>
                 </div>
-                {!trades.length && <p>{tradesLoading ? "正在加载成交" : "暂无可用成交"}</p>}
+                {!trades.length && <p>{tradesLoading ? "Loading trades" : "No trades"}</p>}
                 {tradeError && <p role="alert">{tradeError}</p>}
                 {tradeCursor && (
                   <button disabled={tradesLoading} onClick={() => loadTradesRef.current()}>
-                    加载更多成交
+                    Load more trades
                   </button>
                 )}
               </div>
             ) : (
               <div role="tabpanel" aria-label="Holders">
-                <div className="holder-controls" role="group" aria-label="持有人筛选">
+                <div className="holder-controls" role="group" aria-label="Holder filters">
                   {(
                     [
                       ["ALL", "All"],
@@ -1052,7 +1056,7 @@ function TokenWorkspace({
                     <button
                       key={risk}
                       aria-pressed={holderRisk === risk}
-                      title="筛选当前已加载的持有人；可加载更多"
+                      title="Filters currently loaded holders; load more to include additional rows"
                       onClick={() => {
                         setHolderScope("ALL");
                         setHolderRisk(risk);
@@ -1065,7 +1069,7 @@ function TokenWorkspace({
                     disabled={holdersLoading}
                     onClick={() => setHoldersRetry((value) => value + 1)}
                   >
-                    刷新持有人
+                    Refresh
                   </button>
                 </div>
                 <div className="table-scroll">
@@ -1073,7 +1077,7 @@ function TokenWorkspace({
                     <thead>
                       <tr>
                         {[
-                          "钱包 / 标签",
+                          "Wallet / labels",
                           "Remaining",
                           "Bought / avg MC",
                           "Sold / avg MC",
@@ -1089,7 +1093,7 @@ function TokenWorkspace({
                           <td>
                             <button
                               className="link-button"
-                              aria-label={`查看钱包 ${holder.address}`}
+                              aria-label={`View wallet ${holder.address}`}
                               title={holder.address}
                               onClick={() => onProfile(holder.address)}
                             >
@@ -1115,7 +1119,7 @@ function TokenWorkspace({
                                 ].includes(label),
                               )
                               .map((label) => (
-                                <span className="risk-tag" title="GMGN 标签" key={label}>
+                                <span className="risk-tag" title="GMGN label" key={label}>
                                   {
                                     (
                                       {
@@ -1124,14 +1128,14 @@ function TokenWorkspace({
                                         insider: "Insider",
                                         rat_trader: "Rat",
                                         bundler: "Bundler",
-                                        wash_trader: "刷量",
+                                        wash_trader: "Wash",
                                       } as Record<string, string>
                                     )[label]
                                   }
                                 </span>
                               ))}
                           </td>
-                          <td title={`数量 ${holder.quantity ?? "—"}`}>
+                          <td title={`Amount ${holder.quantity ?? "—"}`}>
                             {amount(holder.valueUsd, "$")}
                             <small>{percent(holder.supplyPct)} of supply</small>
                           </td>
@@ -1157,16 +1161,16 @@ function TokenWorkspace({
                 {!holderRows.length && !holdersError && (
                   <p>
                     {holdersLoading
-                      ? "正在加载持有人"
+                      ? "Loading holders"
                       : holderScope !== "ALL"
-                        ? "暂无已跟踪持仓"
-                        : "暂无持有人快照"}
+                        ? "No tracked positions"
+                        : "No holder snapshot"}
                   </p>
                 )}
                 {holdersError && <p role="alert">{holdersError}</p>}
                 {holders?.nextCursor && (
                   <button disabled={holdersLoading} onClick={moreHolders}>
-                    加载更多持有人
+                    Load more holders
                   </button>
                 )}
               </div>

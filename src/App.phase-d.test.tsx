@@ -51,7 +51,7 @@ it("App.phase-d: 2 related scenarios", async () => {
     api.getAccount.mockRejectedValue(new Error("account unavailable"));
     render(<App walletAddress={`0x${"1".repeat(40)}`} />);
     expect(screen.getByText("Discover public")).toBeInTheDocument();
-    expect(await screen.findByText(/账户读取失败/)).toBeInTheDocument();
+    expect(await screen.findByText(/Account unavailable/)).toBeInTheDocument();
     expect(screen.getByText("Discover public")).toBeInTheDocument();
   })();
   await cleanScenario2();

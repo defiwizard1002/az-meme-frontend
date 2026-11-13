@@ -9,6 +9,7 @@ import { UserSettings } from "./UserSettings";
 import { TokenDetails } from "./TokenDetails";
 import { TradingPanel } from "./TradingPanel";
 import { Portfolio } from "./Portfolio";
+import { DesignIcon } from "./DesignIcon";
 import { amount, money, shortAddress } from "./display";
 import type { AccountSummary, Token } from "./types";
 import "./styles.css";
@@ -97,7 +98,7 @@ function Workspace({
         })
         .catch((cause) => {
           if (!controller.signal.aborted)
-            setAccountError(cause instanceof Error ? cause.message : "账户暂时不可用");
+            setAccountError(cause instanceof Error ? cause.message : "Account unavailable");
         });
     return () => controller.abort();
   }, [walletAddress, revision]);
@@ -114,7 +115,7 @@ function Workspace({
         if (active) setToken(value);
       })
       .catch((cause) => {
-        if (active) setTokenError(cause instanceof Error ? cause.message : "代币详情暂时不可用");
+        if (active) setTokenError(cause instanceof Error ? cause.message : "Token unavailable");
       });
     return () => {
       active = false;
@@ -186,67 +187,137 @@ function Workspace({
       ? positionValue -
         summary.positions.reduce((total, position) => total + Number(position.costUsd), 0)
       : null;
+  const availableUsdg = summary?.quoteBalances.find(
+    (balance) => balance.asset === "USDG",
+  )?.available;
+  const totalAccountValue =
+    availableUsdg != null && positionValue != null
+      ? String(Number(availableUsdg) + positionValue)
+      : null;
+  const accountNav = (
+    <div className="account-nav">
+      <div
+        className="account-overview"
+        aria-label={walletAddress ? "Account overview" : "Connect wallet to view account overview"}
+      >
+        <span>
+          Available
+          <strong>
+            {amount(summary?.quoteBalances.find((balance) => balance.asset === "USDG")?.available)}{" "}
+            <small>USDG</small>
+          </strong>
+        </span>
+        <span>
+          Positions<strong>{money(positionValue)}</strong>
+        </span>
+        <span>
+          Unrealized Pnl<strong>{money(unrealizedPnl)}</strong>
+        </span>
+      </div>
+      {walletAddress ? (
+        <>
+          <button onClick={() => setProfile(walletAddress)}>{shortAddress(walletAddress)}</button>
+          <button onClick={onLogout}>Log out</button>
+        </>
+      ) : (
+        <button className="primary" disabled={connectionPending} onClick={() => void connect()}>
+          {connectionPending ? "Connecting…" : "Connect wallet"}
+        </button>
+      )}
+    </div>
+  );
   return (
     <div className={`app-shell page-${location.page}`}>
-      <header className="app-header">
-        <button className="brand" onClick={() => navigate("discover")} aria-label="Memebot 首页">
-          <span className="azx-wordmark">AZX</span>
-          <span className="meme-product-label">Meme</span>
-          <span className="chain-label">● Robinhood Chain</span>
+      <header className="platform-header">
+        <button
+          className="platform-brand"
+          onClick={() => navigate("discover")}
+          aria-label="AZX home"
+        >
+          <img className="azx-mark" src="/icons/azx-mark.png" alt="" />
+          <span>AZX</span>
         </button>
-        <nav aria-label="主导航">
-          {(
-            [
-              ["discover", "Discover"],
-              ["activity", "Smart Money"],
-              ["portfolio", "Positions & Orders"],
-              ["settings", "设置"],
-            ] as const
-          ).map(([page, label]) => (
-            <button
-              key={page}
-              aria-current={location.page === page ? "page" : undefined}
-              onClick={() => navigate(page)}
-            >
-              {location.page === "token" && page === "discover" ? "← Back" : label}
-            </button>
-          ))}
+        <nav className="platform-nav" aria-label="Platform navigation">
+          {["Trade", "Markets", "Strategies", "Vault", "Portfolio", "Referral"].map(
+            (label, index) => (
+              <span className="platform-nav-item" aria-disabled="true" key={label}>
+                {label}
+                {index === 0 && <span className="platform-chevron">⌄</span>}
+              </span>
+            ),
+          )}
         </nav>
-        <div className="account-nav">
-          <div
-            className="account-overview"
-            aria-label={walletAddress ? "账户概览" : "连接钱包后查看账户概览"}
-          >
-            <span>
-              Available
-              <strong>
-                {amount(
-                  summary?.quoteBalances.find((balance) => balance.asset === "USDG")?.available,
-                )}{" "}
-                <small>USDG</small>
-              </strong>
-            </span>
-            <span>
-              Positions<strong>{money(positionValue)}</strong>
-            </span>
-            <span>
-              Unrealized Pnl<strong>{money(unrealizedPnl)}</strong>
+      </header>
+      {location.page === "token" ? (
+        <header className="detail-context-bar">
+          <div className="detail-context-left">
+            <button className="detail-back" onClick={() => navigate("discover")}>
+              ← Back
+            </button>
+            <span className="chain-chip">
+              <span aria-hidden="true">●</span>
+              Robinhood Chain
+              <span className="chip-chevron" aria-hidden="true">
+                ⌄
+              </span>
             </span>
           </div>
-          {walletAddress ? (
-            <>
-              <button onClick={() => setProfile(walletAddress)}>
-                {shortAddress(walletAddress)}
+          {accountNav}
+        </header>
+      ) : (
+        <>
+          <header className="product-header">
+            <div className="product-identity">
+              <div className="product-title-row">
+                <button
+                  className="product-title"
+                  onClick={() => navigate("discover")}
+                  aria-label="Memebot home"
+                >
+                  Meme
+                </button>
+                <span className="chain-chip">
+                  <span aria-hidden="true">●</span>
+                  Robinhood Chain
+                  <span className="chip-chevron" aria-hidden="true">
+                    ⌄
+                  </span>
+                </span>
+              </div>
+              <p className="product-tagline">Get in early. Dodge the rugs.</p>
+            </div>
+            {accountNav}
+          </header>
+          <nav className="product-tabs" aria-label="Memebot navigation">
+            {(
+              [
+                ["discover", "Discover"],
+                ["activity", "Smart money"],
+                ["portfolio", "Positions & orders"],
+                ["settings", "Settings"],
+              ] as const
+            ).map(([page, label]) => (
+              <button
+                key={page}
+                aria-current={
+                  location.page === page ||
+                  (location.page === "token" && page === "discover") ||
+                  (location.page === "wallet" && page === "activity")
+                    ? "page"
+                    : undefined
+                }
+                onClick={() => navigate(page)}
+              >
+                {page === "activity" && <DesignIcon name="smart-money" />}
+                {label}
+                {page === "portfolio" && held.size > 0 && (
+                  <span className="product-tab-count">{held.size}</span>
+                )}
               </button>
-              <button onClick={onLogout}>退出</button>
-            </>
-          ) : (
-            <button className="primary" disabled={connectionPending} onClick={() => void connect()}>
-              {connectionPending ? "连接中…" : "连接钱包"}
-            </button>
-          )}
-        </div>
-      </header>
+            ))}
+          </nav>
+        </>
+      )}
       {location.page !== "token" && (
         <ActivityRibbon
           onWallet={setProfile}
@@ -258,7 +329,7 @@ function Workspace({
         {connectionError && <p className="notice">{connectionError}</p>}
         {accountError && (
           <p className="notice">
-            账户读取失败：{accountError} <button onClick={refreshAccount}>重试</button>
+            Account unavailable: {accountError} <button onClick={refreshAccount}>Retry</button>
           </p>
         )}
         {location.page === "discover" && (
@@ -275,8 +346,12 @@ function Workspace({
           <ActivityFeed
             onWallet={setProfile}
             onToken={openToken}
-            onTrade={(address, side) =>
-              trade(address, side, side === "BUY" ? user.quickBuyAmounts[0] : undefined)
+            onTrade={(address, side, amountIn) =>
+              trade(
+                address,
+                side,
+                side === "BUY" ? (amountIn ?? user.quickBuyAmounts[0]) : undefined,
+              )
             }
             heldTokens={held}
           />
@@ -285,32 +360,26 @@ function Workspace({
         {location.page === "portfolio" &&
           (walletAddress ? (
             <>
-              <dl className="portfolio-summary" aria-label="账户概览">
+              <dl className="portfolio-summary" aria-label="Account overview">
                 <div>
-                  <dt>Meme Bot account · USDG</dt>
-                  <dd>
-                    {amount(
-                      summary?.quoteBalances.find((balance) => balance.asset === "USDG")?.available,
-                    )}
+                  <dt>Meme Bot account</dt>
+                  <dd>{amount(availableUsdg)} USDG</dd>
+                </div>
+                <div>
+                  <dt>Position value</dt>
+                  <dd>{money(positionValue)}</dd>
+                </div>
+                <div>
+                  <dt>Unrealized PnL</dt>
+                  <dd
+                    className={unrealizedPnl != null && unrealizedPnl < 0 ? "negative" : "positive"}
+                  >
+                    {money(unrealizedPnl)}
                   </dd>
                 </div>
                 <div>
-                  <dt>已记录持仓</dt>
-                  <dd>{summary ? summary.positions.length : "—"}</dd>
-                </div>
-                <div>
-                  <dt>持仓价值 · USD</dt>
-                  <dd>
-                    {summary?.positions.length &&
-                    summary.positions.every((position) => position.valueUsd !== null)
-                      ? amount(
-                          summary.positions.reduce(
-                            (total, position) => total + Number(position.valueUsd),
-                            0,
-                          ),
-                        )
-                      : "—"}
-                  </dd>
+                  <dt>Total</dt>
+                  <dd>{money(totalAccountValue)}</dd>
                 </div>
               </dl>
               <Portfolio
@@ -324,9 +393,9 @@ function Workspace({
           ) : (
             <section className="panel empty-state">
               <h1>Positions / Orders</h1>
-              <p>连接钱包查看你的持仓和订单</p>
+              <p>Connect wallet to view positions and orders</p>
               <button className="primary" onClick={() => void connect()}>
-                连接钱包
+                Connect wallet
               </button>
             </section>
           ))}
@@ -334,7 +403,7 @@ function Workspace({
           <>
             {tokenError && (
               <p role="alert" className="error">
-                {tokenError} <button onClick={() => setTokenRetry((n) => n + 1)}>重试</button>
+                {tokenError} <button onClick={() => setTokenRetry((n) => n + 1)}>Retry</button>
               </p>
             )}
             {token && token.tokenAddress.toLowerCase() === location.address ? (
@@ -363,7 +432,7 @@ function Workspace({
                         !user.watchlist.has(token.tokenAddress.toLowerCase()),
                       )
                       .catch((cause) =>
-                        setTokenError(cause instanceof Error ? cause.message : "自选保存失败"),
+                        setTokenError(cause instanceof Error ? cause.message : "Watchlist failed"),
                       );
                   }}
                   onTokenUpdate={onTokenUpdate}
@@ -389,7 +458,7 @@ function Workspace({
             ) : (
               !tokenError && (
                 <p role="status" className="empty-state">
-                  加载代币…
+                  Loading token…
                 </p>
               )
             )}

@@ -43,7 +43,7 @@ export default function WalletTrading({
     try {
       const accounts = await provider.request({ method: "eth_requestAccounts" });
       const next = Array.isArray(accounts) && typeof accounts[0] === "string" ? accounts[0] : null;
-      if (!next) throw new Error("钱包没有返回账户地址");
+      if (!next) throw new Error("Wallet did not return an account address");
       if (detectedAddressRef.current?.toLowerCase() !== next.toLowerCase()) {
         clearSessionToken();
         detectedAddressRef.current = next;
@@ -123,7 +123,7 @@ export default function WalletTrading({
       walletAddress: session?.accountId,
       accountIdentity: session?.userId,
       connectionPending: pending,
-      connectionStatus: pending ? "正在连接浏览器钱包" : undefined,
+      connectionStatus: pending ? "Connecting browser wallet" : undefined,
       connectionRetryable: Boolean(error),
       connectionError: error,
       onConnect: connect,

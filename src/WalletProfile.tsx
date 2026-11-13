@@ -25,7 +25,7 @@ export function WalletProfile(props: WalletProfileProps) {
     />
   );
 }
-function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
+function ProfileContent({ address, onClose, onToken, onTrade }: WalletProfileProps) {
   const [profile, setProfile] = useState<WalletProfileData | null>(null);
   const [positions, setPositions] = useState<WalletPosition[]>([]);
   const [activities, setActivities] = useState<WalletActivity[]>([]);
@@ -60,7 +60,7 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
         (result) => result.status === "rejected",
       );
       if (failed?.status === "rejected")
-        setError(failed.reason instanceof Error ? failed.reason.message : "钱包资料暂不可用");
+        setError(failed.reason instanceof Error ? failed.reason.message : "Wallet unavailable");
       setLoading(false);
     });
     return () => controller.abort();
@@ -77,7 +77,7 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
         setPositionCursor(page.nextCursor);
       })
       .catch((cause: unknown) => {
-        if (!signal.aborted) setError(cause instanceof Error ? cause.message : "持仓读取失败");
+        if (!signal.aborted) setError(cause instanceof Error ? cause.message : "Positions failed");
       })
       .finally(() => {
         if (!signal.aborted) setPaging(null);
@@ -95,7 +95,7 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
         setActivityCursor(page.nextCursor);
       })
       .catch((cause: unknown) => {
-        if (!signal.aborted) setError(cause instanceof Error ? cause.message : "交易读取失败");
+        if (!signal.aborted) setError(cause instanceof Error ? cause.message : "Trades failed");
       })
       .finally(() => {
         if (!signal.aborted) setPaging(null);
@@ -110,39 +110,47 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
       className="profile-drawer panel"
       role="dialog"
       aria-modal="true"
-      aria-label="钱包 Profile"
+      aria-label="Wallet profile"
       onKeyDown={(event) => {
         if (event.key === "Escape") onClose();
       }}
     >
       <header className="toolbar">
-        <h2>钱包 Profile</h2>
-        <button type="button" onClick={onClose} aria-label="关闭钱包资料">
-          关闭
+        <h2>Wallet profile</h2>
+        <button type="button" onClick={onClose} aria-label="Close wallet profile">
+          ×
         </button>
       </header>
       <div className="profile-identity">
-        {avatar && <img className="wallet-avatar" src={avatar} alt="" />}
-        <h3>{profile?.name || shortAddress(address)}</h3>
-        <code className="full-address">{address}</code>
-        {profile?.labels.map((label) => (
-          <span className="badge" key={label}>
-            {label === "SMART_MONEY" ? "Smart Money" : "KOL"}
+        {avatar ? (
+          <img className="wallet-avatar" src={avatar} alt="" />
+        ) : (
+          <span className="wallet-avatar wallet-avatar-placeholder" aria-hidden="true">
+            {address.slice(2, 3).toUpperCase()}
           </span>
-        ))}
-        {xUrl && (
-          <a href={xUrl} target="_blank" rel="noreferrer">
-            X
-          </a>
         )}
+        <div className="profile-copy">
+          <h3>{profile?.name || shortAddress(address)}</h3>
+          <code className="full-address">{address}</code>
+          {profile?.labels.map((label) => (
+            <span className="badge" key={label}>
+              {label === "SMART_MONEY" ? "Smart Money" : "KOL"}
+            </span>
+          ))}
+          {xUrl && (
+            <a href={xUrl} target="_blank" rel="noreferrer">
+              X
+            </a>
+          )}
+        </div>
       </div>
       <PrivateProfile address={address} onFollowChanged={() => setRevision((value) => value + 1)} />
-      {loading && <p role="status">正在读取钱包资料…</p>}
+      {loading && <p role="status">Loading wallet…</p>}
       {error && (
         <p role="alert">
           {error}{" "}
           <button type="button" onClick={() => setRevision((value) => value + 1)}>
-            重试
+            Retry
           </button>
         </p>
       )}
@@ -150,38 +158,39 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
         <>
           <div className="stat-grid">
             <div>
-              <span>7 日已实现盈亏</span>
-              <strong aria-label="7 日已实现盈亏">
+              <span>7d realized PnL</span>
+              <strong aria-label="7d realized PnL">
                 {stats?.realizedPnlUsd == null ? "—" : money(stats.realizedPnlUsd)}
               </strong>
             </div>
             <div>
-              <span>当前持仓浮盈</span>
+              <span>Open PnL</span>
               <strong>
                 {profile.unrealizedPnlUsd == null ? "—" : money(profile.unrealizedPnlUsd)}
               </strong>
             </div>
             <div>
-              <span>7 日胜率</span>
+              <span>7d win rate</span>
               <strong>{winRate}</strong>
             </div>
             <div>
-              <span>7 日买入 / 卖出</span>
-              <strong aria-label="7 日买入 / 卖出">
+              <span>7d buys / sells</span>
+              <strong aria-label="7d buys / sells">
                 {stats ? `${stats.buyCount} / ${stats.sellCount}` : "—"}
               </strong>
             </div>
           </div>
         </>
       )}
-      <h3>当前持仓</h3>
+      <h3>Holding</h3>
       <div className="table-scroll">
         <table className="data-table">
           <thead>
             <tr>
-              <th>代币</th>
-              <th>价值 (U)</th>
-              <th>浮盈 (U)</th>
+              <th>Token</th>
+              <th>Value</th>
+              <th>PnL</th>
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -221,29 +230,41 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
                   <td>
                     {position.unrealizedPnlUsd == null ? "—" : money(position.unrealizedPnlUsd)}
                   </td>
+                  <td>
+                    {onTrade && (
+                      <button
+                        type="button"
+                        className="profile-token-buy"
+                        aria-label={`Buy ${position.symbol || position.name || shortAddress(position.token)}`}
+                        onClick={() => onTrade(position.token, "BUY")}
+                      >
+                        Buy
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
           </tbody>
         </table>
       </div>
       {!loading && !positions.some((position) => position.quantityAtomic !== "0") && (
-        <p className="empty-state">暂无持仓</p>
+        <p className="empty-state">No positions</p>
       )}
       {positionCursor && (
         <button type="button" disabled={paging !== null} onClick={morePositions}>
-          更多持仓
+          Load more positions
         </button>
       )}
-      <h3>最近交易与转账</h3>
+      <h3>Trades</h3>
       <div className="table-scroll">
         <table className="data-table">
           <thead>
             <tr>
-              <th>时间</th>
-              <th>方向</th>
-              <th>代币</th>
-              <th>金额 (U)</th>
-              <th>交易时市值 (U)</th>
+              <th>Time</th>
+              <th>Side</th>
+              <th>Token</th>
+              <th>Amount</th>
+              <th>Fill MC</th>
             </tr>
           </thead>
           <tbody>
@@ -254,18 +275,33 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
                 </td>
                 <td>
                   {
-                    { BUY: "买入", SELL: "卖出", TRANSFER_IN: "转入", TRANSFER_OUT: "转出" }[
-                      activity.kind
-                    ]
+                    {
+                      BUY: "Buy",
+                      SELL: "Sell",
+                      TRANSFER_IN: "Transfer in",
+                      TRANSFER_OUT: "Transfer out",
+                    }[activity.kind]
                   }
                 </td>
                 <td>
                   <button
                     type="button"
-                    className="text-button"
+                    className="text-button wallet-token-identity"
+                    title={activity.tokenName || activity.token}
                     onClick={() => onToken(activity.token)}
                   >
-                    {shortAddress(activity.token)}
+                    {safeUrl(activity.tokenLogo) && (
+                      <img
+                        src={safeUrl(activity.tokenLogo)}
+                        alt=""
+                        width={20}
+                        height={20}
+                        onError={(event) => {
+                          event.currentTarget.style.display = "none";
+                        }}
+                      />
+                    )}
+                    {activity.tokenSymbol || activity.tokenName || shortAddress(activity.token)}
                   </button>
                 </td>
                 <td>{activity.amountUsd == null ? "—" : money(activity.amountUsd)}</td>
@@ -275,10 +311,10 @@ function ProfileContent({ address, onClose, onToken }: WalletProfileProps) {
           </tbody>
         </table>
       </div>
-      {!loading && !activities.length && <p className="empty-state">暂无动态</p>}
+      {!loading && !activities.length && <p className="empty-state">No activity</p>}
       {activityCursor && (
         <button type="button" disabled={paging !== null} onClick={moreActivities}>
-          更多交易
+          Load more trades
         </button>
       )}
     </aside>
@@ -309,12 +345,12 @@ function PrivateProfile({
                 .setFollow(address, !state.followed.has(address))
                 .then(onFollowChanged)
                 .catch((cause: unknown) =>
-                  setError(cause instanceof Error ? cause.message : "关注保存失败"),
+                  setError(cause instanceof Error ? cause.message : "Follow failed"),
                 )
                 .finally(() => setPending(false));
             }}
           >
-            {state.followed.has(address) ? "取消关注" : "关注钱包"}
+            {state.followed.has(address) ? "Unfollow" : "Follow wallet"}
           </button>
           {!state.loading && !state.error && (
             <PrivateNote
@@ -342,13 +378,13 @@ function PrivateNote({ address, initialValue }: { address: string; initialValue:
         void state
           .saveNote(address, note)
           .catch((cause: unknown) =>
-            setError(cause instanceof Error ? cause.message : "备注保存失败"),
+            setError(cause instanceof Error ? cause.message : "Note failed to save"),
           )
           .finally(() => setPending(false));
       }}
     >
       <label>
-        私有备注
+        Private note
         <textarea
           value={note}
           maxLength={1000}
@@ -357,7 +393,7 @@ function PrivateNote({ address, initialValue }: { address: string; initialValue:
         />
       </label>
       <button type="submit" disabled={pending || note === initialValue}>
-        保存备注
+        Save note
       </button>
       {error && <p role="alert">{error}</p>}
     </form>

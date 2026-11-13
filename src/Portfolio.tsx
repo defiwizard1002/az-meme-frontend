@@ -21,7 +21,7 @@ export function Portfolio(props: PortfolioProps) {
     return (
       <section className="panel empty">
         <h2>Positions & Orders</h2>
-        <p>连接钱包后查看自己的持仓与订单。</p>
+        <p>Connect wallet to view your positions and orders.</p>
       </section>
     );
   return (
@@ -49,7 +49,6 @@ function PortfolioAccount({
   const [positionError, setPositionError] = useState<string | null>(null);
   const [orderError, setOrderError] = useState<string | null>(null);
   const [paging, setPaging] = useState(false);
-  const [revision, setRevision] = useState(0);
   const [shareText, setShareText] = useState<string | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
   useEffect(() => {
@@ -67,7 +66,7 @@ function PortfolioAccount({
       })
       .catch((cause) => {
         if (!controller.signal.aborted)
-          setPositionError(cause instanceof Error ? cause.message : "持仓暂时不可用");
+          setPositionError(cause instanceof Error ? cause.message : "Positions unavailable");
       });
     let timer: ReturnType<typeof setTimeout>;
     const loadOrders = () => {
@@ -91,7 +90,7 @@ function PortfolioAccount({
         })
         .catch((cause) => {
           if (controller.signal.aborted) return;
-          setOrderError(cause instanceof Error ? cause.message : "订单暂时不可用");
+          setOrderError(cause instanceof Error ? cause.message : "Orders unavailable");
           timer = setTimeout(loadOrders, 5000);
         });
     };
@@ -100,7 +99,7 @@ function PortfolioAccount({
       controller.abort();
       clearTimeout(timer);
     };
-  }, [walletAddress, refreshKey, revision, tokenFilter]);
+  }, [walletAddress, refreshKey, tokenFilter]);
 
   function loadMore() {
     if (!cursor || paging) return;
@@ -115,7 +114,7 @@ function PortfolioAccount({
       })
       .catch((cause) => {
         if (!signal.aborted)
-          setPositionError(cause instanceof Error ? cause.message : "持仓暂时不可用");
+          setPositionError(cause instanceof Error ? cause.message : "Positions unavailable");
       })
       .finally(() => {
         if (!signal.aborted) setPaging(false);
@@ -130,12 +129,8 @@ function PortfolioAccount({
   const explorer = safeUrl(explorerBaseUrl)?.replace(/\/$/, "");
   return (
     <section className="panel portfolio">
-      <header className="toolbar">
-        <h2>我的资产与订单</h2>
-        <button onClick={() => setRevision((value) => value + 1)}>刷新</button>
-      </header>
       {!tokenFilter && (
-        <div className="tabs" role="tablist" aria-label="资产与订单">
+        <div className="tabs" role="tablist" aria-label="Positions and orders">
           <button
             role="tab"
             aria-selected={tab === "positions"}
@@ -144,28 +139,27 @@ function PortfolioAccount({
             Positions
           </button>
           <button role="tab" aria-selected={tab === "orders"} onClick={() => setTab("orders")}>
-            Orders
+            Order history
           </button>
         </div>
       )}
       {tab === "positions" ? (
         <>
           {positionError && <p role="alert">{positionError}</p>}
-          {!positions && !positionError && <p role="status">正在读取持仓…</p>}
-          {visiblePositions?.length === 0 && <p className="empty">暂无持仓</p>}
+          {!positions && !positionError && <p role="status">Loading positions…</p>}
+          {visiblePositions?.length === 0 && <p className="empty">No positions</p>}
           {visiblePositions && visiblePositions.length > 0 && (
             <div className="table-scroll">
               <table>
                 <thead>
                   <tr>
-                    <th>代币</th>
-                    <th>数量</th>
-                    <th>平均入场市值</th>
-                    <th>当前市值</th>
-                    <th>价值</th>
-                    <th>浮动盈亏</th>
-                    <th>已实现盈亏</th>
-                    <th>操作</th>
+                    <th>Token</th>
+                    <th>Amount</th>
+                    <th>Avg entry MC</th>
+                    <th>Now MC</th>
+                    <th>Value</th>
+                    <th>PnL</th>
+                    <th />
                   </tr>
                 </thead>
                 <tbody>
@@ -182,38 +176,55 @@ function PortfolioAccount({
                       <tr key={position.token}>
                         <td>
                           <button
-                            className="text-button"
+                            className="portfolio-token"
                             title={position.token}
                             onClick={() => onToken?.(position.token)}
                           >
-                            {shortAddress(position.token)}
+                            {safeUrl(position.logo) && (
+                              <img
+                                src={safeUrl(position.logo)}
+                                alt=""
+                                onError={(event) => {
+                                  event.currentTarget.style.display = "none";
+                                }}
+                              />
+                            )}
+                            <span>
+                              {position.symbol || position.name || shortAddress(position.token)}
+                            </span>
                           </button>
-                          <small>{new Date(position.updatedAt).toLocaleString()}</small>
                         </td>
-                        <td title={quantity ?? "数量未知"}>
+                        <td title={quantity ?? "Amount unknown"}>
                           {amount(quantity)}
-                          {!position.quantityComplete && <small>数量不完整</small>}
+                          {!position.quantityComplete && <small>Partial amount</small>}
                         </td>
                         <td>{compactMoney(position.averageEntryMarketCapUsd)}</td>
                         <td>{compactMoney(position.currentMarketCapUsd)}</td>
                         <td>{money(position.valueUsd)}</td>
                         <td>
                           {money(position.unrealizedPnlUsd)}
-                          {position.costUsd === null && <small>成本未知</small>}
+                          {position.costUsd === null && <small>Cost unknown</small>}
+                          {position.realizedPnlUsd !== null && (
+                            <small>Realized {money(position.realizedPnlUsd)}</small>
+                          )}
                         </td>
-                        <td>{money(position.realizedPnlUsd)}</td>
                         <td>
-                          <button disabled={!owned} onClick={() => onSell(position.token)}>
-                            卖出
+                          <button
+                            disabled={!owned}
+                            onClick={() => onSell(position.token)}
+                            className="portfolio-sell"
+                          >
+                            Sell
                           </button>
                           <button
+                            className="portfolio-share"
                             onClick={() => {
                               setShareText(
-                                `代币 ${position.token}\n数量：${quantity ?? "未知"}${position.quantityComplete ? "" : "（不完整）"}\n当前价值：${money(position.valueUsd)}\n浮动盈亏：${money(position.unrealizedPnlUsd)}\n更新时间：${new Date(position.updatedAt).toLocaleString()}\n${window.location.origin}${window.location.pathname}#token/${position.token}`,
+                                `Token ${position.token}\nAmount: ${quantity ?? "unknown"}${position.quantityComplete ? "" : " (partial)"}\nValue: ${money(position.valueUsd)}\nUnrealized PnL: ${money(position.unrealizedPnlUsd)}\nUpdated: ${new Date(position.updatedAt).toLocaleString()}\n${window.location.origin}${window.location.pathname}#token/${position.token}`,
                               );
                             }}
                           >
-                            分享
+                            Share
                           </button>
                         </td>
                       </tr>
@@ -225,13 +236,13 @@ function PortfolioAccount({
           )}
           {cursor && (
             <button onClick={loadMore} disabled={paging}>
-              {paging ? "正在读取…" : "更多持仓"}
+              {paging ? "Loading…" : "Load more positions"}
             </button>
           )}
         </>
       ) : (
         <>
-          <div className="tabs" aria-label="订单状态">
+          <div className="tabs" aria-label="Order status">
             {(
               [
                 ["ALL", "All"],
@@ -249,34 +260,36 @@ function PortfolioAccount({
             ))}
           </div>
           {orderError && <p role="alert">{orderError}</p>}
-          {!orders && !orderError && <p role="status">正在读取订单…</p>}
-          {visibleOrders?.length === 0 && <p className="empty">暂无订单</p>}
+          {!orders && !orderError && <p role="status">Loading orders…</p>}
+          {visibleOrders?.length === 0 && <p className="empty">No orders</p>}
           {visibleOrders && visibleOrders.length > 0 && (
             <div className="table-scroll">
               <table>
                 <thead>
                   <tr>
-                    <th>时间 / 代币</th>
-                    <th>方向 / 状态</th>
-                    <th>输入</th>
-                    <th>实际到账</th>
-                    <th>成交时市值</th>
-                    <th>实际费用</th>
-                    <th>结果 / 链上交易</th>
+                    <th>Time</th>
+                    <th>Token</th>
+                    <th>Side</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Fill MC</th>
+                    <th>Tx</th>
                   </tr>
                 </thead>
                 <tbody>
                   {visibleOrders.map((order) => {
                     const status =
                       order.status === "CONFIRMED"
-                        ? "已成交"
+                        ? "Filled"
                         : order.status === "FAILED"
-                          ? "失败"
-                          : "处理中";
+                          ? "Failed"
+                          : "Processing";
                     return (
                       <tr key={order.executionId}>
                         <td>
                           <time>{new Date(order.createdAt).toLocaleString()}</time>
+                        </td>
+                        <td>
                           <button
                             className="text-button"
                             title={order.tokenAddress}
@@ -285,34 +298,35 @@ function PortfolioAccount({
                             {order.tokenSymbol || shortAddress(order.tokenAddress)}
                           </button>
                         </td>
-                        <td>
-                          {order.side === "BUY" ? "买入" : "卖出"}
-                          <span
-                            className={`badge ${status === "失败" ? "danger" : status === "已成交" ? "positive" : "warning"}`}
-                          >
-                            {status}
-                          </span>
-                        </td>
+                        <td>{order.side === "BUY" ? "Buy" : "Sell"}</td>
                         <td>
                           {price(order.settlement?.amountIn ?? order.amountIn)}{" "}
                           {order.side === "BUY" ? order.settlementAsset : order.tokenSymbol}
+                          {order.status === "CONFIRMED" && order.settlement && (
+                            <small>
+                              Received {price(order.settlement.amountOut)}{" "}
+                              {order.side === "BUY" ? order.tokenSymbol : order.settlementAsset}
+                            </small>
+                          )}
+                          {order.settlement && (
+                            <small>
+                              Fee {price(order.settlement.fee.amount)} {order.settlement.fee.asset}
+                            </small>
+                          )}
                         </td>
                         <td>
-                          {order.status === "CONFIRMED" && order.settlement
-                            ? `${price(order.settlement.amountOut)} ${order.side === "BUY" ? order.tokenSymbol : order.settlementAsset}`
-                            : "—"}
+                          <span
+                            className={`badge ${status === "Failed" ? "danger" : status === "Filled" ? "positive" : "warning"}`}
+                          >
+                            {status}
+                          </span>
+                          {order.errorMessage && <small>{order.errorMessage}</small>}
+                          {order.status === "SUBMISSION_UNKNOWN" && (
+                            <small>Submission unconfirmed. Checking the same order.</small>
+                          )}
                         </td>
                         <td>{money(order.settlement?.marketCapUsd)}</td>
                         <td>
-                          {order.settlement
-                            ? `${price(order.settlement.fee.amount)} ${order.settlement.fee.asset}`
-                            : "—"}
-                        </td>
-                        <td>
-                          {order.errorMessage && <p>{order.errorMessage}</p>}
-                          {order.status === "SUBMISSION_UNKNOWN" && (
-                            <p>提交结果待确认，继续查询同一笔订单。</p>
-                          )}
                           {order.txHashes.map((hash) =>
                             explorer && /^0x[0-9a-f]{64}$/i.test(hash) ? (
                               <a
@@ -338,9 +352,9 @@ function PortfolioAccount({
         </>
       )}
       {shareText !== null && (
-        <section className="share-card" aria-label="持仓分享">
-          <h3>持仓分享</h3>
-          <textarea aria-label="持仓分享内容" readOnly value={shareText} rows={7} />
+        <section className="share-card" aria-label="Position share">
+          <h3>Share position</h3>
+          <textarea aria-label="Position share text" readOnly value={shareText} rows={7} />
           <button
             onClick={() => {
               void navigator.clipboard
@@ -349,9 +363,9 @@ function PortfolioAccount({
                 .catch(() => {});
             }}
           >
-            复制分享内容
+            Copy
           </button>
-          <button onClick={() => setShareText(null)}>关闭</button>
+          <button onClick={() => setShareText(null)}>Close</button>
         </section>
       )}
     </section>

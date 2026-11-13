@@ -142,7 +142,9 @@ describe("continuous candle projection and user viewport", () => {
         { time: 110, open: 2, high: 4, low: 2, close: 4 },
         { time: 115, open: 4, high: 4, low: 3, close: 3 },
       ]);
-      expect(screen.getByText("部分历史 K 线已隐藏，缺口保留")).toBeInTheDocument();
+      expect(
+        screen.getByText("Some historical candles are hidden; gaps are preserved"),
+      ).toBeInTheDocument();
       rerender(<CandleChart symbol="A" candles={raw} />);
       expect(engine.set.mock.lastCall?.[0][1]).toEqual({
         time: 110,
@@ -151,7 +153,9 @@ describe("continuous candle projection and user viewport", () => {
         low: 2,
         close: 4,
       });
-      expect(screen.queryByText("部分历史 K 线已隐藏，缺口保留")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("Some historical candles are hidden; gaps are preserved"),
+      ).not.toBeInTheDocument();
     })();
     await cleanScenario1();
     await prepareScenario2();
@@ -295,9 +299,9 @@ describe("continuous candle projection and user viewport", () => {
     // labels legacy history without claiming it has the new trade threshold
     await (async () => {
       const { rerender } = render(<CandleChart symbol="A" candles={[candle(100, "2")]} legacy />);
-      expect(screen.getByRole("status")).toHaveTextContent("历史规则 · 未重建");
+      expect(screen.getByRole("status")).toHaveTextContent("Historical rules · not rebuilt");
       rerender(<CandleChart symbol="A" candles={[candle(100, "2")]} legacy={false} />);
-      expect(screen.queryByText("历史规则 · 未重建")).not.toBeInTheDocument();
+      expect(screen.queryByText("Historical rules · not rebuilt")).not.toBeInTheDocument();
     })();
   });
 });

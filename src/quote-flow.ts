@@ -14,7 +14,7 @@ export interface QuoteRequest {
 }
 
 function decimal(value: string): [bigint, number] {
-  if (!/^\d+(?:\.\d+)?$/.test(value)) throw Error("金额格式无效");
+  if (!/^\d+(?:\.\d+)?$/.test(value)) throw Error("Invalid amount format");
   const [whole, fraction = ""] = value.split(".");
   return [BigInt(whole + fraction), fraction.length];
 }
@@ -68,8 +68,8 @@ export function requireQuoteTerms(
 ): ValidQuote {
   for (const amount of [value.idealOut, value.targetOut, value.minOut]) {
     if (typeof amount !== "string" || !/^\d+(?:\.\d+)?$/.test(amount))
-      throw Error("报价缺少净输出或最低到账，暂时无法交易");
-    if (compareAmounts(amount, "0") <= 0) throw Error("报价输出必须大于 0");
+      throw Error("Quote is missing net output or minimum received; trading is unavailable");
+    if (compareAmounts(amount, "0") <= 0) throw Error("Quote output must be greater than 0");
   }
   const serviceFee = value.fees?.find((fee) => fee.type === "SERVICE");
   if (
@@ -86,7 +86,7 @@ export function requireQuoteTerms(
     typeof value.feeConfigVersion !== "string" ||
     !/^\d+$/.test(value.feeConfigVersion)
   )
-    throw Error("报价缺少有效费用配置，暂时无法交易");
+    throw Error("Quote is missing valid fee configuration; trading is unavailable");
   if (
     !value.reference ||
     !isLiveReference(value.reference) ||
@@ -95,20 +95,21 @@ export function requireQuoteTerms(
     value.reference.maxAgeMs <= 0 ||
     now - value.reference.observedAt >= value.reference.maxAgeMs
   )
-    throw Error("报价缺少有效 K 线参考价，暂时无法交易");
-  if (!value.quoteId) throw Error("报价缺少身份，请刷新报价");
+    throw Error("Quote is missing a valid candle reference; trading is unavailable");
+  if (!value.quoteId) throw Error("Quote identity is missing; refresh the quote");
   if (!Number.isInteger(value.slippageBps) || value.slippageBps! < 0 || value.slippageBps! >= 10000)
-    throw Error("报价缺少有效滑点，暂时无法交易");
-  if (!Number.isFinite(value.expiresAt)) throw Error("报价缺少有效期");
-  if (value.expiresAt <= now) throw new QuoteExpiredError("报价已过期，请刷新报价");
-  if (!matchesDraft(value, request)) throw Error("报价与当前输入不匹配");
+    throw Error("Quote is missing valid slippage; trading is unavailable");
+  if (!Number.isFinite(value.expiresAt)) throw Error("Quote expiry is missing");
+  if (value.expiresAt <= now) throw new QuoteExpiredError("Quote expired; refresh the quote");
+  if (!matchesDraft(value, request)) throw Error("Quote does not match the current input");
   if (compareAmounts(value.minAmountOut, value.minOut!) !== 0)
-    throw Error("报价最低到账不一致，请刷新报价");
+    throw Error("Quote minimum received changed; refresh the quote");
   return value as ValidQuote;
 }
 export function preparationInput(request: QuoteRequest, estimate: ValidQuote): QuoteRequest {
-  if (!matchesDraft(estimate, request)) throw Error("报价与当前输入不匹配");
-  if (estimate.expiresAt <= Date.now()) throw new QuoteExpiredError("报价已过期，请刷新报价");
+  if (!matchesDraft(estimate, request)) throw Error("Quote does not match the current input");
+  if (estimate.expiresAt <= Date.now())
+    throw new QuoteExpiredError("Quote expired; refresh the quote");
   return {
     ...request,
     purpose: "PREPARE_EXECUTION",
@@ -125,23 +126,23 @@ export function requirePreparedQuote(
   now = Date.now(),
 ): Quote & QuoteTerms {
   if (value.status === "LOCAL_ESTIMATE" || !value.quoteId)
-    throw Error("准备未完成，报价不能提交交易");
-  if (!matchesDraft(value, request)) throw Error("准备结果与当前输入不匹配");
-  if (value.expiresAt <= now) throw new QuoteExpiredError("报价已过期，请刷新报价");
+    throw Error("Preparation is incomplete; the quote cannot be submitted");
+  if (!matchesDraft(value, request)) throw Error("Preparation does not match the current input");
+  if (value.expiresAt <= now) throw new QuoteExpiredError("Quote expired; refresh the quote");
   if (value.feeConfigVersion !== request.feeConfigVersion)
-    throw Error("费用配置已改变，请重新报价");
+    throw Error("Fee configuration changed; refresh the quote");
   if (
     value.slippageBps !== request.slippageBps ||
     request.minAmountOut === undefined ||
     compareAmounts(value.minOut, request.minAmountOut) !== 0
   )
-    throw Error("滑点或最低到账已改变，请重新报价");
+    throw Error("Slippage or minimum received changed; refresh the quote");
   if (
     !value.routeFingerprint ||
     !value.routePools?.length ||
     !value.routeAssets ||
     value.routeAssets.length < 2
   )
-    throw Error("准备结果缺少交易路径");
+    throw Error("Preparation result is missing a trading route");
   return value as Quote & QuoteTerms;
 }

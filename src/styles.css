@@ -2632,3 +2632,998 @@ textarea {
   border-radius: 6px;
   object-fit: cover;
 }
+
+/* Figma 22272:24532, 22272:23209, 22272:23218 and 22272:23251. */
+.platform-header {
+  display: flex;
+  align-items: center;
+  min-height: 60px;
+  padding: 0 24px;
+  background: #111420;
+  border-bottom: 1px solid #22222e;
+}
+.platform-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+.platform-brand:hover:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+}
+.azx-mark {
+  display: block;
+  width: 24px;
+  height: 26px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+.platform-nav {
+  display: flex;
+  align-items: center;
+  gap: 44px;
+  margin-left: 82px;
+  min-width: 0;
+  overflow: hidden;
+}
+.platform-nav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #d8d9df;
+  font-size: 15px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.platform-chevron {
+  color: #aaa8b5;
+  font-size: 13px;
+  transform: translateY(-2px);
+}
+.product-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 58px 42px;
+  gap: 0 24px;
+  min-height: 126px;
+  padding: 13px 40px 13px;
+  background:
+    radial-gradient(640px 110px at 10% -30%, rgb(119 74 203 / 24%), transparent 72%), #08070c;
+  border-bottom: 1px solid #22222e;
+}
+.product-identity {
+  align-self: center;
+}
+.product-title-row {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+.product-title {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #f5f3fa;
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -1.2px;
+}
+.product-title:hover:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+}
+.chain-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid #2d2b3a;
+  border-radius: 8px;
+  background: #14131d;
+  color: #d8d6df;
+  font-size: 12px;
+  line-height: 1;
+}
+.chain-chip > span:first-child {
+  color: #22d478;
+  font-size: 10px;
+}
+.chip-chevron {
+  margin-left: 3px;
+  color: #8d8998;
+  font-size: 12px;
+}
+.product-tagline {
+  margin: 7px 0 0;
+  color: #8b8ba3;
+  font-family:
+    "PingFang SC",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+.product-header .account-nav {
+  align-self: center;
+  margin: 0;
+  grid-column: 2;
+  grid-row: 1 / 3;
+}
+.product-header .account-overview {
+  background: #0f0e16;
+}
+.product-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 42px;
+  min-height: 47px;
+  padding: 0 40px;
+  background: #08070c;
+  border-bottom: 1px solid #252331;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.product-tabs::-webkit-scrollbar {
+  display: none;
+}
+.product-tabs button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  padding: 0 1px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #8e8a9d;
+  font-size: 15px;
+  line-height: 21.75px;
+}
+.product-tabs .design-icon {
+  width: 18px;
+  height: 18px;
+}
+.product-tab-count {
+  color: #8e8a9d;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.product-tabs button:hover:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+  color: #d7d3e0;
+}
+.product-tabs button[aria-current="page"] {
+  background: transparent;
+  color: #f1eef7;
+  font-weight: 600;
+}
+.product-tabs button[aria-current="page"]::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  border-radius: 2px 2px 0 0;
+  background: linear-gradient(90deg, #7645d8, #9e6df3);
+  content: "";
+}
+.product-tabs button:focus-visible,
+.product-title:focus-visible,
+.platform-brand:focus-visible {
+  outline: 2px solid #b79af7;
+  outline-offset: 3px;
+}
+.detail-context-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 60px;
+  padding: 0 20px;
+  background: #08070c;
+  border-bottom: 1px solid #22222e;
+}
+.detail-context-left {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.detail-back {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #b2adb9;
+  font-size: 12px;
+}
+.detail-back:hover:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+  color: #eeeaf5;
+}
+.detail-context-bar .account-nav {
+  margin-left: auto;
+}
+.activity-ribbon {
+  min-height: 46px;
+  padding: 6px 40px;
+  border-bottom: 1px solid #1b1925;
+}
+.activity-ribbon .live-label {
+  color: #45ea87;
+}
+.app-shell > main {
+  padding-right: 40px;
+  padding-left: 40px;
+}
+.discover .search {
+  top: 0;
+  right: 40px;
+}
+.discover > .toolbar {
+  min-height: 42px;
+}
+
+@media (max-width: 980px) {
+  .platform-nav {
+    gap: 24px;
+    margin-left: 40px;
+  }
+  .platform-nav-item:nth-child(n + 5) {
+    display: none;
+  }
+  .product-header {
+    padding-inline: 24px;
+  }
+  .product-tabs {
+    gap: 28px;
+    padding-inline: 24px;
+  }
+  .detail-context-bar {
+    padding-inline: 24px;
+  }
+  .activity-ribbon {
+    padding-inline: 24px;
+  }
+  .app-shell > main {
+    padding-right: 24px;
+    padding-left: 24px;
+  }
+  .product-header .account-overview {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .platform-header {
+    min-height: 48px;
+    padding-inline: 12px;
+  }
+  .platform-nav {
+    gap: 18px;
+    margin-left: 24px;
+  }
+  .platform-nav-item:nth-child(n + 4) {
+    display: none;
+  }
+  .product-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 48px 30px;
+    min-height: 96px;
+    padding: 8px 12px;
+    gap: 0 12px;
+  }
+  .product-title {
+    font-size: 27px;
+  }
+  .chain-chip {
+    min-height: 28px;
+    padding-inline: 8px;
+    font-size: 11px;
+  }
+  .product-tagline {
+    margin-top: 4px;
+    font-size: 12px;
+  }
+  .product-tabs {
+    gap: 14px;
+    min-height: 43px;
+    padding-inline: 12px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .product-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .detail-context-bar {
+    min-height: 48px;
+    padding-inline: 12px;
+  }
+  .detail-context-left {
+    gap: 14px;
+  }
+  .detail-context-bar .account-overview {
+    display: none;
+  }
+  .product-tabs button {
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  .activity-ribbon {
+    min-height: 39px;
+    padding: 4px 12px;
+  }
+  .app-shell > main {
+    padding: 12px;
+  }
+  .discover .search {
+    right: 12px;
+  }
+}
+
+/* Figma 22552:11287 and the Smart Money rows shared by the live ribbon. */
+.discover .search {
+  position: static;
+  order: 4;
+  margin-left: auto;
+  width: min(300px, 100%);
+}
+.discover .search input {
+  width: 100%;
+  height: 30px;
+  padding: 5px 11px;
+  border-radius: 6px;
+  background: #111019;
+  color: #ddd9e6;
+}
+.activity-panel {
+  margin: 0;
+}
+.activity-filters {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border-bottom: 1px solid #22202d;
+}
+.activity-scope {
+  gap: 35px;
+  min-height: 43px;
+  padding: 0;
+  border: 0;
+}
+.activity-scope button,
+.activity-filter-row .tabs button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.activity-scope button {
+  position: relative;
+  padding: 0;
+  color: #898596;
+  font-size: 14px;
+}
+.activity-scope button[aria-pressed="true"] {
+  color: #f0edf4;
+  background: transparent;
+}
+.activity-scope button[aria-pressed="true"]::after {
+  position: absolute;
+  right: 0;
+  bottom: -12px;
+  left: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: #8b5cf6;
+  content: "";
+}
+.activity-filter-row {
+  min-height: 40px;
+  padding: 0;
+  gap: 22px;
+  align-items: center;
+  border-top: 1px solid #22202d;
+}
+.activity-filter-row .tabs {
+  gap: 7px;
+}
+.activity-filter-row .tabs > span {
+  margin-right: 2px;
+  color: #c9c5d3;
+  font-size: 11px;
+}
+.activity-filter-row .tabs button {
+  min-height: 22px;
+  padding: 2px 6px;
+  color: #827e90;
+  font-size: 11px;
+}
+.activity-filter-row .tabs button[aria-pressed="true"] {
+  background: #050507;
+  color: #fff;
+  border-radius: 4px;
+}
+.activity-count {
+  margin-left: auto;
+  color: #858193;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.activity-card {
+  grid-template-columns: 350px minmax(0, 1fr) 54px 158px;
+  gap: 18px;
+  min-height: 59px;
+  padding: 0 20px;
+  border-bottom: 1px solid #22202d;
+  color: #d6d2df;
+  font-size: 12px;
+}
+.activity-wallet {
+  gap: 8px;
+  min-width: 0;
+}
+.activity-wallet .text-button {
+  min-width: 0;
+  overflow: hidden;
+  color: #c9c5d3;
+  font-size: 12px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+.activity-avatar {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: #241d32;
+  color: #cbb8ed;
+  font-size: 14px;
+}
+.activity-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.activity-wallet .badge {
+  margin: 0;
+  padding: 2px 5px;
+  border-color: #354060;
+  background: #161b2c;
+  color: #6b9eff;
+  font-size: 9px;
+  line-height: 1.2;
+}
+.activity-wallet .badge + .badge {
+  border-color: #4b3a68;
+  background: #20162d;
+  color: #c18bf3;
+}
+.activity-event {
+  gap: 9px;
+  min-width: 0;
+}
+.activity-event > span:first-child {
+  width: 49px;
+  color: #22c76d;
+  font-weight: 600;
+}
+.activity-event > span:first-child.negative {
+  color: #ef545f;
+}
+.activity-token {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 170px;
+  min-height: 28px;
+  padding: 3px 9px 3px 3px;
+  border: 1px solid #2d2a35;
+  border-radius: 14px;
+  background: #08080a;
+  color: #f0edf4;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.activity-token:hover:not(:disabled) {
+  border-color: #504663;
+  background: #111019;
+}
+.activity-token-logo {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 50%;
+  background: #312543;
+  color: #d5c3f2;
+  font-size: 10px;
+}
+.activity-token-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.activity-value {
+  color: #b8b3c4;
+  white-space: nowrap;
+}
+.activity-card time {
+  color: #777386;
+  font-size: 10px;
+  text-align: right;
+}
+.activity-actions {
+  gap: 8px;
+}
+.activity-actions button {
+  min-height: 24px;
+  padding: 3px 11px;
+  border-radius: 5px;
+  font-size: 10px;
+}
+.activity-view {
+  border-color: #2b2935;
+  background: transparent;
+  color: #dad6e2;
+}
+.activity-follow-buy {
+  border-color: #4b3d68;
+  background: #1b1528;
+  color: #bda3ff;
+}
+.activity-follow-sell {
+  border-color: #e9c8cf;
+  background: transparent;
+  color: #f1b6c2;
+}
+
+/* Figma 22788:51318 and 22788:49048. */
+.portfolio-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.portfolio-summary > div {
+  min-height: 87px;
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: #0b0a10;
+}
+.portfolio-summary dt {
+  margin-bottom: 11px;
+  color: #858193;
+  font-size: 11px;
+}
+.portfolio-summary dd {
+  color: #efedf2;
+  font-family: Cousine, monospace;
+  font-size: 17px;
+  font-weight: 700;
+}
+.portfolio {
+  padding: 0;
+  background: #09080d;
+}
+.portfolio > .tabs[role="tablist"] {
+  align-items: stretch;
+  gap: 28px;
+  min-height: 48px;
+  margin: 0;
+  padding: 0 18px 0 22px;
+  border-bottom: 1px solid #22202d;
+}
+.portfolio > .tabs[role="tablist"] button {
+  position: relative;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: #8d8999;
+  font-size: 14px;
+}
+.portfolio > .tabs[role="tablist"] button[aria-selected="true"] {
+  background: transparent;
+  border: 0;
+  color: #f2eff6;
+}
+.portfolio > .tabs[role="tablist"] button[aria-selected="true"]::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: #a174f1;
+  content: "";
+}
+.portfolio .tabs[aria-label="订单状态"],
+.portfolio .tabs[aria-label="Order status"] {
+  min-height: 38px;
+  margin: 0;
+  padding: 7px 16px;
+  border-bottom: 1px solid #22202d;
+}
+.portfolio .tabs[aria-label="订单状态"] button,
+.portfolio .tabs[aria-label="Order status"] button {
+  min-height: 24px;
+  padding: 3px 9px;
+  font-size: 10px;
+}
+.portfolio .tabs[aria-label="订单状态"] button[aria-pressed="true"],
+.portfolio .tabs[aria-label="Order status"] button[aria-pressed="true"] {
+  border-radius: 4px;
+  background: #050507;
+  color: #fff;
+}
+.portfolio .table-scroll {
+  max-height: none;
+}
+.portfolio table {
+  font-size: 11px;
+}
+.portfolio th,
+.portfolio td {
+  height: 59px;
+  padding: 8px 14px;
+  border-bottom: 1px solid #22202d;
+  vertical-align: middle;
+}
+.portfolio th {
+  height: 38px;
+  background: #050507;
+  color: #8a8697;
+  font-size: 10px;
+}
+.portfolio-token {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #eeebf3;
+}
+.portfolio-token:hover:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+}
+.portfolio-token img {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.portfolio td small {
+  display: block;
+  margin-top: 3px;
+  color: #777386;
+  font-size: 9px;
+}
+.portfolio-sell,
+.portfolio-share {
+  min-height: 28px;
+  padding: 3px 10px;
+  font-size: 10px;
+}
+.portfolio-sell {
+  border-color: #e7c3cb;
+  background: transparent;
+  color: #f0b5c1;
+}
+.portfolio-share {
+  margin-left: 6px;
+  border-color: #2e2b37;
+  background: #111019;
+  color: #b9b4c5;
+}
+
+@media (max-width: 1000px) {
+  .activity-card {
+    grid-template-columns: 270px minmax(0, 1fr) auto;
+  }
+}
+
+@media (max-width: 900px) {
+  .portfolio-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .activity-scope {
+    gap: 24px;
+  }
+  .activity-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 12px;
+    padding: 11px 12px;
+  }
+  .activity-event {
+    grid-column: 1 / -1;
+  }
+  .activity-actions {
+    grid-column: 1 / -1;
+  }
+  .discover .search {
+    order: 0;
+    width: 100%;
+    margin-left: 0;
+  }
+}
+
+/* Figma 22660:16239: all six token metrics remain on one row in the detail header. */
+.token-stats {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 18px;
+}
+
+@media (max-width: 780px) {
+  .token-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .token-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Match the 48px Discover rows and 20px content gutters in 22272:23251 / 22552:11287. */
+.app-shell > main {
+  padding-right: 20px;
+  padding-left: 20px;
+}
+.activity-ribbon {
+  padding-right: 20px;
+  padding-left: 20px;
+}
+.discover .data-table th {
+  height: 33px;
+  padding: 4px 8px;
+}
+.discover .data-table td {
+  height: 59px;
+  padding: 6px 8px;
+}
+.discover .watch-button {
+  top: 7px;
+}
+
+/* Match the 475px right-side wallet profile frame in 22575:14036. */
+.profile-drawer {
+  top: 0;
+  width: min(475px, 100%);
+  height: 100vh;
+  padding: 20px 24px;
+  border-left: 1px solid #22202d;
+  background: #08070c;
+}
+.profile-drawer .profile-identity {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding-right: 44px;
+}
+.profile-drawer .wallet-avatar {
+  grid-row: 1;
+  width: 56px;
+  height: 56px;
+}
+.wallet-avatar-placeholder {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #604a88, #251c36);
+  color: #fff;
+  font-size: 21px;
+  font-weight: 700;
+}
+.profile-drawer .profile-copy {
+  min-width: 0;
+}
+.profile-drawer .profile-copy h3 {
+  margin: 0 0 7px;
+  font-size: 20px;
+}
+.profile-drawer .profile-copy .full-address {
+  margin: 0 0 7px;
+}
+.profile-drawer .profile-copy .badge {
+  margin-right: 6px;
+}
+.profile-drawer .private-profile {
+  margin-top: 14px;
+}
+.profile-drawer h3 {
+  margin: 22px 0 10px;
+  font-size: 15px;
+}
+.profile-token-buy {
+  min-height: 24px;
+  padding: 2px 10px;
+  border: 1px solid #493a63;
+  border-radius: 5px;
+  background: #171123;
+  color: #c8b2ee;
+  font-size: 10px;
+}
+
+@media (max-width: 980px) {
+  .app-shell > main {
+    padding-right: 24px;
+    padding-left: 24px;
+  }
+  .activity-ribbon {
+    padding-right: 24px;
+    padding-left: 24px;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-shell > main {
+    padding: 12px;
+  }
+  .activity-ribbon {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+}
+
+/* Figma 22479:4877, 22552:11287 and 22575:14036 interaction details. */
+.discover > .toolbar > .tabs:first-of-type {
+  gap: 4px;
+}
+.discover > .toolbar > .tabs:first-of-type button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 18px;
+  background: transparent;
+  color: #a7a3b2;
+}
+.discover > .toolbar > .tabs:first-of-type button[aria-pressed="true"] {
+  background: #050507;
+  box-shadow: inset 0 0 0 1px #363141;
+  color: #f4f1f7;
+}
+.discover .lifecycle-filters {
+  gap: 8px;
+  margin: -4px 0 14px;
+}
+.discover .lifecycle-filters button {
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid #292633;
+  border-radius: 16px;
+  background: transparent;
+  color: #aaa5b5;
+  font-size: 10px;
+}
+.discover .lifecycle-filters button span {
+  color: #7d7889;
+}
+.discover .lifecycle-filters button[aria-pressed="true"] {
+  border-color: #514a63;
+  background: #08070b;
+  color: #f0edf4;
+}
+.discover .data-table .lifecycle.status-CURVE,
+.discover .data-table .lifecycle.status-unknown {
+  display: inline-flex;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: #18161f;
+  color: #ece9f2;
+}
+.discover .data-table .lifecycle.status-NEAR_GRADUATION {
+  display: inline-flex;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: #f4e4b5;
+  color: #735817;
+}
+.discover .data-table .lifecycle.status-GRADUATED {
+  background: transparent;
+  color: #20c477;
+}
+.activity-toolbar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.activity-quick {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-right: 20px;
+}
+.activity-quick .quick-presets {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #050507;
+  color: #f2eff5;
+}
+.activity-quick .quick-presets select {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #f2eff5;
+}
+.activity-quick .live-label {
+  color: #45ea87;
+  font-size: 11px;
+}
+.activity-wallet .badge + .badge {
+  border-color: #4b3a68;
+  background: #20162d;
+  color: #c18bf3;
+}
+.activity-follow-star {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #aaa5b5;
+}
+.activity-follow-star:disabled {
+  opacity: 0.7;
+}
+.activity-follow-star[aria-pressed="true"] {
+  color: #f5b532;
+}
+.activity-follow-buy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+@media (max-width: 780px) {
+  .activity-toolbar-top {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .activity-quick {
+    width: 100%;
+    justify-content: flex-end;
+    gap: 0;
+    padding: 4px 12px;
+  }
+  .activity-quick .live-label {
+    display: none;
+  }
+  .activity-quick .quick-presets {
+    padding: 5px 8px;
+    font-size: 0;
+  }
+  .activity-quick .quick-presets select {
+    font-size: 10px;
+  }
+  .activity-quick .design-icon {
+    margin-right: 4px;
+  }
+}

@@ -34,7 +34,7 @@ it("unsigned estimate timeout does not claim a transaction may have been broadca
     });
   await vi.advanceTimersByTimeAsync(15_000);
   expect(failure).toMatchObject({ code: "MEME_REQUEST_TIMEOUT" });
-  expect((failure as Error).message).not.toContain("广播");
+  expect((failure as Error).message).not.toContain("broadcast");
   expect(fetch).toHaveBeenCalledTimes(1);
 });
 
@@ -150,7 +150,7 @@ describe("HTTP envelopes", () => {
       ).rejects.toMatchObject({
         status: 403,
         code: "MEME_PRIVATE_ACCOUNT_ENTRY_REQUIRED",
-        message: expect.stringContaining("报价和交易请使用私有主账户入口"),
+        message: expect.stringContaining("private main-account entry"),
       });
       expect(fetch).toHaveBeenCalledTimes(1);
       expect(fetch.mock.calls[0]![1].method).toBe("POST");
@@ -274,7 +274,7 @@ describe("HTTP envelopes", () => {
       await expect(memeApi.getAccount()).rejects.toMatchObject({
         status: 200,
         code: "MEME_INVALID_RESPONSE",
-        message: "HTTP 200: 服务响应无效，请稍后重试",
+        message: "HTTP 200: invalid service response. Retry shortly",
       });
     })();
     await cleanScenario1();
@@ -355,7 +355,7 @@ describe("bounded HTTP requests", () => {
           expect(failure).toMatchObject({
             code: "MEME_REQUEST_TIMEOUT",
             status: stage === "body" ? 200 : 0,
-            message: expect.stringContaining("超时"),
+            message: expect.stringContaining("timed out"),
           });
           expect(fetch.mock.calls[0]![1].signal.aborted).toBe(true);
           expect(fetch).toHaveBeenCalledTimes(1);
@@ -484,7 +484,7 @@ describe("bounded HTTP requests", () => {
       expect(failure).toMatchObject({
         status: 502,
         code: "MEME_REQUEST_FAILED",
-        message: expect.stringContaining("超时"),
+        message: expect.stringContaining("timed out"),
       });
     })();
     await cleanScenario1();
@@ -513,7 +513,7 @@ describe("bounded HTTP requests", () => {
       await vi.advanceTimersByTimeAsync(60_000);
       expect(failure).toMatchObject({
         code: "MEME_REQUEST_TIMEOUT",
-        message: expect.stringContaining("可能已广播"),
+        message: expect.stringContaining("may have been broadcast"),
       });
       expect(fetch).toHaveBeenCalledTimes(1);
     })();

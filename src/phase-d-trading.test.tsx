@@ -113,7 +113,7 @@ describe("phase D trading", () => {
     );
     create.mockResolvedValue({ ...exact, amountIn: "20" });
     fireEvent.click(screen.getByRole("button", { name: "20" }));
-    expect(screen.getByLabelText("交易金额")).toHaveValue("20");
+    expect(screen.getByLabelText("Trade amount")).toHaveValue("20");
     await waitFor(() =>
       expect(create).toHaveBeenLastCalledWith(
         expect.objectContaining({ purpose: "ESTIMATE", amountIn: "20" }),
@@ -141,8 +141,8 @@ describe("phase D trading", () => {
       },
     };
     const { rerender } = render(<TradingPanel {...props} account={funded} />);
-    fireEvent.change(screen.getByLabelText("交易金额"), { target: { value: "1" } });
-    expect(screen.getByText(/平台共享资金：2.661567 USDG/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Trade amount"), { target: { value: "1" } });
+    expect(screen.getByText("Available: 2.661567 USDG")).toBeInTheDocument();
     await waitFor(() => expect(createQuote).toHaveBeenCalledTimes(1));
     expect(createQuote).toHaveBeenCalledWith(
       expect.objectContaining({ amountIn: "1", purpose: "ESTIMATE" }),
@@ -155,8 +155,8 @@ describe("phase D trading", () => {
         account={funded}
       />,
     );
-    expect(screen.getByText("当前代币暂不支持交易")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "刷新报价" })).toBeNull();
+    expect(screen.getByText("Trading is unavailable for this token")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Refresh quote" })).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 400));
     expect(createQuote).toHaveBeenCalledTimes(1);
     const userFunded: AccountSummary = {
@@ -172,14 +172,14 @@ describe("phase D trading", () => {
       },
     };
     rerender(<TradingPanel {...props} account={userFunded} />);
-    expect(screen.getByText("共享资金余额不足")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "刷新报价" })).toBeNull();
+    expect(screen.getByText("Insufficient available balance")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Refresh quote" })).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 400));
     expect(createQuote).toHaveBeenCalledTimes(1);
     rerender(<TradingPanel {...props} account={{ ...userFunded, treasury: undefined }} />);
-    expect(screen.getByText(/平台共享资金：未知 USDG/)).toBeInTheDocument();
-    expect(screen.getByText("余额加载中")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "刷新报价" })).toBeNull();
+    expect(screen.getByText("Available: — USDG")).toBeInTheDocument();
+    expect(screen.getByText("Loading balance")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Refresh quote" })).toBeNull();
   });
 
   it("phase D trading: 4 related scenarios", async () => {
@@ -196,14 +196,14 @@ describe("phase D trading", () => {
       expect(requirePreparedQuote(terms, prepared).minOut).toBe("80");
       expect(() =>
         requireQuoteTerms({ ...terms, idealOut: undefined } as unknown as Quote, draft),
-      ).toThrow("报价缺少");
-      expect(() => requireQuoteTerms({ ...terms, expiresAt: 1 }, draft)).toThrow("过期");
+      ).toThrow("Quote is missing");
+      expect(() => requireQuoteTerms({ ...terms, expiresAt: 1 }, draft)).toThrow("expired");
       expect(() => requirePreparedQuote({ ...terms, feeConfigVersion: "2" }, prepared)).toThrow(
-        "费用配置",
+        "Fee configuration",
       );
       expect(() =>
         requirePreparedQuote({ ...terms, minOut: "79", minAmountOut: "79" }, prepared),
-      ).toThrow("最低到账");
+      ).toThrow("minimum received");
     })();
     await cleanScenario2();
     await prepareScenario1();
@@ -307,11 +307,11 @@ describe("phase D trading", () => {
         />,
       );
       await waitFor(() => expect(createQuote).toHaveBeenCalled());
-      expect(screen.getByLabelText("交易金额")).toHaveValue("100");
+      expect(screen.getByLabelText("Trade amount")).toHaveValue("100");
       expect(createQuote.mock.calls.every(([input]) => input.purpose === "ESTIMATE")).toBe(true);
       expect(execute).not.toHaveBeenCalled();
       expect(screen.queryByRole("dialog")).toBeNull();
-      expect(screen.getByText(/共享资金/)).toBeInTheDocument();
+      expect(screen.getByText(/Available:/)).toBeInTheDocument();
     })();
     await cleanScenario2();
     await prepareScenario1();
@@ -328,7 +328,7 @@ describe("phase D trading", () => {
           quickRequest={{ id: "blocked", side: "BUY", amountIn: "100" }}
         />,
       );
-      await waitFor(() => expect(screen.getByText(/禁止买入/)).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText(/Buying is disabled/)).toBeInTheDocument());
       expect(createQuote).not.toHaveBeenCalled();
       cleanup();
       const position = {
@@ -355,7 +355,9 @@ describe("phase D trading", () => {
           quickRequest={{ id: "sell", side: "SELL" }}
         />,
       );
-      await waitFor(() => expect(screen.getByText(/当前钱包余额：1.23 MEME/)).toBeInTheDocument());
+      await waitFor(() =>
+        expect(screen.getByText(/Wallet balance: 1.23 MEME/)).toBeInTheDocument(),
+      );
       expect(walletApi.positions).toHaveBeenCalledWith(
         wallet,
         "first-page",
@@ -373,7 +375,7 @@ describe("phase D trading", () => {
           quickRequest={{ id: "no-preset", side: "BUY" }}
         />,
       );
-      await waitFor(() => expect(screen.getByLabelText("交易金额")).toHaveValue(""));
+      await waitFor(() => expect(screen.getByLabelText("Trade amount")).toHaveValue(""));
       expect(createQuote).not.toHaveBeenCalled();
       cleanup();
       vi.mocked(walletApi.positions).mockResolvedValue({ items: [position], nextCursor: null });
@@ -393,14 +395,14 @@ describe("phase D trading", () => {
         ],
       });
       render(<Portfolio walletAddress={wallet} onSell={vi.fn()} />);
-      await waitFor(() => expect(screen.getByText("成本未知")).toBeInTheDocument());
-      fireEvent.click(screen.getByRole("tab", { name: "Orders" }));
+      await waitFor(() => expect(screen.getByText("Cost unknown")).toBeInTheDocument());
+      fireEvent.click(screen.getByRole("tab", { name: "Order history" }));
       expect(screen.getByText("Receipt rejected")).toBeInTheDocument();
       expect(screen.queryByText("999 MEME")).toBeNull();
-      expect(screen.getByText("失败")).toBeInTheDocument();
+      expect(screen.getAllByText("Failed").length).toBeGreaterThan(0);
       fireEvent.click(screen.getByRole("button", { name: "Filled" }));
       expect(screen.queryByText("Receipt rejected")).toBeNull();
-      expect(screen.getByText("暂无订单")).toBeVisible();
+      expect(screen.getByText("No orders")).toBeVisible();
       fireEvent.click(screen.getByRole("button", { name: "Failed" }));
       expect(screen.getByText("Receipt rejected")).toBeVisible();
       cleanup();
@@ -408,8 +410,8 @@ describe("phase D trading", () => {
       render(
         <Portfolio walletAddress={wallet} tokenFilter={`0x${"3".repeat(40)}`} onSell={vi.fn()} />,
       );
-      expect(await screen.findByText("暂无持仓")).toBeVisible();
-      expect(screen.queryByRole("tab", { name: "Orders" })).toBeNull();
+      expect(await screen.findByText("No positions")).toBeVisible();
+      expect(screen.queryByRole("tab", { name: "Order history" })).toBeNull();
       expect(memeApi.getAccountTransactions).not.toHaveBeenCalled();
     })();
   });
@@ -420,11 +422,15 @@ it("quote errors show short states, preserve codes in title and keep buying disa
     [
       "MEME_REFERENCE_UNAVAILABLE",
       "Live candle reference is unavailable",
-      "该代币流动性不足，暂不支持报价",
+      "Not enough liquidity to quote",
     ],
-    ["MEME_LOCAL_STATE_UNAVAILABLE", "Local state unavailable", "行情同步中，请稍后重试"],
-    ["MEME_UNAUTHORIZED", "Unauthorized", "请先连接钱包"],
-    ["OTHER_LOGIN", "Privy login required", "请先连接钱包"],
+    [
+      "MEME_LOCAL_STATE_UNAVAILABLE",
+      "Local state unavailable",
+      "Market data is syncing. Try again shortly",
+    ],
+    ["MEME_UNAUTHORIZED", "Unauthorized", "Connect wallet to continue"],
+    ["OTHER_LOGIN", "Privy login required", "Connect wallet to continue"],
     ["UNKNOWN_ERROR", "Unexpected service failure", "Unexpected service failure"],
   ]) {
     vi.spyOn(memeApi, "createQuote").mockRejectedValue(new ApiError(code, message, 409));
@@ -443,7 +449,7 @@ it("quote errors show short states, preserve codes in title and keep buying disa
       expect(line).toHaveAttribute("role", "status");
     }
     expect(screen.queryByText(code)).toBeNull();
-    expect(screen.getByRole("button", { name: "买入 MEME" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Buy MEME" })).toBeDisabled();
     cleanup();
     vi.restoreAllMocks();
   }

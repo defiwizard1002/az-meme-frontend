@@ -170,8 +170,8 @@ describe("CandleChart renderability", () => {
 
       expect(engine.setCandles).toHaveBeenLastCalledWith([]);
       expect(engine.setVolumes).toHaveBeenLastCalledWith([]);
-      expect(screen.getByLabelText("HUGE K 线图")).toBeInTheDocument();
-      expect(screen.getByText("暂无可渲染 K 线")).toBeVisible();
+      expect(screen.getByLabelText("HUGE candlestick chart")).toBeInTheDocument();
+      expect(screen.getByText("No renderable candles")).toBeVisible();
       expect(screen.queryByRole("status")).not.toBeInTheDocument();
       expect(screen.getByTestId("tradingview-chart")).toHaveAttribute(
         "data-excluded-candle-count",
