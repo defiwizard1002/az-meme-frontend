@@ -131,7 +131,7 @@ it("wallet-phase-d: 4 related scenarios", async () => {
     );
     expect(await screen.findByText("No positions")).toBeVisible();
     expect(screen.queryByText("Waiting for balance snapshot")).toBeNull();
-    expect(screen.getByLabelText("7d PnL")).toHaveTextContent("—");
+    expect(screen.getByLabelText("7d realized PnL").nextElementSibling).toHaveTextContent("—");
     expect(screen.getByLabelText("7d buys / sells")).toHaveTextContent("—");
     fireEvent.click(screen.getByRole("button", { name: "Load more positions" }));
     await waitFor(() =>
@@ -345,6 +345,63 @@ it("labels observed on-chain net amounts and keeps unavailable values unknown", 
   const weth = screen.getByRole("button", { name: "WETH" }).closest("tr")!;
   expect(within(weth).queryByText(/On-chain net/)).toBeNull();
   expect(within(weth).getAllByText("$0")).toHaveLength(2);
+});
+
+it("exposes an exact complete holding quantity to pointer, keyboard and touch users", async () => {
+  const position = {
+    chainId: 4663,
+    address,
+    token,
+    decimals: 18,
+    quantityAtomic: "1234567890123456789",
+    observedNetAtomic: "1234567890123456789",
+    quantityComplete: true,
+    costUsd: null,
+    boughtAtomic: "0",
+    soldAtomic: "0",
+    boughtUsd: null,
+    soldUsd: null,
+    realizedPnlUsd: null,
+    cyclePnlUsd: null,
+    cycleNumber: 0,
+    updatedAt: 0,
+    valueUsd: null,
+    unrealizedPnlUsd: null,
+  } satisfies WalletPosition;
+  vi.mocked(walletApi.profile).mockResolvedValue(null as unknown as WalletProfileData);
+  vi.mocked(walletApi.positions).mockResolvedValue({
+    items: [
+      { ...position, symbol: "HELD" },
+      {
+        ...position,
+        token: `0x${"3".repeat(40)}`,
+        symbol: "PARTIAL",
+        quantityAtomic: null,
+        observedNetAtomic: "10000000000000000000",
+        quantityComplete: false,
+      },
+    ],
+    nextCursor: null,
+  });
+  render(
+    <UserStateProvider userId={null}>
+      <WalletProfile address={address} onClose={vi.fn()} onToken={vi.fn()} />
+    </UserStateProvider>,
+  );
+  const held = (await screen.findByRole("button", { name: "HELD" })).closest("tr")!;
+  const quantity = within(held).getByText("Qty");
+  expect(quantity).toHaveAccessibleName(
+    "Exact holding quantity for HELD: 1.234567890123456789 HELD",
+  );
+  expect(quantity).toHaveAttribute("title", "Exact quantity: 1.234567890123456789 HELD");
+  fireEvent.click(quantity);
+  expect(quantity.closest("details")).toHaveAttribute("open");
+  expect(within(held).getByText("1.234567890123456789 HELD")).toBeInTheDocument();
+  const partial = screen.getByRole("button", { name: "PARTIAL" }).closest("tr")!;
+  expect(
+    within(partial).getByTitle("On-chain net movement; position attribution is incomplete"),
+  ).toHaveTextContent("10 observed net · incomplete");
+  expect(within(partial).queryByText("Qty")).toBeNull();
 });
 
 it("keeps the measured profile cards visible while wallet data is loading", () => {

@@ -202,8 +202,10 @@ function ProfileContent({
       )}
       <div className="stat-grid" aria-busy={loading}>
         <div className={Number(stats?.realizedPnlUsd) < 0 ? "negative" : undefined}>
-          <span>7d PnL</span>
-          <strong aria-label="7d PnL">
+          <span title="7d realized PnL" aria-label="7d realized PnL">
+            7d PnL
+          </span>
+          <strong>
             {loading ? (
               <span className="stat-value-loading" aria-hidden="true" />
             ) : stats?.realizedPnlUsd == null ? (
@@ -251,29 +253,49 @@ function ProfileContent({
             {holdings.map((position) => {
               const incomplete = !position.quantityComplete || position.quantityAtomic === null;
               const quantity = displayedQuantity(position);
+              const exactQuantity =
+                quantity == null ? null : formatUnits(BigInt(quantity), position.decimals);
               const tokenName = position.symbol || position.name || shortAddress(position.token);
               return (
                 <tr key={position.token} className={incomplete ? "holding-incomplete" : undefined}>
                   <td className="holding-token">
-                    <button
-                      type="button"
-                      className="text-button wallet-token-identity"
-                      title={position.token}
-                      onClick={() => onToken(position.token)}
-                    >
-                      {safeUrl(position.logo) && (
-                        <img
-                          src={safeUrl(position.logo)}
-                          alt=""
-                          width={24}
-                          height={24}
-                          onError={(event) => {
-                            event.currentTarget.style.display = "none";
-                          }}
-                        />
+                    <div className="holding-token-main">
+                      <button
+                        type="button"
+                        className="text-button wallet-token-identity"
+                        title={position.token}
+                        onClick={() => onToken(position.token)}
+                      >
+                        {safeUrl(position.logo) && (
+                          <img
+                            src={safeUrl(position.logo)}
+                            alt=""
+                            width={24}
+                            height={24}
+                            onError={(event) => {
+                              event.currentTarget.style.display = "none";
+                            }}
+                          />
+                        )}
+                        {tokenName}
+                      </button>
+                      {!incomplete && exactQuantity !== null && (
+                        <details className="wallet-quantity">
+                          <summary
+                            title={`Exact quantity: ${exactQuantity} ${tokenName}`}
+                            aria-label={`Exact holding quantity for ${tokenName}: ${exactQuantity} ${tokenName}`}
+                          >
+                            Qty
+                          </summary>
+                          <div className="wallet-quantity-panel" role="note">
+                            <span>Exact quantity</span>
+                            <code>
+                              {exactQuantity} {tokenName}
+                            </code>
+                          </div>
+                        </details>
                       )}
-                      {tokenName}
-                    </button>
+                    </div>
                     {incomplete && (
                       <small title="On-chain net movement; position attribution is incomplete">
                         {quantity != null
