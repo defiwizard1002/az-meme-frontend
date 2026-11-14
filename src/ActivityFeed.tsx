@@ -499,13 +499,6 @@ export function ActivityRibbon({
       window.clearInterval(interval);
     };
   }, []);
-  useEffect(() => {
-    const rotation = window.setInterval(() => {
-      if (!hover.current)
-        setItems((current) => (current.length > 1 ? [...current.slice(1), current[0]] : current));
-    }, 6000);
-    return () => window.clearInterval(rotation);
-  }, []);
   return (
     <section
       className="activity-ribbon"
@@ -522,34 +515,47 @@ export function ActivityRibbon({
       }}
     >
       <strong className="live-label">● Live</strong>
-      <div className="ticker-track">
+      <div className="ticker-window">
         {loading && <span className="muted">Loading…</span>}
         {error && <span className="muted">{error}</span>}
         {!loading && !error && !items.length && <span className="muted">No recent activity</span>}
-        {items.map((item) => (
-          <span className="activity-ribbon-item" key={item.eventId}>
-            <button
-              type="button"
-              className="text-button"
-              title={item.address}
-              onClick={() => onWallet(item.address)}
-            >
-              {item.walletName || shortAddress(item.address)}
-            </button>
-            <span className={item.kind === "BUY" ? "positive" : "negative"}>
-              {item.kind === "BUY" ? "bought" : "sold"}
-            </span>
-            <button
-              type="button"
-              className="text-button"
-              title={item.tokenName || item.token}
-              onClick={() => onToken(item.token)}
-            >
-              {item.tokenSymbol || shortAddress(item.token)}
-            </button>
-            <span>{item.amountUsd == null ? "Amount unknown" : money(item.amountUsd)}</span>
-          </span>
-        ))}
+        {!loading && !error && items.length > 0 && (
+          <div className="ticker-track">
+            {[0, 1].map((copy) => (
+              <div
+                className="ticker-group"
+                key={copy}
+                aria-hidden={copy === 1 ? true : undefined}
+                inert={copy === 1}
+              >
+                {items.map((item) => (
+                  <span className="activity-ribbon-item" key={item.eventId}>
+                    <button
+                      type="button"
+                      className="text-button"
+                      title={item.address}
+                      onClick={() => onWallet(item.address)}
+                    >
+                      {item.walletName || shortAddress(item.address)}
+                    </button>
+                    <span className={item.kind === "BUY" ? "positive" : "negative"}>
+                      {item.kind === "BUY" ? "bought" : "sold"}
+                    </span>
+                    <button
+                      type="button"
+                      className="text-button"
+                      title={item.tokenName || item.token}
+                      onClick={() => onToken(item.token)}
+                    >
+                      {item.tokenSymbol || shortAddress(item.token)}
+                    </button>
+                    <span>{item.amountUsd == null ? "Amount unknown" : money(item.amountUsd)}</span>
+                  </span>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <button type="button" className="text-button ticker-link" onClick={onSmartMoney}>
         Smart money ›

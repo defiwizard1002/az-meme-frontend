@@ -43,4 +43,9 @@ it("uses stored wallet and token identity when the feed provides it", async () =
   render(<ActivityRibbon onWallet={() => {}} onToken={() => {}} onSmartMoney={() => {}} />);
   expect(await screen.findByRole("button", { name: "Cold Hands" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "DHAND" })).toBeInTheDocument();
+  const groups = document.querySelectorAll(".ticker-group");
+  expect(groups).toHaveLength(2);
+  expect(groups[1]).toHaveAttribute("aria-hidden", "true");
+  expect(groups[1]).toHaveAttribute("inert");
+  expect(groups[0].textContent).toBe(groups[1].textContent);
 });

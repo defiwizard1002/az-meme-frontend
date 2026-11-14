@@ -1916,13 +1916,36 @@ textarea {
   flex-shrink: 0;
   font-size: 10px;
 }
-.ticker-track {
-  display: flex;
-  gap: 8px;
-  overflow: auto;
-  scrollbar-width: none;
+.ticker-window {
+  overflow: hidden;
   flex: 1;
   min-width: 0;
+}
+.ticker-track {
+  display: flex;
+  width: max-content;
+  min-width: 200%;
+  animation: ticker-scroll 60s linear infinite;
+}
+.ticker-group {
+  display: flex;
+  flex: 1 0 50%;
+  gap: 8px;
+  padding-right: 8px;
+}
+.activity-ribbon:hover .ticker-track,
+.activity-ribbon:focus-within .ticker-track {
+  animation-play-state: paused;
+}
+@keyframes ticker-scroll {
+  to {
+    transform: translateX(-50%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track {
+    animation: none;
+  }
 }
 .activity-ribbon-item {
   flex-shrink: 0;
@@ -3166,11 +3189,15 @@ textarea {
   white-space: nowrap;
 }
 .activity-card time {
+  width: 54px;
   color: #777386;
   font-size: 10px;
   text-align: right;
 }
 .activity-actions {
+  display: grid;
+  grid-template-columns: 44px 106px;
+  justify-content: end;
   gap: 8px;
 }
 .activity-actions button,
@@ -3358,7 +3385,7 @@ textarea {
 
 @media (max-width: 1000px) {
   .activity-card {
-    grid-template-columns: 270px minmax(0, 1fr) auto;
+    grid-template-columns: 270px minmax(0, 1fr) 54px 158px;
   }
 }
 
@@ -4664,6 +4691,7 @@ textarea {
 }
 .trading-panel .quote-details {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 3px;
   margin: 11px 0;
   color: #ececf3;
@@ -4673,6 +4701,7 @@ textarea {
 }
 .trading-panel .quote-details > div {
   display: flex;
+  min-width: 0;
   min-height: 22px;
   align-items: center;
   justify-content: space-between;
@@ -4690,6 +4719,7 @@ textarea {
 .trading-panel .quote-details dd,
 .trading-panel .quote-details .quote-amount {
   overflow: hidden;
+  min-width: 0;
   margin: 0;
   color: #ececf3;
   font-family: Cousine, monospace;
