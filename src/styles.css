@@ -4744,3 +4744,25 @@ textarea {
   border-color: #34d46f;
   background: #34d46f;
 }
+
+@media (max-width: 520px) {
+  .wallet-holdings-table td:nth-child(2) {
+    width: 58px;
+  }
+  .wallet-holdings-table td:nth-child(3) {
+    width: 50px;
+  }
+  .wallet-holdings-table td:nth-child(4) {
+    width: 84px;
+  }
+  .wallet-holdings-table .holding-token small {
+    max-width: none;
+    overflow: visible;
+    line-height: 11px;
+    white-space: normal;
+  }
+  .wallet-holdings-table tr.holding-incomplete td {
+    height: auto;
+    min-height: 50px;
+  }
+}
