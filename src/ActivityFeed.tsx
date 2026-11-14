@@ -13,6 +13,7 @@ interface ActivityLinks {
 export interface ActivityFeedProps extends ActivityLinks {
   onTrade: (token: string, side: "BUY" | "SELL", amountIn?: string) => void;
   heldTokens: ReadonlySet<string>;
+  explorerBaseUrl?: string;
 }
 const dayMs = 86_400_000;
 function feedError(cause: unknown): string {
@@ -140,6 +141,7 @@ function FilteredFeed({
   onToken,
   onTrade,
   heldTokens,
+  explorerBaseUrl,
 }: ActivityFeedProps &
   Pick<ActivityQuery, "scope" | "side" | "minUsd"> & {
     quickAmount: string;
@@ -254,6 +256,7 @@ function FilteredFeed({
   }
   const incoming =
     pending?.items.filter((item) => !items.some((old) => old.eventId === item.eventId)).length ?? 0;
+  const explorer = safeUrl(explorerBaseUrl)?.replace(/\/+$/, "");
   return (
     <>
       {loading && <p role="status">Loading activity…</p>}
@@ -398,9 +401,18 @@ function FilteredFeed({
                   applyPending();
                 }}
               >
-                <button type="button" className="activity-view" onClick={() => onToken(item.token)}>
-                  View
-                </button>
+                {explorer && /^0x[0-9a-f]{64}$/i.test(item.txHash) ? (
+                  <a
+                    className="activity-view"
+                    href={`${explorer}/tx/${item.txHash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    View
+                  </a>
+                ) : (
+                  <span title="Transaction link unavailable">—</span>
+                )}
                 {(item.kind === "BUY" || heldTokens.has(item.token.toLowerCase())) && (
                   <button
                     type="button"

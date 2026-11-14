@@ -196,54 +196,71 @@ function ProfileContent({ address, onClose, onToken, onTrade }: WalletProfilePro
           <tbody>
             {positions
               .filter((position) => position.quantityAtomic !== "0")
-              .map((position) => (
-                <tr key={position.token}>
-                  <td>
-                    <button
-                      type="button"
-                      className="text-button wallet-token-identity"
-                      title={position.token}
-                      onClick={() => onToken(position.token)}
-                    >
-                      {safeUrl(position.logo) && (
-                        <img
-                          src={safeUrl(position.logo)}
-                          alt=""
-                          width={24}
-                          height={24}
-                          onError={(event) => {
-                            event.currentTarget.style.display = "none";
-                          }}
-                        />
-                      )}
-                      {position.symbol || position.name || shortAddress(position.token)}
-                    </button>
-                    <small
-                      title={`atomic ${position.quantityAtomic ?? "—"}; updated ${position.updatedAt}`}
-                    >
-                      {position.quantityComplete && position.quantityAtomic !== null
-                        ? amount(formatUnits(BigInt(position.quantityAtomic), position.decimals))
-                        : "—"}
-                    </small>
-                  </td>
-                  <td>{position.valueUsd == null ? "—" : money(position.valueUsd)}</td>
-                  <td>
-                    {position.unrealizedPnlUsd == null ? "—" : money(position.unrealizedPnlUsd)}
-                  </td>
-                  <td>
-                    {onTrade && (
+              .map((position) => {
+                const showNet = !position.quantityComplete || position.quantityAtomic === null;
+                const quantity = showNet ? position.observedNetAtomic : position.quantityAtomic;
+                return (
+                  <tr key={position.token}>
+                    <td>
                       <button
                         type="button"
-                        className="profile-token-buy"
-                        aria-label={`Buy ${position.symbol || position.name || shortAddress(position.token)}`}
-                        onClick={() => onTrade(position.token, "BUY")}
+                        className="text-button wallet-token-identity"
+                        title={position.token}
+                        onClick={() => onToken(position.token)}
                       >
-                        Buy
+                        {safeUrl(position.logo) && (
+                          <img
+                            src={safeUrl(position.logo)}
+                            alt=""
+                            width={24}
+                            height={24}
+                            onError={(event) => {
+                              event.currentTarget.style.display = "none";
+                            }}
+                          />
+                        )}
+                        {position.symbol || position.name || shortAddress(position.token)}
                       </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                      <small title={showNet ? "On-chain net; attribution incomplete" : undefined}>
+                        {quantity != null
+                          ? amount(formatUnits(BigInt(quantity), position.decimals))
+                          : "—"}
+                        {showNet && quantity != null && " · On-chain net (attribution incomplete)"}
+                      </small>
+                    </td>
+                    <td
+                      title={
+                        position.valueUsd == null
+                          ? "Value unavailable: price or complete quantity is missing"
+                          : undefined
+                      }
+                    >
+                      {position.valueUsd == null ? "—" : money(position.valueUsd)}
+                    </td>
+                    <td
+                      title={
+                        position.unrealizedPnlUsd == null
+                          ? "PnL unavailable: cost basis or value is missing"
+                          : undefined
+                      }
+                    >
+                      {position.unrealizedPnlUsd == null ? "—" : money(position.unrealizedPnlUsd)}
+                    </td>
+                    <td>
+                      {onTrade && (
+                        <button
+                          type="button"
+                          className="profile-token-buy"
+                          aria-label={`Buy ${position.symbol || position.name || shortAddress(position.token)}`}
+                          onClick={() => onTrade(position.token, "BUY")}
+                        >
+                          Buy
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
           </tbody>
         </table>
       </div>

@@ -60,7 +60,10 @@ function Workspace({
   const [accountError, setAccountError] = useState<string>();
   const [revision, setRevision] = useState(0);
   const [held, setHeld] = useState<ReadonlySet<string>>(new Set());
-  const [explorer, setExplorer] = useState("");
+  const [explorer, setExplorer] = useState(
+    (import.meta.env.VITE_EXPLORER_BASE_URL as string | undefined) ||
+      "https://robinhoodchain.blockscout.com",
+  );
   const [quick, setQuick] = useState<{
     id: string;
     side: "BUY" | "SELL";
@@ -79,7 +82,7 @@ function Workspace({
     void memeApi
       .getConfig()
       .then((config) => {
-        if (active) setExplorer(config.explorerBaseUrl);
+        if (active && config.explorerBaseUrl) setExplorer(config.explorerBaseUrl);
       })
       .catch(() => {});
     return () => {
@@ -346,6 +349,7 @@ function Workspace({
           <ActivityFeed
             onWallet={setProfile}
             onToken={openToken}
+            explorerBaseUrl={explorer}
             onTrade={(address, side, amountIn) =>
               trade(
                 address,

@@ -22,3 +22,5 @@ pnpm build
 ```
 
 开发地址默认为 `http://127.0.0.1:5173`。客户端公共配置为 `VITE_MEME_API_BASE_URL`、`VITE_MEME_WS_URL` 和 `VITE_AZ_API_BASE_URL`；未配置时使用同源 REST/WS。真实连接配置放在 Git ignored 的本地 env 文件；密钥和服务端凭据不得进入前端环境变量。
+
+交易浏览器优先使用服务端公共配置的 `explorerBaseUrl`；不可用时使用 `VITE_EXPLORER_BASE_URL`，默认为 `https://robinhoodchain.blockscout.com`。交易链接遵循项目现有的 `<explorer>/tx/<txHash>` 格式；Robinhood Chain 官方网络配置见 https://docs.robinhood.com/chain/connecting/。

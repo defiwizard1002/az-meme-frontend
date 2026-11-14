@@ -3173,16 +3173,24 @@ textarea {
 .activity-actions {
   gap: 8px;
 }
-.activity-actions button {
+.activity-actions button,
+.activity-actions a {
   min-height: 24px;
   padding: 3px 11px;
   border-radius: 5px;
   font-size: 10px;
 }
 .activity-view {
-  border-color: #2b2935;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #2b2935;
   background: transparent;
   color: #dad6e2;
+}
+.activity-view:hover {
+  border-color: #515b6b;
+  background: #252c38;
+  text-decoration: none;
 }
 .activity-follow-buy {
   border-color: #4b3d68;

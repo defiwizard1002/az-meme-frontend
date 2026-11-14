@@ -1,11 +1,11 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ActivityFeed } from "./ActivityFeed";
 import { WalletProfile } from "./WalletProfile";
 import { UserStateProvider, useUserState } from "./user-state";
 import { parseQuickBuyAmounts, UserSettings } from "./UserSettings";
 import { walletApi } from "./wallet-api";
-import type { ActivityPage, WalletProfileData } from "./wallet-types";
+import type { ActivityPage, WalletPosition, WalletProfileData } from "./wallet-types";
 
 vi.mock("./wallet-api", () => ({
   walletApi: {
@@ -158,6 +158,8 @@ it("wallet-phase-d: 4 related scenarios", async () => {
           eventId: "b".repeat(64),
           address,
           token,
+          txHash: `0x${"b".repeat(64)}`,
+          chainId: 4663,
           kind: "SELL",
           timestampMs: Date.now(),
           amountUsd: "2100",
@@ -176,12 +178,16 @@ it("wallet-phase-d: 4 related scenarios", async () => {
           onToken={vi.fn()}
           onTrade={onTrade}
           heldTokens={new Set()}
+          explorerBaseUrl="https://example.com"
         />
       </UserStateProvider>,
     );
     await screen.findByText("$2.1K");
     expect(screen.queryByRole("button", { name: "Follow Sell" })).toBeNull();
-    expect(screen.getByRole("button", { name: "View" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "View" })).toHaveAttribute(
+      "href",
+      `https://example.com/tx/0x${"b".repeat(64)}`,
+    );
     fireEvent.click(screen.getByRole("button", { name: "KOL" }));
     fireEvent.click(screen.getByRole("button", { name: "Sells" }));
     fireEvent.click(screen.getByRole("button", { name: "≥ $2K" }));
@@ -205,6 +211,7 @@ it("wallet-phase-d: 4 related scenarios", async () => {
           onToken={vi.fn()}
           onTrade={onTrade}
           heldTokens={new Set([token])}
+          explorerBaseUrl="https://example.com"
         />
       </UserStateProvider>,
     );
@@ -231,6 +238,113 @@ it("wallet-phase-d: 4 related scenarios", async () => {
     fireEvent.mouseLeave(sellCell);
     expect(screen.getByText("$2.2K")).toBeVisible();
   })();
+});
+
+it("opens available activity transactions in the configured explorer", async () => {
+  const transactionHash = `0x${"a".repeat(64)}`;
+  const activity = {
+    address,
+    token,
+    chainId: 4663,
+    kind: "BUY",
+    timestampMs: Date.now(),
+    amountUsd: "2",
+    marketCapUsd: "3",
+  };
+  vi.mocked(walletApi.feed).mockResolvedValue({
+    items: [
+      { ...activity, eventId: "valid", txHash: transactionHash },
+      { ...activity, eventId: "missing", txHash: "" },
+      { ...activity, eventId: "invalid", txHash: "not-a-hash" },
+    ],
+    nextCursor: null,
+  } as ActivityPage);
+  render(
+    <UserStateProvider userId={null}>
+      <ActivityFeed
+        onWallet={vi.fn()}
+        onToken={vi.fn()}
+        onTrade={vi.fn()}
+        heldTokens={new Set()}
+        explorerBaseUrl="https://explorer.example/"
+      />
+    </UserStateProvider>,
+  );
+  const link = await screen.findByRole("link", { name: "View" });
+  expect(link).toHaveAttribute("href", `https://explorer.example/tx/${transactionHash}`);
+  expect(link).toHaveAttribute("target", "_blank");
+  expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  expect(screen.getAllByTitle("Transaction link unavailable")).toHaveLength(2);
+  expect(screen.queryByRole("button", { name: "View" })).toBeNull();
+});
+
+it("labels observed on-chain net amounts and keeps unavailable values unknown", async () => {
+  const incomplete = {
+    chainId: 4663,
+    address,
+    token,
+    decimals: 18,
+    quantityAtomic: null,
+    observedNetAtomic: "10000000000000000000",
+    quantityComplete: false,
+    costUsd: null,
+    boughtAtomic: "0",
+    soldAtomic: "0",
+    boughtUsd: "0",
+    soldUsd: null,
+    realizedPnlUsd: null,
+    cyclePnlUsd: null,
+    cycleNumber: 0,
+    updatedAt: 0,
+    symbol: "SPCX",
+    valueUsd: null,
+    unrealizedPnlUsd: null,
+  } satisfies WalletPosition;
+  vi.mocked(walletApi.profile).mockResolvedValue(null as unknown as WalletProfileData);
+  vi.mocked(walletApi.positions).mockResolvedValue({
+    items: [
+      incomplete,
+      {
+        ...incomplete,
+        token: `0x${"3".repeat(40)}`,
+        symbol: "NEG",
+        decimals: 6,
+        observedNetAtomic: "-1234567",
+      },
+      {
+        ...incomplete,
+        token: `0x${"4".repeat(40)}`,
+        symbol: "WETH",
+        quantityAtomic: "1000000000000000000",
+        quantityComplete: true,
+        valueUsd: "0",
+        unrealizedPnlUsd: "0",
+      },
+    ],
+    nextCursor: null,
+  });
+  render(
+    <UserStateProvider userId={null}>
+      <WalletProfile address={address} onClose={vi.fn()} onToken={vi.fn()} />
+    </UserStateProvider>,
+  );
+  const spcx = (await screen.findByRole("button", { name: "SPCX" })).closest("tr")!;
+  expect(within(spcx).getByTitle("On-chain net; attribution incomplete")).toHaveTextContent(
+    "10 · On-chain net (attribution incomplete)",
+  );
+  expect(
+    within(spcx).getByTitle("Value unavailable: price or complete quantity is missing"),
+  ).toHaveTextContent("—");
+  expect(
+    within(spcx).getByTitle("PnL unavailable: cost basis or value is missing"),
+  ).toHaveTextContent("—");
+  const negative = screen.getByRole("button", { name: "NEG" }).closest("tr")!;
+  expect(within(negative).getByTitle("On-chain net; attribution incomplete")).toHaveTextContent(
+    "-1.23457",
+  );
+  const weth = screen.getByRole("button", { name: "WETH" }).closest("tr")!;
+  expect(within(weth).queryByText(/On-chain net/)).toBeNull();
+  expect(within(weth).getAllByText("$0")).toHaveLength(2);
 });
 
 it("uses the selected activity quick-buy preset for a row buy", async () => {
