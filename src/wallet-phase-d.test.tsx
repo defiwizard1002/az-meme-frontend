@@ -344,7 +344,66 @@ it("labels observed on-chain net amounts and keeps unavailable values unknown", 
   ).toHaveTextContent("-1.23457");
   const weth = screen.getByRole("button", { name: "WETH" }).closest("tr")!;
   expect(within(weth).queryByText(/On-chain net/)).toBeNull();
-  expect(within(weth).getAllByText("$0")).toHaveLength(2);
+  expect(within(weth).getByText("$0")).toBeVisible();
+  const zeroPnl = within(weth).getByLabelText(
+    "Unrealized PnL $0; percentage unavailable: cost basis is incomplete or zero",
+  );
+  expect(zeroPnl).toHaveTextContent("—");
+  expect(zeroPnl).toHaveAttribute(
+    "title",
+    "Unrealized PnL $0; percentage unavailable: cost basis is incomplete or zero",
+  );
+});
+
+it("shows holding PnL percentage only when a complete cost basis supports it", async () => {
+  const position = {
+    chainId: 4663,
+    address,
+    token,
+    decimals: 18,
+    quantityAtomic: "1000000000000000000",
+    observedNetAtomic: "1000000000000000000",
+    quantityComplete: true,
+    costUsd: "200",
+    boughtAtomic: "0",
+    soldAtomic: "0",
+    boughtUsd: "200",
+    soldUsd: null,
+    realizedPnlUsd: null,
+    cyclePnlUsd: null,
+    cycleNumber: 0,
+    updatedAt: 0,
+    valueUsd: "185.4",
+    unrealizedPnlUsd: "-14.6",
+  } satisfies WalletPosition;
+  vi.mocked(walletApi.profile).mockResolvedValue(null as unknown as WalletProfileData);
+  vi.mocked(walletApi.positions).mockResolvedValue({
+    items: [
+      { ...position, symbol: "DOWN" },
+      {
+        ...position,
+        token: `0x${"3".repeat(40)}`,
+        symbol: "PARTIAL",
+        quantityAtomic: null,
+        quantityComplete: false,
+      },
+    ],
+    nextCursor: null,
+  });
+  render(
+    <UserStateProvider userId={null}>
+      <WalletProfile address={address} onClose={vi.fn()} onToken={vi.fn()} />
+    </UserStateProvider>,
+  );
+  const down = (await screen.findByRole("button", { name: "DOWN" })).closest("tr")!;
+  const downPnl = within(down).getByLabelText("Unrealized PnL $-14.6 (-7.3% of cost)");
+  expect(downPnl).toHaveTextContent("-7.3%");
+  expect(downPnl).toHaveAttribute("title", "Unrealized PnL $-14.6 (-7.3% of cost)");
+  const partial = screen.getByRole("button", { name: "PARTIAL" }).closest("tr")!;
+  const partialPnl = within(partial).getByLabelText(
+    "Unrealized PnL $-14.6; percentage unavailable: cost basis is incomplete or zero",
+  );
+  expect(partialPnl).toHaveTextContent("—");
 });
 
 it("exposes an exact complete holding quantity to pointer, keyboard and touch users", async () => {

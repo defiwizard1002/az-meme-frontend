@@ -256,6 +256,25 @@ function ProfileContent({
               const exactQuantity =
                 quantity == null ? null : formatUnits(BigInt(quantity), position.decimals);
               const tokenName = position.symbol || position.name || shortAddress(position.token);
+              const pnlPercent =
+                position.quantityComplete &&
+                position.costUsd != null &&
+                Number(position.costUsd) > 0 &&
+                position.unrealizedPnlUsd != null
+                  ? (Number(position.unrealizedPnlUsd) / Number(position.costUsd)) * 100
+                  : null;
+              const displayedPnlPercent =
+                pnlPercent == null
+                  ? null
+                  : Math.abs(pnlPercent) < 0.05
+                    ? "0.0%"
+                    : `${pnlPercent.toFixed(1)}%`;
+              const pnlDescription =
+                position.unrealizedPnlUsd == null
+                  ? "PnL unavailable: cost basis or value is missing"
+                  : displayedPnlPercent == null
+                    ? `Unrealized PnL ${money(position.unrealizedPnlUsd)}; percentage unavailable: cost basis is incomplete or zero`
+                    : `Unrealized PnL ${money(position.unrealizedPnlUsd)} (${displayedPnlPercent} of cost)`;
               return (
                 <tr key={position.token} className={incomplete ? "holding-incomplete" : undefined}>
                   <td className="holding-token">
@@ -323,13 +342,10 @@ function ProfileContent({
                           ? "positive"
                           : "negative"
                     }`}
-                    title={
-                      position.unrealizedPnlUsd == null
-                        ? "PnL unavailable: cost basis or value is missing"
-                        : undefined
-                    }
+                    title={pnlDescription}
+                    aria-label={pnlDescription}
                   >
-                    {position.unrealizedPnlUsd == null ? "—" : money(position.unrealizedPnlUsd)}
+                    {displayedPnlPercent ?? "—"}
                   </td>
                   <td className="holding-action">
                     {onTrade && (
