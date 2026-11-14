@@ -150,7 +150,7 @@ function PortfolioAccount({
           {visiblePositions?.length === 0 && <p className="empty">No positions</p>}
           {visiblePositions && visiblePositions.length > 0 && (
             <div className="table-scroll">
-              <table>
+              <table className="positions-table">
                 <thead>
                   <tr>
                     <th>Token</th>
@@ -264,7 +264,7 @@ function PortfolioAccount({
           {visibleOrders?.length === 0 && <p className="empty">No orders</p>}
           {visibleOrders && visibleOrders.length > 0 && (
             <div className="table-scroll">
-              <table>
+              <table className="orders-table">
                 <thead>
                   <tr>
                     <th>Time</th>

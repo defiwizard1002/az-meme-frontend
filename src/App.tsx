@@ -70,8 +70,15 @@ function Workspace({
     amountIn?: string;
     tokenAddress: string;
   } | null>(null);
+  const [activeQuickBuyAmount, setActiveQuickBuyAmount] = useState(
+    () => user.quickBuyAmounts[0] ?? "",
+  );
   const identity = useRef(walletAddress);
   identity.current = walletAddress;
+  useEffect(() => {
+    if (!user.quickBuyAmounts.includes(activeQuickBuyAmount))
+      setActiveQuickBuyAmount(user.quickBuyAmounts[0] ?? "");
+  }, [activeQuickBuyAmount, user.quickBuyAmounts]);
   useEffect(() => {
     const change = () => setLocation(route());
     window.addEventListener("hashchange", change);
@@ -342,6 +349,7 @@ function Workspace({
               setToken(value);
               trade(value.tokenAddress, "BUY", amountIn);
             }}
+            onQuickAmountChange={setActiveQuickBuyAmount}
             onConnect={() => void connect()}
           />
         )}
@@ -350,13 +358,8 @@ function Workspace({
             onWallet={setProfile}
             onToken={openToken}
             explorerBaseUrl={explorer}
-            onTrade={(address, side, amountIn) =>
-              trade(
-                address,
-                side,
-                side === "BUY" ? (amountIn ?? user.quickBuyAmounts[0]) : undefined,
-              )
-            }
+            onTrade={(address, side, amountIn) => trade(address, side, amountIn)}
+            onQuickAmountChange={setActiveQuickBuyAmount}
             heldTokens={held}
           />
         )}
@@ -416,6 +419,7 @@ function Workspace({
                   compact
                   onToken={openToken}
                   onQuickBuy={(value, amountIn) => trade(value.tokenAddress, "BUY", amountIn)}
+                  onQuickAmountChange={setActiveQuickBuyAmount}
                   onConnect={() => void connect()}
                 />
                 <TokenDetails
@@ -482,6 +486,7 @@ function Workspace({
           }}
           onToken={openToken}
           onTrade={trade}
+          quickBuyAmount={activeQuickBuyAmount}
         />
       )}
     </div>

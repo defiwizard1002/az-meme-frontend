@@ -7,7 +7,12 @@ vi.mock("./wallet-api", () => ({
 }));
 vi.mock("./user-state", () => ({
   UserStateProvider: ({ children }: any) => children,
-  useUserState: () => ({ followed: new Set(), watchlist: new Set(), authenticated: false }),
+  useUserState: () => ({
+    followed: new Set(),
+    watchlist: new Set(),
+    authenticated: false,
+    quickBuyAmounts: ["10", "50", "100"],
+  }),
 }));
 vi.mock("./Discover", () => ({
   default: ({ compact, onToken }: any) =>

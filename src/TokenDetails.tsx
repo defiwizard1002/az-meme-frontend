@@ -978,10 +978,7 @@ function TokenWorkspace({
                           <td className={trade.side === "BUY" ? "positive" : "negative"}>
                             {trade.side === "BUY" ? "Buy" : "Sell"}
                           </td>
-                          <td
-                            className={trade.side === "BUY" ? "positive" : "negative"}
-                            title={trade.notionalUsd}
-                          >
+                          <td className="trade-amount" title={trade.notionalUsd}>
                             <TradeValue value={trade.notionalUsd} />
                           </td>
                           <td title={trade.marketCapUsd ?? undefined}>
@@ -1073,7 +1070,7 @@ function TokenWorkspace({
                   </button>
                 </div>
                 <div className="table-scroll">
-                  <table>
+                  <table className="holders-table">
                     <thead>
                       <tr>
                         {[

@@ -12,6 +12,7 @@ interface ActivityLinks {
 }
 export interface ActivityFeedProps extends ActivityLinks {
   onTrade: (token: string, side: "BUY" | "SELL", amountIn?: string) => void;
+  onQuickAmountChange?: (amount: string) => void;
   heldTokens: ReadonlySet<string>;
   explorerBaseUrl?: string;
 }
@@ -36,10 +37,14 @@ export function ActivityFeed(props: ActivityFeedProps) {
   const [minUsd, setMinUsd] = useState<ActivityQuery["minUsd"]>("ANY");
   const [count, setCount] = useState<{ loaded: number; complete: boolean } | null>(null);
   const [quickAmount, setQuickAmount] = useState(state.quickBuyAmounts[0] ?? "");
+  const onQuickAmountChange = props.onQuickAmountChange;
   useEffect(() => {
     if (!state.quickBuyAmounts.includes(quickAmount))
       setQuickAmount(state.quickBuyAmounts[0] ?? "");
   }, [quickAmount, state.quickBuyAmounts]);
+  useEffect(() => {
+    onQuickAmountChange?.(quickAmount);
+  }, [onQuickAmountChange, quickAmount]);
   return (
     <section className="panel activity-panel">
       <div className="toolbar activity-filters">

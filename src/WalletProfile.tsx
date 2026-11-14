@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { formatUnits } from "viem";
+import { DesignIcon } from "./DesignIcon";
 import { amount, money, relativeTime, safeUrl, shortAddress } from "./display";
 import { walletApi } from "./wallet-api";
 import { useUserState } from "./user-state";
@@ -14,7 +15,13 @@ export interface WalletProfileProps {
   address: string;
   onClose: () => void;
   onToken: (address: string) => void;
-  onTrade?: (token: string, side: "BUY" | "SELL") => void;
+  onTrade?: (token: string, side: "BUY" | "SELL", amountIn?: string) => void;
+  quickBuyAmount?: string;
+}
+function displayedQuantity(position: WalletPosition): string | null | undefined {
+  return !position.quantityComplete || position.quantityAtomic === null
+    ? position.observedNetAtomic
+    : position.quantityAtomic;
 }
 export function WalletProfile(props: WalletProfileProps) {
   return (
@@ -25,7 +32,13 @@ export function WalletProfile(props: WalletProfileProps) {
     />
   );
 }
-function ProfileContent({ address, onClose, onToken, onTrade }: WalletProfileProps) {
+function ProfileContent({
+  address,
+  onClose,
+  onToken,
+  onTrade,
+  quickBuyAmount = "",
+}: WalletProfileProps) {
   const [profile, setProfile] = useState<WalletProfileData | null>(null);
   const [positions, setPositions] = useState<WalletPosition[]>([]);
   const [activities, setActivities] = useState<WalletActivity[]>([]);
@@ -34,6 +47,7 @@ function ProfileContent({ address, onClose, onToken, onTrade }: WalletProfilePro
   const [loading, setLoading] = useState(true);
   const [paging, setPaging] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [addressCopied, setAddressCopied] = useState(false);
   const [revision, setRevision] = useState(0);
   const request = useRef<AbortController | null>(null);
   useEffect(() => {
@@ -105,6 +119,9 @@ function ProfileContent({ address, onClose, onToken, onTrade }: WalletProfilePro
   const winRate = stats?.winRate == null ? "—" : `${(Number(stats.winRate) * 100).toFixed(1)}%`;
   const xUrl = safeUrl(profile?.xUrl);
   const avatar = safeUrl(profile?.avatarUrl);
+  const holdings = positions.filter(
+    (position) => !(position.quantityComplete && position.quantityAtomic === "0"),
+  );
   return (
     <aside
       className="profile-drawer panel"
@@ -130,167 +147,216 @@ function ProfileContent({ address, onClose, onToken, onTrade }: WalletProfilePro
           </span>
         )}
         <div className="profile-copy">
-          <h3>{profile?.name || shortAddress(address)}</h3>
-          <code className="full-address">{address}</code>
-          {profile?.labels.map((label) => (
-            <span className="badge" key={label}>
-              {label === "SMART_MONEY" ? "Smart Money" : "KOL"}
-            </span>
-          ))}
+          <div className="profile-name-row">
+            <h3>{profile?.name || shortAddress(address)}</h3>
+            {profile?.labels.map((label) => (
+              <span className="badge" key={label}>
+                {label === "SMART_MONEY" ? "Smart money" : "KOL"}
+              </span>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="wallet-address-button"
+            title={address}
+            aria-label={`Copy wallet address ${address}`}
+            onClick={() => {
+              void navigator.clipboard.writeText(address).then(
+                () => setAddressCopied(true),
+                () => setAddressCopied(false),
+              );
+            }}
+          >
+            <code>{shortAddress(address)}</code>
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <rect x="5.5" y="5.5" width="7" height="7" rx="1.5" />
+              <path d="M10.5 5.5v-2a1.5 1.5 0 0 0-1.5-1.5H4.5A1.5 1.5 0 0 0 3 3.5v4.5A1.5 1.5 0 0 0 4.5 9.5h1" />
+            </svg>
+            {addressCopied && <span className="visually-hidden">Address copied</span>}
+          </button>
           {xUrl && (
-            <a href={xUrl} target="_blank" rel="noreferrer">
-              X
-            </a>
+            <div className="profile-meta">
+              <a href={xUrl} target="_blank" rel="noreferrer">
+                𝕏 Profile
+              </a>
+            </div>
           )}
         </div>
+        <PrivateProfile
+          address={address}
+          onFollowChanged={() => setRevision((value) => value + 1)}
+        />
       </div>
-      <PrivateProfile address={address} onFollowChanged={() => setRevision((value) => value + 1)} />
-      {loading && <p role="status">Loading wallet…</p>}
+      {loading && (
+        <p className="profile-loading" role="status">
+          Loading wallet…
+        </p>
+      )}
       {error && (
-        <p role="alert">
+        <p className="profile-error" role="alert">
           {error}{" "}
           <button type="button" onClick={() => setRevision((value) => value + 1)}>
             Retry
           </button>
         </p>
       )}
-      {profile && (
-        <>
-          <div className="stat-grid">
-            <div>
-              <span>7d realized PnL</span>
-              <strong aria-label="7d realized PnL">
-                {stats?.realizedPnlUsd == null ? "—" : money(stats.realizedPnlUsd)}
-              </strong>
-            </div>
-            <div>
-              <span>Open PnL</span>
-              <strong>
-                {profile.unrealizedPnlUsd == null ? "—" : money(profile.unrealizedPnlUsd)}
-              </strong>
-            </div>
-            <div>
-              <span>7d win rate</span>
-              <strong>{winRate}</strong>
-            </div>
-            <div>
-              <span>7d buys / sells</span>
-              <strong aria-label="7d buys / sells">
-                {stats ? `${stats.buyCount} / ${stats.sellCount}` : "—"}
-              </strong>
-            </div>
-          </div>
-        </>
-      )}
-      <h3>Holding</h3>
-      <div className="table-scroll">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Token</th>
-              <th>Value</th>
-              <th>PnL</th>
-              <th />
-            </tr>
-          </thead>
+      <div className="stat-grid" aria-busy={loading}>
+        <div className={Number(stats?.realizedPnlUsd) < 0 ? "negative" : undefined}>
+          <span>7d PnL</span>
+          <strong aria-label="7d PnL">
+            {loading ? (
+              <span className="stat-value-loading" aria-hidden="true" />
+            ) : stats?.realizedPnlUsd == null ? (
+              "—"
+            ) : (
+              money(stats.realizedPnlUsd)
+            )}
+          </strong>
+        </div>
+        <div>
+          <span>7d win rate</span>
+          <strong>
+            {loading ? <span className="stat-value-loading" aria-hidden="true" /> : winRate}
+          </strong>
+        </div>
+        <div>
+          <span>7d buys / sells</span>
+          <strong aria-label="7d buys / sells">
+            {loading ? (
+              <span className="stat-value-loading" aria-hidden="true" />
+            ) : stats ? (
+              `${stats.buyCount} / ${stats.sellCount}`
+            ) : (
+              "—"
+            )}
+          </strong>
+        </div>
+        <div className={Number(profile?.unrealizedPnlUsd) < 0 ? "negative" : undefined}>
+          <span>Unrealized PnL</span>
+          <strong aria-label="Unrealized PnL">
+            {loading ? (
+              <span className="stat-value-loading" aria-hidden="true" />
+            ) : profile?.unrealizedPnlUsd == null ? (
+              "—"
+            ) : (
+              money(profile.unrealizedPnlUsd)
+            )}
+          </strong>
+        </div>
+      </div>
+      <h3 className="profile-section-title">Holding</h3>
+      <div className="table-scroll wallet-holdings-scroll">
+        <table className="wallet-holdings-table">
           <tbody>
-            {positions
-              .filter((position) => position.quantityAtomic !== "0")
-              .map((position) => {
-                const showNet = !position.quantityComplete || position.quantityAtomic === null;
-                const quantity = showNet ? position.observedNetAtomic : position.quantityAtomic;
-                return (
-                  <tr key={position.token}>
-                    <td>
-                      <button
-                        type="button"
-                        className="text-button wallet-token-identity"
-                        title={position.token}
-                        onClick={() => onToken(position.token)}
-                      >
-                        {safeUrl(position.logo) && (
-                          <img
-                            src={safeUrl(position.logo)}
-                            alt=""
-                            width={24}
-                            height={24}
-                            onError={(event) => {
-                              event.currentTarget.style.display = "none";
-                            }}
-                          />
-                        )}
-                        {position.symbol || position.name || shortAddress(position.token)}
-                      </button>
-                      <small title={showNet ? "On-chain net; attribution incomplete" : undefined}>
+            {holdings.map((position) => {
+              const incomplete = !position.quantityComplete || position.quantityAtomic === null;
+              const quantity = displayedQuantity(position);
+              const tokenName = position.symbol || position.name || shortAddress(position.token);
+              return (
+                <tr key={position.token} className={incomplete ? "holding-incomplete" : undefined}>
+                  <td className="holding-token">
+                    <button
+                      type="button"
+                      className="text-button wallet-token-identity"
+                      title={position.token}
+                      onClick={() => onToken(position.token)}
+                    >
+                      {safeUrl(position.logo) && (
+                        <img
+                          src={safeUrl(position.logo)}
+                          alt=""
+                          width={24}
+                          height={24}
+                          onError={(event) => {
+                            event.currentTarget.style.display = "none";
+                          }}
+                        />
+                      )}
+                      {tokenName}
+                    </button>
+                    {incomplete && (
+                      <small title="On-chain net movement; position attribution is incomplete">
                         {quantity != null
                           ? amount(formatUnits(BigInt(quantity), position.decimals))
                           : "—"}
-                        {showNet && quantity != null && " · On-chain net (attribution incomplete)"}
+                        {quantity != null && " observed net · incomplete"}
                       </small>
-                    </td>
-                    <td
-                      title={
-                        position.valueUsd == null
-                          ? "Value unavailable: price or complete quantity is missing"
-                          : undefined
-                      }
-                    >
-                      {position.valueUsd == null ? "—" : money(position.valueUsd)}
-                    </td>
-                    <td
-                      title={
-                        position.unrealizedPnlUsd == null
-                          ? "PnL unavailable: cost basis or value is missing"
-                          : undefined
-                      }
-                    >
-                      {position.unrealizedPnlUsd == null ? "—" : money(position.unrealizedPnlUsd)}
-                    </td>
-                    <td>
-                      {onTrade && (
-                        <button
-                          type="button"
-                          className="profile-token-buy"
-                          aria-label={`Buy ${position.symbol || position.name || shortAddress(position.token)}`}
-                          onClick={() => onTrade(position.token, "BUY")}
-                        >
-                          Buy
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+                    )}
+                  </td>
+                  <td
+                    className="holding-value"
+                    title={
+                      position.valueUsd == null
+                        ? "Value unavailable: price or complete quantity is missing"
+                        : undefined
+                    }
+                  >
+                    {position.valueUsd == null ? "—" : money(position.valueUsd)}
+                  </td>
+                  <td
+                    className={`holding-pnl ${
+                      position.unrealizedPnlUsd == null
+                        ? ""
+                        : Number(position.unrealizedPnlUsd) >= 0
+                          ? "positive"
+                          : "negative"
+                    }`}
+                    title={
+                      position.unrealizedPnlUsd == null
+                        ? "PnL unavailable: cost basis or value is missing"
+                        : undefined
+                    }
+                  >
+                    {position.unrealizedPnlUsd == null ? "—" : money(position.unrealizedPnlUsd)}
+                  </td>
+                  <td className="holding-action">
+                    {onTrade && (
+                      <button
+                        type="button"
+                        className="profile-token-buy"
+                        aria-label={
+                          quickBuyAmount
+                            ? `Buy ${tokenName} with ${quickBuyAmount} USDG`
+                            : "Set a quick-buy amount"
+                        }
+                        disabled={!quickBuyAmount}
+                        onClick={() => onTrade(position.token, "BUY", quickBuyAmount)}
+                      >
+                        <DesignIcon name="bolt" />
+                        {quickBuyAmount ? `${quickBuyAmount} USDG` : "Set amount"}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
-      {!loading && !positions.some((position) => position.quantityAtomic !== "0") && (
-        <p className="empty-state">No positions</p>
-      )}
+      {!loading && !holdings.length && <p className="empty-state">No positions</p>}
       {positionCursor && (
-        <button type="button" disabled={paging !== null} onClick={morePositions}>
+        <button
+          type="button"
+          className="profile-load-more"
+          disabled={paging !== null}
+          onClick={morePositions}
+        >
           Load more positions
         </button>
       )}
-      <h3>Trades</h3>
+      <h3 className="profile-section-title">Trades</h3>
       <div className="table-scroll">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Side</th>
-              <th>Token</th>
-              <th>Amount</th>
-              <th>Fill MC</th>
-            </tr>
-          </thead>
+        <table className="wallet-trades-table">
           <tbody>
             {activities.map((activity) => (
               <tr key={activity.eventId}>
-                <td title={new Date(activity.timestampMs).toLocaleString()}>
+                <td
+                  className="wallet-trade-time"
+                  title={new Date(activity.timestampMs).toLocaleString()}
+                >
                   {relativeTime(activity.timestampMs)}
                 </td>
-                <td>
+                <td className={`wallet-trade-side trade-side-${activity.kind}`}>
                   {
                     {
                       BUY: "Buy",
@@ -300,7 +366,7 @@ function ProfileContent({ address, onClose, onToken, onTrade }: WalletProfilePro
                     }[activity.kind]
                   }
                 </td>
-                <td>
+                <td className="wallet-trade-token">
                   <button
                     type="button"
                     className="text-button wallet-token-identity"
@@ -321,8 +387,16 @@ function ProfileContent({ address, onClose, onToken, onTrade }: WalletProfilePro
                     {activity.tokenSymbol || activity.tokenName || shortAddress(activity.token)}
                   </button>
                 </td>
-                <td>{activity.amountUsd == null ? "—" : money(activity.amountUsd)}</td>
-                <td>{activity.marketCapUsd == null ? "—" : money(activity.marketCapUsd)}</td>
+                <td
+                  className="wallet-trade-amount"
+                  title={
+                    activity.marketCapUsd == null
+                      ? undefined
+                      : `Fill MC ${money(activity.marketCapUsd)}`
+                  }
+                >
+                  {activity.amountUsd == null ? "—" : money(activity.amountUsd)}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -330,7 +404,12 @@ function ProfileContent({ address, onClose, onToken, onTrade }: WalletProfilePro
       </div>
       {!loading && !activities.length && <p className="empty-state">No activity</p>}
       {activityCursor && (
-        <button type="button" disabled={paging !== null} onClick={moreActivities}>
+        <button
+          type="button"
+          className="profile-load-more"
+          disabled={paging !== null}
+          onClick={moreActivities}
+        >
           Load more trades
         </button>
       )}
@@ -347,34 +426,61 @@ function PrivateProfile({
   const state = useUserState();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [noteOpen, setNoteOpen] = useState(false);
   return (
     <section className="private-profile">
       {!state.authenticated ? null : (
         <>
-          {(error || state.error) && <p role="alert">{error ?? state.error}</p>}
-          <button
-            type="button"
-            disabled={pending || state.loading || Boolean(state.error)}
-            onClick={() => {
-              setPending(true);
-              setError(null);
-              void state
-                .setFollow(address, !state.followed.has(address))
-                .then(onFollowChanged)
-                .catch((cause: unknown) =>
-                  setError(cause instanceof Error ? cause.message : "Follow failed"),
-                )
-                .finally(() => setPending(false));
-            }}
-          >
-            {state.followed.has(address) ? "Unfollow" : "Follow wallet"}
-          </button>
-          {!state.loading && !state.error && (
-            <PrivateNote
-              key={`${address}:${state.notes[address] ?? ""}`}
-              address={address}
-              initialValue={state.notes[address] ?? ""}
-            />
+          <div className="private-profile-actions">
+            <button
+              type="button"
+              className="private-follow-button"
+              title={state.followed.has(address) ? "Unfollow wallet" : "Follow wallet"}
+              aria-label={state.followed.has(address) ? "Unfollow wallet" : "Follow wallet"}
+              aria-pressed={state.followed.has(address)}
+              disabled={pending || state.loading || Boolean(state.error)}
+              onClick={() => {
+                setPending(true);
+                setError(null);
+                void state
+                  .setFollow(address, !state.followed.has(address))
+                  .then(onFollowChanged)
+                  .catch((cause: unknown) =>
+                    setError(cause instanceof Error ? cause.message : "Follow failed"),
+                  )
+                  .finally(() => setPending(false));
+              }}
+            >
+              <DesignIcon name="star" filled={state.followed.has(address)} />
+            </button>
+            <button
+              type="button"
+              className="private-note-toggle"
+              title="Private note"
+              aria-label="Private note"
+              aria-expanded={noteOpen}
+              disabled={state.loading || Boolean(state.error)}
+              onClick={() => setNoteOpen((value) => !value)}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="m3 11.8-.5 2.2 2.2-.5 7.9-7.9-1.7-1.7Z" />
+                <path d="m10.2 4.6 1.7 1.7" />
+              </svg>
+            </button>
+          </div>
+          {noteOpen && !state.loading && !state.error && (
+            <div className="private-note-popover">
+              <PrivateNote
+                key={`${address}:${state.notes[address] ?? ""}`}
+                address={address}
+                initialValue={state.notes[address] ?? ""}
+              />
+            </div>
+          )}
+          {(error || state.error) && (
+            <p className="private-profile-error" role="alert">
+              {error ?? state.error}
+            </p>
           )}
         </>
       )}

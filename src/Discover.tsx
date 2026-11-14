@@ -10,12 +10,14 @@ import type { Token } from "./types";
 export default function Discover({
   onToken,
   onQuickBuy,
+  onQuickAmountChange,
   onConnect,
   pendingToken,
   compact = false,
 }: {
   onToken: (token: Token) => void;
   onQuickBuy: (token: Token, amount: string) => void;
+  onQuickAmountChange?: (amount: string) => void;
   onConnect: () => void;
   pendingToken?: string;
   compact?: boolean;
@@ -46,6 +48,9 @@ export default function Discover({
     selectedAmount && user.quickBuyAmounts.includes(selectedAmount)
       ? selectedAmount
       : (user.quickBuyAmounts[0] ?? "");
+  useEffect(() => {
+    onQuickAmountChange?.(quickAmount);
+  }, [onQuickAmountChange, quickAmount]);
   useEffect(() => {
     const timer = setTimeout(() => setSearch(query.trim()), 250);
     return () => clearTimeout(timer);

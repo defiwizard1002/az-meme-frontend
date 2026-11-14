@@ -124,6 +124,36 @@ describe("phase D trading", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("uses the embedded amount control and amount-based CTA without preparing", async () => {
+    const create = vi
+      .spyOn(memeApi, "createQuote")
+      .mockResolvedValue({ ...terms, amountIn: "1000" });
+    const execute = vi.spyOn(memeApi, "executeMainAccountTrade");
+    render(
+      <TradingPanel
+        token={token}
+        quickBuyAmounts={["10"]}
+        account={account}
+        walletAddress={wallet}
+        onAccountRefresh={vi.fn()}
+      />,
+    );
+    const input = screen.getByLabelText("Trade amount");
+    expect(input).toHaveValue("10");
+    expect(screen.getByRole("button", { name: "Max" })).toBeVisible();
+    expect(screen.getByText("USDG", { selector: ".trade-amount-unit" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Max" }));
+    expect(input).toHaveValue("1000");
+    expect(await screen.findByRole("button", { name: "Buy 1000 USDG" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(create).toHaveBeenLastCalledWith(
+        expect.objectContaining({ purpose: "ESTIMATE", amountIn: "1000" }),
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("quotes unknown public support using treasury funds, blocks explicit unsupported pools, and keeps missing funds unknown", async () => {
     const createQuote = vi
       .spyOn(memeApi, "createQuote")
@@ -142,7 +172,7 @@ describe("phase D trading", () => {
     };
     const { rerender } = render(<TradingPanel {...props} account={funded} />);
     fireEvent.change(screen.getByLabelText("Trade amount"), { target: { value: "1" } });
-    expect(screen.getByText("Available: 2.661567 USDG")).toBeInTheDocument();
+    expect(screen.getByText("2.661567 USDG", { selector: ".trade-balance-value" })).toBeVisible();
     await waitFor(() => expect(createQuote).toHaveBeenCalledTimes(1));
     expect(createQuote).toHaveBeenCalledWith(
       expect.objectContaining({ amountIn: "1", purpose: "ESTIMATE" }),
@@ -172,12 +202,12 @@ describe("phase D trading", () => {
       },
     };
     rerender(<TradingPanel {...props} account={userFunded} />);
-    expect(screen.getByText("Insufficient available balance")).toBeInTheDocument();
+    expect(screen.getByText("Insufficient Balance")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Refresh quote" })).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 400));
     expect(createQuote).toHaveBeenCalledTimes(1);
     rerender(<TradingPanel {...props} account={{ ...userFunded, treasury: undefined }} />);
-    expect(screen.getByText("Available: — USDG")).toBeInTheDocument();
+    expect(screen.getByText("— USDG", { selector: ".trade-balance-value" })).toBeVisible();
     expect(screen.getByText("Loading balance")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Refresh quote" })).toBeNull();
   });
@@ -311,7 +341,7 @@ describe("phase D trading", () => {
       expect(createQuote.mock.calls.every(([input]) => input.purpose === "ESTIMATE")).toBe(true);
       expect(execute).not.toHaveBeenCalled();
       expect(screen.queryByRole("dialog")).toBeNull();
-      expect(screen.getByText(/Available:/)).toBeInTheDocument();
+      expect(screen.getByText("Available", { selector: ".trade-balance-label" })).toBeVisible();
     })();
     await cleanScenario2();
     await prepareScenario1();
@@ -440,6 +470,7 @@ it("quote errors show short states, preserve codes in title and keep buying disa
         walletAddress={wallet}
         account={account}
         onAccountRefresh={vi.fn()}
+        quickBuyAmounts={["10"]}
       />,
     );
     const line = await screen.findByText(text);
@@ -449,7 +480,7 @@ it("quote errors show short states, preserve codes in title and keep buying disa
       expect(line).toHaveAttribute("role", "status");
     }
     expect(screen.queryByText(code)).toBeNull();
-    expect(screen.getByRole("button", { name: "Buy MEME" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Buy 10 USDG" })).toBeDisabled();
     cleanup();
     vi.restoreAllMocks();
   }

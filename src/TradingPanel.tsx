@@ -54,7 +54,7 @@ function TradingForm({
   onExecutionChange,
 }: TradingPanelProps) {
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
-  const [amount, setAmount] = useState("10");
+  const [amount, setAmount] = useState(() => quickBuyAmounts[0] ?? "");
   const [quote, setQuote] = useState<ValidQuote | null>(null);
   const [busy, setBusy] = useState(false);
   const [quoting, setQuoting] = useState(false);
@@ -149,7 +149,7 @@ function TradingForm({
         if (compareAmounts(input, "1") < 0 || compareAmounts(input, "9999999") > 0)
           return "Buy amount must be between 1 and 9,999,999 U";
         if (treasury === null) return "Loading balance";
-        if (compareAmounts(input, treasury) > 0) return "Insufficient available balance";
+        if (compareAmounts(input, treasury) > 0) return "Insufficient Balance";
       } else {
         if (ownBalance === null) return "Balance unknown";
         if (compareAmounts(input, ownBalance) > 0) return "Insufficient token balance";
@@ -322,6 +322,12 @@ function TradingForm({
     (/Privy login required/i.test(errorMessage ?? "") ? "Connect wallet to continue" : undefined);
   const invalid = invalidReason(side, amount);
   const expired = quote !== null && quote.expiresAt <= now;
+  const amountUnit = side === "BUY" ? "USDG" : symbol;
+  const maxAmount = side === "BUY" ? treasury : ownBalance;
+  const canUseMax =
+    maxAmount !== null && /^\d+(?:\.\d+)?$/.test(maxAmount) && compareAmounts(maxAmount, "0") > 0;
+  const actionLabel =
+    side === "BUY" ? `Buy ${amount.trim() || "—"} USDG` : `Sell ${amount.trim() || "—"} ${symbol}`;
   const transactionState =
     transaction?.status === "CONFIRMED"
       ? "Filled"
@@ -337,7 +343,7 @@ function TradingForm({
           onClick={() => {
             setSide("BUY");
             setApproval(null);
-            setAmount("10");
+            setAmount(quickBuyAmounts[0] ?? "");
             setError(null);
           }}
           disabled={busy}
@@ -358,14 +364,16 @@ function TradingForm({
           Sell
         </button>
       </div>
-      <p className="muted">Available: {treasury ?? "—"} USDG</p>
+      <p className="trade-balance-row">
+        <span className="trade-balance-label">Available</span>
+        <span className="trade-balance-value">{treasury ?? "—"} USDG</span>
+      </p>
       {side === "SELL" && (
-        <p>
+        <p className="trade-wallet-balance">
           Wallet balance: {ownBalance ?? "—"} {symbol}
         </p>
       )}
-      <label>
-        Amount ({side === "BUY" ? "USDG" : symbol})
+      <div className="trade-amount-control">
         <input
           aria-label="Trade amount"
           inputMode="decimal"
@@ -377,12 +385,28 @@ function TradingForm({
             setError(null);
           }}
         />
-      </label>
+        <button
+          type="button"
+          className="trade-max-button"
+          disabled={!canUseMax || busy || Boolean(pendingId)}
+          onClick={() => {
+            if (maxAmount) {
+              setAmount(maxAmount);
+              setApproval(null);
+              setError(null);
+            }
+          }}
+        >
+          Max
+        </button>
+        <span className="trade-amount-unit">{amountUnit}</span>
+      </div>
       {side === "BUY" && quickBuyAmounts.length > 0 && (
-        <div className="presets" aria-label="Buy presets">
+        <div className="presets trade-presets" aria-label="Buy presets">
           {quickBuyAmounts.map((value) => (
             <button
               key={value}
+              aria-pressed={value === amount}
               disabled={busy || Boolean(pendingId)}
               onClick={() => {
                 setAmount(value);
@@ -396,7 +420,7 @@ function TradingForm({
         </div>
       )}
       {side === "SELL" && (
-        <div className="presets">
+        <div className="presets trade-presets">
           {[25, 50, 100].map((pct) => (
             <button
               key={pct}
@@ -415,44 +439,62 @@ function TradingForm({
       )}
       {quote && (
         <dl className="quote-details">
-          <dt>Expected received</dt>
-          <dd
-            className="quote-amount"
-            title={`${quote.targetOut} ${side === "BUY" ? symbol : "USDG"}`}
-          >
-            {price(quote.targetOut)} {side === "BUY" ? symbol : "USDG"}
-          </dd>
-          <dt>Minimum received</dt>
-          <dd
-            className="quote-amount"
-            title={`${quote.minOut} ${side === "BUY" ? symbol : "USDG"}`}
-          >
-            {price(quote.minOut)} {side === "BUY" ? symbol : "USDG"}
-          </dd>
-          <dt>Slippage</dt>
-          <dd>{(quote.slippageBps / 100).toFixed(2)}%</dd>
-          <dt>Platform fee</dt>
-          <dd>
-            {price(quote.fees.find((fee) => fee.type === "SERVICE")?.amount)} USDG（
-            {percent(Number(quote.effectiveFeeBps) / 100)}）
-          </dd>
-          <dt>Route</dt>
-          <dd>
-            {quote.routeHops?.map((hop) => hop.venue).join(" → ") ||
-              quote.routePools?.map((pool) => pool.poolType).join(" → ") ||
-              "Confirmed at prepare"}
-          </dd>
-          <dt>Quote expires</dt>
-          <dd>
-            {expired
-              ? "Expired. Refreshes on submit"
-              : `${Math.max(0, Math.ceil((quote.expiresAt - now) / 1000))}s`}
-          </dd>
+          <div>
+            <dt>Expected received</dt>
+            <dd
+              className="quote-amount"
+              title={`${quote.targetOut} ${side === "BUY" ? symbol : "USDG"}`}
+            >
+              {price(quote.targetOut)} {side === "BUY" ? symbol : "USDG"}
+            </dd>
+          </div>
+          <div>
+            <dt>Minimum received</dt>
+            <dd
+              className="quote-amount"
+              title={`${quote.minOut} ${side === "BUY" ? symbol : "USDG"}`}
+            >
+              {price(quote.minOut)} {side === "BUY" ? symbol : "USDG"}
+            </dd>
+          </div>
+          <div>
+            <dt>Slippage limit</dt>
+            <dd>{(quote.slippageBps / 100).toFixed(2)}%</dd>
+          </div>
+          <div>
+            <dt>Fee</dt>
+            <dd>
+              {price(quote.fees.find((fee) => fee.type === "SERVICE")?.amount)} USDG（
+              {percent(Number(quote.effectiveFeeBps) / 100)}）
+            </dd>
+          </div>
+          <div>
+            <dt>Route</dt>
+            <dd>
+              {quote.routeHops?.map((hop) => hop.venue).join(" → ") ||
+                quote.routePools?.map((pool) => pool.poolType).join(" → ") ||
+                "Confirmed at prepare"}
+            </dd>
+          </div>
+          <div>
+            <dt>Quote expires</dt>
+            <dd>
+              {expired
+                ? "Expired. Refreshes on submit"
+                : `${Math.max(0, Math.ceil((quote.expiresAt - now) / 1000))}s`}
+            </dd>
+          </div>
         </dl>
       )}
-      {quoting && <p role="status">Getting quote…</p>}
+      {quoting && (
+        <p className="trade-status-line" role="status">
+          Getting quote…
+        </p>
+      )}
       {walletAddress && !busy && !pendingId && !invalid && (
         <button
+          type="button"
+          className="trade-refresh-button"
           onClick={() => {
             setApproval(null);
             setQuoteRetry((value) => value + 1);
@@ -465,19 +507,19 @@ function TradingForm({
       {(error || (walletAddress && invalid)) && (
         <p
           role={quoteStatus ? "status" : error ? "alert" : "status"}
-          className={quoteStatus ? "muted" : undefined}
+          className={quoteStatus ? "muted trade-status-line" : "trade-error"}
           title={quoteStatus ? (errorCode ?? errorMessage ?? undefined) : undefined}
         >
           {quoteStatus ?? errorMessage ?? invalid}
         </p>
       )}
       {pendingId && (
-        <p role="status">
+        <p className="trade-status-line" role="status">
           Trade {pendingId} is processing. Checking the same order; do not resubmit.
         </p>
       )}
       {transaction && (
-        <p role="status">
+        <p className="trade-status-line" role="status">
           {transactionState}
           {transaction.settlement && transaction.status === "CONFIRMED"
             ? ` · Received ${transaction.settlement.amountOut}`
@@ -512,7 +554,7 @@ function TradingForm({
             void submit(side, amount);
           }}
         >
-          {busy ? "Processing…" : side === "BUY" ? `Buy ${symbol}` : `Sell ${symbol}`}
+          {busy ? "Processing…" : actionLabel}
         </button>
       )}
     </section>

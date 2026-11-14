@@ -131,7 +131,7 @@ it("wallet-phase-d: 4 related scenarios", async () => {
     );
     expect(await screen.findByText("No positions")).toBeVisible();
     expect(screen.queryByText("Waiting for balance snapshot")).toBeNull();
-    expect(screen.getByLabelText("7d realized PnL")).toHaveTextContent("—");
+    expect(screen.getByLabelText("7d PnL")).toHaveTextContent("—");
     expect(screen.getByLabelText("7d buys / sells")).toHaveTextContent("—");
     fireEvent.click(screen.getByRole("button", { name: "Load more positions" }));
     await waitFor(() =>
@@ -329,9 +329,9 @@ it("labels observed on-chain net amounts and keeps unavailable values unknown", 
     </UserStateProvider>,
   );
   const spcx = (await screen.findByRole("button", { name: "SPCX" })).closest("tr")!;
-  expect(within(spcx).getByTitle("On-chain net; attribution incomplete")).toHaveTextContent(
-    "10 · On-chain net (attribution incomplete)",
-  );
+  expect(
+    within(spcx).getByTitle("On-chain net movement; position attribution is incomplete"),
+  ).toHaveTextContent("10 observed net · incomplete");
   expect(
     within(spcx).getByTitle("Value unavailable: price or complete quantity is missing"),
   ).toHaveTextContent("—");
@@ -339,12 +339,121 @@ it("labels observed on-chain net amounts and keeps unavailable values unknown", 
     within(spcx).getByTitle("PnL unavailable: cost basis or value is missing"),
   ).toHaveTextContent("—");
   const negative = screen.getByRole("button", { name: "NEG" }).closest("tr")!;
-  expect(within(negative).getByTitle("On-chain net; attribution incomplete")).toHaveTextContent(
-    "-1.23457",
-  );
+  expect(
+    within(negative).getByTitle("On-chain net movement; position attribution is incomplete"),
+  ).toHaveTextContent("-1.23457");
   const weth = screen.getByRole("button", { name: "WETH" }).closest("tr")!;
   expect(within(weth).queryByText(/On-chain net/)).toBeNull();
   expect(within(weth).getAllByText("$0")).toHaveLength(2);
+});
+
+it("keeps the measured profile cards visible while wallet data is loading", () => {
+  vi.mocked(walletApi.profile).mockImplementation(() => new Promise(() => {}));
+  render(
+    <UserStateProvider userId={null}>
+      <WalletProfile address={address} onClose={vi.fn()} onToken={vi.fn()} />
+    </UserStateProvider>,
+  );
+  expect(screen.getByText("Loading wallet…")).toBeVisible();
+  expect(screen.getByText("7d PnL")).toBeVisible();
+  expect(screen.getByText("7d win rate")).toBeVisible();
+  expect(screen.getByText("7d buys / sells")).toBeVisible();
+  expect(screen.getByText("Unrealized PnL")).toBeVisible();
+  expect(document.querySelectorAll(".profile-drawer .stat-grid > div")).toHaveLength(4);
+  expect(screen.queryByText("No positions")).toBeNull();
+  expect(screen.queryByText("No activity")).toBeNull();
+});
+
+it("omits only complete holdings whose actual quantity is zero", async () => {
+  const position = {
+    chainId: 4663,
+    address,
+    token,
+    decimals: 18,
+    quantityAtomic: "1000000000000000000",
+    observedNetAtomic: "1000000000000000000",
+    quantityComplete: true,
+    costUsd: null,
+    boughtAtomic: "0",
+    soldAtomic: "0",
+    boughtUsd: null,
+    soldUsd: null,
+    realizedPnlUsd: null,
+    cyclePnlUsd: null,
+    cycleNumber: 0,
+    updatedAt: 0,
+    valueUsd: null,
+    unrealizedPnlUsd: null,
+  } satisfies WalletPosition;
+  vi.mocked(walletApi.profile).mockResolvedValue(null as unknown as WalletProfileData);
+  vi.mocked(walletApi.positions).mockResolvedValue({
+    items: [
+      { ...position, token: `0x${"3".repeat(40)}`, symbol: "ZERO", quantityAtomic: "0" },
+      {
+        ...position,
+        token: `0x${"4".repeat(40)}`,
+        symbol: "NETZERO",
+        quantityAtomic: null,
+        observedNetAtomic: "0",
+        quantityComplete: false,
+      },
+      { ...position, token: `0x${"5".repeat(40)}`, symbol: "HELD" },
+    ],
+    nextCursor: null,
+  });
+  render(
+    <UserStateProvider userId={null}>
+      <WalletProfile address={address} onClose={vi.fn()} onToken={vi.fn()} />
+    </UserStateProvider>,
+  );
+  expect(await screen.findByRole("button", { name: "HELD" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "ZERO" })).toBeNull();
+  expect(screen.getByRole("button", { name: "NETZERO" })).toBeVisible();
+  expect(screen.queryByText("No positions")).toBeNull();
+});
+
+it("uses the selected quick-buy amount for a holding action", async () => {
+  vi.mocked(walletApi.profile).mockResolvedValue(null as unknown as WalletProfileData);
+  vi.mocked(walletApi.positions).mockResolvedValue({
+    items: [
+      {
+        chainId: 4663,
+        address,
+        token,
+        decimals: 18,
+        quantityAtomic: "1000000000000000000",
+        observedNetAtomic: "1000000000000000000",
+        quantityComplete: true,
+        costUsd: null,
+        boughtAtomic: "0",
+        soldAtomic: "0",
+        boughtUsd: null,
+        soldUsd: null,
+        realizedPnlUsd: null,
+        cyclePnlUsd: null,
+        cycleNumber: 0,
+        updatedAt: 0,
+        symbol: "HELD",
+        valueUsd: null,
+        unrealizedPnlUsd: null,
+      },
+    ],
+    nextCursor: null,
+  });
+  const onTrade = vi.fn();
+  render(
+    <UserStateProvider userId={null}>
+      <WalletProfile
+        address={address}
+        onClose={vi.fn()}
+        onToken={vi.fn()}
+        onTrade={onTrade}
+        quickBuyAmount="25"
+      />
+    </UserStateProvider>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Buy HELD with 25 USDG" }));
+  expect(onTrade).toHaveBeenCalledWith(token, "BUY", "25");
 });
 
 it("uses the selected activity quick-buy preset for a row buy", async () => {

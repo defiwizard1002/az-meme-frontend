@@ -2283,7 +2283,7 @@ textarea {
     height: 44px;
   }
   .chart-panel .chart {
-    height: 270px;
+    height: 170px;
     margin-top: 10px;
   }
   .intervals button,
@@ -2593,7 +2593,7 @@ textarea {
 }
 @media (min-width: 1101px) {
   .token-header {
-    min-height: 70px;
+    min-height: 97px;
     padding-top: 10px;
     padding-bottom: 10px;
   }
@@ -3296,7 +3296,22 @@ textarea {
   height: 38px;
   background: #050507;
   color: #8a8697;
-  font-size: 10px;
+  font-size: 11px;
+}
+.portfolio td {
+  height: 45px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  font-family: Cousine, monospace;
+  font-size: 11px;
+  line-height: 16px;
+}
+.positions-table td:first-child,
+.positions-table td:last-child,
+.orders-table td:nth-child(2),
+.orders-table td:nth-child(3),
+.orders-table td:nth-child(5) {
+  font-family: "PingFang SC", sans-serif;
 }
 .portfolio-token {
   display: inline-flex;
@@ -3673,4 +3688,1008 @@ textarea {
   color-scheme: dark;
   font-size: 10px;
   font-weight: 600;
+}
+
+/* Measured Discover table typography and density from 22272:23251 / 22479:4877. */
+.discover > .toolbar > .tabs:first-of-type button {
+  font-family: "PingFang SC", sans-serif;
+  font-size: 14px;
+  line-height: 20.3px;
+}
+.discover .data-table th {
+  height: 35px;
+  color: #8b8ba3;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 15.95px;
+}
+.discover .data-table td {
+  height: 55px;
+  color: #ececf3;
+}
+.discover .token-link strong {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 17.4px;
+}
+.discover .token-link > span:not(.token-avatar) {
+  font-family: "PingFang SC", sans-serif;
+  font-size: 12px;
+  line-height: 17.4px;
+}
+.discover .address,
+.discover .lifecycle {
+  font-size: 10px;
+  line-height: 14.5px;
+}
+.discover .address {
+  font-family: Cousine, monospace;
+}
+.discover .quick-buy-cell select {
+  height: 32px;
+  padding: 0 9px;
+  color: #a78bfa;
+  font-family: Cousine, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+}
+.discover .quick-buy-button {
+  height: 32px;
+  padding: 0 15px;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 17.4px;
+}
+
+/* Smart Money rows in 22552:11287 align the event at x=309 from the page edge. */
+@media (min-width: 981px) {
+  .activity-card {
+    grid-template-columns: 271px minmax(0, 1fr) 54px 158px;
+    gap: 18px;
+    margin-inline: -20px;
+    padding-right: 25px;
+    padding-left: 20px;
+  }
+}
+.activity-wallet .text-button {
+  color: #ececf3;
+  font-family: "PingFang SC", sans-serif;
+  font-weight: 400;
+  line-height: 17.4px;
+}
+.activity-event > span:first-child {
+  color: #22c55e;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 12px;
+  line-height: 17.4px;
+}
+.activity-event > span:first-child.negative {
+  color: #ef4444;
+}
+.activity-token {
+  font-family: "PingFang SC", sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 17.4px;
+}
+.activity-value {
+  color: #ececf3;
+  font-family: Cousine, monospace;
+  font-size: 12px;
+  line-height: 17.4px;
+}
+.activity-card time {
+  color: #666477;
+  font-family: Cousine, monospace;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* Token tabs, trades, holders and safety from 22660:16239, 22708:17367,
+   22783:34324 and 22754:30791. */
+.token-activity > [role="tablist"] {
+  gap: 24px;
+  min-height: 49px;
+  padding: 0 20px;
+  margin-bottom: 0;
+}
+.token-activity > [role="tablist"] > button {
+  padding: 12px 4px;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 12px;
+  line-height: 17.4px;
+}
+.token-activity th {
+  color: #8b8ba3;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 15.95px;
+}
+.token-activity .trades-table th,
+.token-activity .holders-table th {
+  height: 28px;
+  padding: 5px 16px;
+  background: #050507;
+}
+.token-activity .trades-table td {
+  height: 28px;
+  padding: 4px 16px;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 11px;
+  line-height: 16px;
+  border-bottom-color: #22202d;
+}
+.token-activity .trades-table td:first-child,
+.token-activity .trades-table .trade-amount,
+.token-activity .trades-table .trade-value {
+  font-family: Cousine, monospace;
+  font-size: 11px;
+  line-height: 16px;
+}
+.token-activity .trades-table .trade-amount {
+  color: #22c55e;
+}
+.token-activity .holders-table td {
+  height: 48px;
+  padding: 7px 16px;
+  font-family: Cousine, monospace;
+  font-size: 11px;
+  line-height: 16px;
+  border-bottom-color: #22202d;
+}
+.token-activity .holders-table td:first-child,
+.token-activity .holders-table .link-button,
+.token-activity .holders-table .identity-tag,
+.token-activity .holders-table .risk-tag {
+  font-family: "PingFang SC", sans-serif;
+}
+.token-activity .holders-table small {
+  display: block;
+  margin-top: 2px;
+  color: #8b8ba3;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 9px;
+  line-height: 13px;
+}
+.token-risk-panel .risk-metric {
+  min-height: 55px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #08070c;
+}
+.token-risk-panel .risk-metric dt {
+  color: #8b8ba3;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 15.95px;
+}
+.token-risk-panel .risk-metric dd {
+  font-family: Cousine, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 17.4px;
+}
+@media (min-width: 601px) {
+  .token-activity .views-list {
+    gap: 10px;
+    padding: 0 0 16px;
+  }
+  .token-activity .views-filters {
+    padding-right: 0;
+    padding-left: 0;
+  }
+  .token-activity .view-card {
+    min-height: 81px;
+    padding: 12px;
+    border-color: #22202d;
+    border-radius: 10px;
+    background: #0b0a10;
+  }
+  .token-activity .view-author {
+    gap: 10px;
+    color: #ececf3;
+    font-family: "PingFang SC", sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 17.4px;
+  }
+  .token-activity .view-author img,
+  .token-activity .view-avatar {
+    width: 24px;
+    height: 24px;
+  }
+  .token-activity .view-body {
+    margin: 6px 0 7px 34px;
+    color: #d8d5df;
+    font-family: "PingFang SC", sans-serif;
+    font-size: 12px;
+    line-height: 17.4px;
+  }
+  .token-activity .view-metadata {
+    gap: 8px 14px;
+    margin-left: 34px;
+    color: #8b8ba3;
+    font-family: "PingFang SC", sans-serif;
+    font-size: 11px;
+    line-height: 15.95px;
+  }
+  .token-activity .view-metadata strong,
+  .token-activity .view-holding {
+    font-family: Cousine, monospace;
+    font-size: 11px;
+    line-height: 15.95px;
+  }
+}
+
+/* The trading sidebar has a 340px frame with 16px internal padding. */
+@media (min-width: 1101px) {
+  .token-sidebar {
+    padding: 16px;
+  }
+}
+
+/* Measured from Figma wallet 22575:14036 and trade 22660:16239 / 22788:48649. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.profile-drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  width: min(475px, 100%);
+  height: 100vh;
+  margin: 0;
+  padding: 20px 24px 24px;
+  overflow-y: auto;
+  border: 0;
+  border-left: 1px solid #22202d;
+  border-radius: 0;
+  background: #08070c;
+  box-shadow: -20px 0 60px #0006;
+  color: #ececf3;
+}
+.profile-drawer > .toolbar {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 5;
+  margin: 0;
+}
+.profile-drawer > .toolbar h2 {
+  display: none;
+}
+.profile-drawer > .toolbar button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #5d5d75;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 27px;
+  font-weight: 300;
+  line-height: 1;
+}
+.profile-drawer > .toolbar button:hover {
+  background: transparent;
+  color: #ececf3;
+}
+.profile-drawer .profile-identity {
+  position: relative;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  min-height: 84px;
+  margin: 0;
+  padding: 0 54px 0 0;
+}
+.profile-drawer .wallet-avatar {
+  width: 56px;
+  height: 56px;
+}
+.profile-drawer .profile-copy {
+  min-width: 0;
+  padding-top: 1px;
+}
+.profile-drawer .profile-name-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+.profile-drawer .profile-copy h3 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #ececf3;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 29px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-drawer .profile-copy .badge {
+  flex: none;
+  margin: 0;
+  padding: 1px 6px;
+  border: 1px solid #263241;
+  border-radius: 4px;
+  background: #151b24;
+  color: #91a5bf;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 15px;
+  white-space: nowrap;
+}
+.wallet-address-button {
+  display: flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #5d5d75;
+  text-align: left;
+}
+.wallet-address-button:hover:not(:disabled) {
+  border-color: transparent;
+  background: transparent;
+  color: #8b8ba3;
+}
+.wallet-address-button code {
+  overflow: hidden;
+  font-family: Cousine, monospace;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18.85px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wallet-address-button svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.2;
+}
+.profile-drawer .profile-meta {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 7px;
+  color: #8b8ba3;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 11px;
+  line-height: 15.95px;
+}
+.profile-drawer .profile-meta a {
+  color: #a78bfa;
+}
+.profile-drawer .private-profile {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  z-index: 4;
+  margin: 0;
+}
+.private-profile-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.private-follow-button,
+.private-note-toggle {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #626079;
+}
+.private-follow-button:hover:not(:disabled),
+.private-note-toggle:hover:not(:disabled) {
+  border-color: transparent;
+  background: #171521;
+  color: #a78bfa;
+}
+.private-follow-button[aria-pressed="true"] {
+  color: #f5b532;
+}
+.private-follow-button .design-icon,
+.private-note-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+.private-note-toggle svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.25;
+}
+.private-note-popover {
+  position: absolute;
+  top: 32px;
+  right: 0;
+  width: min(300px, calc(100vw - 48px));
+  padding: 12px;
+  border: 1px solid #292633;
+  border-radius: 9px;
+  background: #15151e;
+  box-shadow: 0 12px 30px #0008;
+}
+.private-note-popover form {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.private-note-popover label {
+  display: grid;
+  gap: 6px;
+  color: #8b8ba3;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 11px;
+}
+.private-note-popover textarea {
+  min-height: 76px;
+  margin: 0;
+  resize: vertical;
+}
+.private-note-popover button {
+  min-height: 30px;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 11px;
+}
+.private-profile-error {
+  position: absolute;
+  top: 30px;
+  right: 0;
+  width: 260px;
+  margin: 0;
+  color: #ef4444;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 10px;
+  line-height: 15px;
+}
+.profile-loading,
+.profile-error {
+  margin: 6px 0 0;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 11px;
+  line-height: 15.95px;
+}
+.profile-loading {
+  color: #8b8ba3;
+}
+.profile-error {
+  color: #ef4444;
+}
+.profile-error button {
+  min-height: 22px;
+  margin-left: 5px;
+  padding: 1px 7px;
+  font-size: 10px;
+}
+.profile-drawer .stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 17px 0;
+}
+.profile-loading + .profile-error + .stat-grid,
+.profile-loading + .stat-grid {
+  margin-top: 8px;
+}
+.profile-drawer .stat-grid > div {
+  display: flex;
+  min-height: 66px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  padding: 10px 14px;
+  border: 1px solid #292633;
+  border-radius: 10px;
+  background: #08070c;
+}
+.profile-drawer .stat-grid span {
+  color: #8b8ba3;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 15.95px;
+}
+.profile-drawer .stat-grid strong {
+  display: flex;
+  min-height: 17px;
+  align-items: center;
+  color: #ececf3;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1;
+}
+.profile-drawer .stat-grid .negative strong {
+  color: #ef4444;
+}
+.profile-drawer .stat-grid .positive strong {
+  color: #22c55e;
+}
+.stat-value-loading {
+  display: block;
+  width: 62px;
+  height: 14px !important;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #17151f 25%, #221f2c 50%, #17151f 75%);
+  background-size: 200% 100%;
+  animation: profile-stat-shimmer 1.2s linear infinite;
+}
+@keyframes profile-stat-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.profile-drawer .profile-section-title {
+  margin: 16px 0 7px;
+  color: #ececf3;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 21.75px;
+}
+.profile-drawer .table-scroll {
+  width: 100%;
+  overflow: visible;
+}
+.profile-drawer .wallet-holdings-scroll {
+  max-height: 280px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.wallet-holdings-table,
+.wallet-trades-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  background: transparent;
+}
+.wallet-holdings-table td,
+.wallet-trades-table td {
+  margin: 0;
+  border: 0;
+  background: transparent;
+  vertical-align: middle;
+}
+.wallet-holdings-table td {
+  height: 42px;
+  padding: 4px 0;
+}
+.wallet-holdings-table tr.holding-incomplete td {
+  height: 50px;
+}
+.wallet-holdings-table tbody tr:hover {
+  background: #ffffff05;
+}
+.wallet-holdings-table td:nth-child(2) {
+  width: 72px;
+  text-align: right;
+}
+.wallet-holdings-table td:nth-child(3) {
+  width: 66px;
+  text-align: right;
+}
+.wallet-holdings-table td:nth-child(4) {
+  width: 90px;
+  text-align: right;
+}
+.wallet-holdings-table .wallet-token-identity,
+.wallet-trades-table .wallet-token-identity {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #ececf3;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 17.4px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wallet-holdings-table .wallet-token-identity:hover:not(:disabled),
+.wallet-trades-table .wallet-token-identity:hover:not(:disabled) {
+  border-color: transparent;
+  background: transparent;
+  color: #a78bfa;
+}
+.wallet-holdings-table .wallet-token-identity img {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+.wallet-trades-table .wallet-token-identity img {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+}
+.wallet-holdings-table .holding-token small {
+  display: block;
+  max-width: 180px;
+  margin-top: 1px;
+  overflow: hidden;
+  color: #666477;
+  font-family: Cousine, monospace;
+  font-size: 9px;
+  line-height: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wallet-holdings-table .holding-value,
+.wallet-holdings-table .holding-pnl {
+  overflow: hidden;
+  color: #ececf3;
+  font-family: Cousine, monospace;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 17.4px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wallet-holdings-table .holding-pnl.positive {
+  color: #22c55e;
+}
+.wallet-holdings-table .holding-pnl.negative {
+  color: #ef4444;
+}
+.profile-drawer .profile-token-buy {
+  display: inline-flex;
+  width: 84px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 1px solid #493a63;
+  border-radius: 5px;
+  background: #171123;
+  color: #a78bfa;
+  font-family: Cousine, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+}
+.profile-drawer .profile-token-buy:hover:not(:disabled) {
+  border-color: #7357a6;
+  background: #21172f;
+  color: #c4b5fd;
+}
+.profile-drawer .profile-token-buy .design-icon {
+  width: 12px;
+  height: 12px;
+}
+.profile-drawer .profile-token-buy .icon-bolt path {
+  fill: #a78bfa;
+}
+.wallet-trades-table td {
+  height: 50px;
+  padding: 6px 0;
+}
+.wallet-trades-table td:nth-child(1) {
+  width: 57px;
+}
+.wallet-trades-table td:nth-child(2) {
+  width: 62px;
+}
+.wallet-trades-table td:nth-child(4) {
+  width: 78px;
+  text-align: right;
+}
+.wallet-trade-time {
+  color: #666477;
+  font-family: Cousine, monospace;
+  font-size: 11px;
+  line-height: 16px;
+}
+.wallet-trade-side {
+  font-family: "PingFang SC", sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 17.4px;
+}
+.wallet-trade-side.trade-side-BUY {
+  color: #22c55e;
+}
+.wallet-trade-side.trade-side-SELL {
+  color: #ef4444;
+}
+.wallet-trade-side.trade-side-TRANSFER_IN,
+.wallet-trade-side.trade-side-TRANSFER_OUT {
+  color: #8b8ba3;
+  font-size: 10px;
+}
+.wallet-trade-amount {
+  overflow: hidden;
+  color: #ececf3;
+  font-family: Cousine, monospace;
+  font-size: 12px;
+  line-height: 17.4px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-drawer .empty-state {
+  margin: 10px 0;
+  color: #666477;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 11px;
+}
+.profile-drawer .profile-load-more {
+  min-height: 24px;
+  margin-top: 5px;
+  padding: 2px 8px;
+  border: 1px solid #292633;
+  border-radius: 5px;
+  background: transparent;
+  color: #8b8ba3;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 10px;
+}
+
+.trading-panel {
+  padding: 0;
+  background: transparent;
+  color: #ececf3;
+}
+.trading-panel .tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  height: 38px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: #15151e;
+}
+.trading-panel .tabs button {
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #8b8ba3;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18.85px;
+}
+.trading-panel .tabs button[aria-selected="true"] {
+  border-color: #22c55e;
+  background: #22c55e;
+  color: #04210f;
+}
+.trading-panel .tabs button:hover:not(:disabled) {
+  border-color: #343141;
+  background: #1c1a26;
+  color: #ececf3;
+}
+.trading-panel .tabs button[aria-selected="true"]:hover:not(:disabled) {
+  border-color: #22c55e;
+  background: #22c55e;
+  color: #04210f;
+}
+.trade-balance-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+  margin: 10px 0 12px;
+  color: #8b8ba3;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 17.4px;
+}
+.trade-balance-value,
+.trade-wallet-balance {
+  font-family: Cousine, monospace;
+  font-size: 12px;
+  line-height: 17.4px;
+}
+.trade-wallet-balance {
+  margin: -6px 0 10px;
+  color: #8b8ba3;
+  text-align: right;
+}
+.trade-amount-control {
+  display: grid;
+  height: 45px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #262534;
+  border-radius: 10px;
+  background: #15151e;
+}
+.trading-panel .trade-amount-control input {
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  background: transparent;
+  color: #ececf3;
+  font-family: Cousine, monospace;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 22px;
+}
+.trading-panel .trade-amount-control input:focus {
+  border: 0;
+}
+.trade-max-button {
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: #241d35;
+  color: #a78bfa;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 24px;
+}
+.trade-max-button:hover:not(:disabled) {
+  border-color: transparent;
+  background: #302547;
+  color: #c4b5fd;
+}
+.trade-amount-unit {
+  color: #8b8ba3;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18.85px;
+}
+.trading-panel .trade-presets {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 8px;
+  margin: 10px 0 11px;
+}
+.trading-panel .trade-presets button {
+  height: 31px;
+  padding: 0 8px;
+  border: 1px solid #24212e;
+  border-radius: 6px;
+  background: #15141e;
+  color: #8b8ba3;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+}
+.trading-panel .trade-presets button:hover:not(:disabled) {
+  border-color: #3b354a;
+  background: #1a1823;
+}
+.trading-panel .trade-presets button[aria-pressed="true"] {
+  border-color: #5b4385;
+  background: #15141e;
+  color: #a78bfa;
+}
+.trading-panel .quote-details {
+  display: grid;
+  gap: 3px;
+  margin: 11px 0;
+  color: #ececf3;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 12px;
+  line-height: 17.4px;
+}
+.trading-panel .quote-details > div {
+  display: flex;
+  min-height: 22px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+}
+.trading-panel .quote-details dt {
+  color: #8b8ba3;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 17.4px;
+  white-space: nowrap;
+}
+.trading-panel .quote-details dd,
+.trading-panel .quote-details .quote-amount {
+  overflow: hidden;
+  margin: 0;
+  color: #ececf3;
+  font-family: Cousine, monospace;
+  font-size: 12px;
+  line-height: 17.4px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trade-status-line,
+.trading-panel .trade-error {
+  margin: 6px 0 0;
+  color: #ef4444;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 15.95px;
+}
+.trade-status-line.muted {
+  color: #8b8ba3;
+}
+.trade-refresh-button {
+  display: block;
+  min-height: 22px;
+  margin: 7px 0 0 auto;
+  padding: 1px 0;
+  border: 0;
+  background: transparent;
+  color: #a78bfa;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 10px;
+}
+.trade-refresh-button:hover:not(:disabled) {
+  border-color: transparent;
+  background: transparent;
+  color: #c4b5fd;
+}
+.trading-panel > .primary {
+  width: 100%;
+  height: 45px;
+  margin-top: 12px;
+  padding: 0 14px;
+  border: 1px solid #22c55e;
+  border-radius: 10px;
+  background: #22c55e;
+  color: #04210f;
+  font-family: "PingFang SC", sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 20.3px;
+}
+.trading-panel > .primary:hover:not(:disabled) {
+  border-color: #34d46f;
+  background: #34d46f;
 }
